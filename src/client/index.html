@@ -1,0 +1,1277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Claude Code GUI</title>
+  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github-dark.min.css">
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg-primary: #0d1117; --bg-secondary: #161b22; --bg-tertiary: #21262d;
+      --text-primary: #e6edf3; --text-secondary: #8b949e; --text-muted: #6e7681;
+      --accent: #2f81f7; --success: #3fb950; --warning: #d29922; --error: #f85149;
+      --border: #30363d;
+    }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg-primary); color: var(--text-primary); font-size: 14px; line-height: 1.5; }
+    #root { height: 100vh; }
+    .app { display: flex; height: 100vh; }
+
+    /* Activity Bar (VS Code-style) */
+    .activity-bar { width: 48px; background: var(--bg-secondary); border-right: 1px solid var(--border); display: flex; flex-direction: column; align-items: center; padding-top: 8px; flex-shrink: 0; gap: 4px; }
+    .activity-bar-btn { width: 40px; height: 40px; background: none; border: none; color: var(--text-muted); cursor: pointer; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 18px; position: relative; }
+    .activity-bar-btn:hover { color: var(--text-primary); background: var(--bg-tertiary); }
+    .activity-bar-btn.active { color: var(--text-primary); }
+    .activity-bar-btn.active::before { content: ''; position: absolute; left: 0; top: 8px; bottom: 8px; width: 2px; background: var(--accent); border-radius: 0 2px 2px 0; }
+    .activity-bar-spacer { flex: 1; }
+    .activity-bar-bottom { margin-bottom: 8px; }
+
+    /* Sidebar Panel */
+    .sidebar-panel { width: 240px; background: var(--bg-secondary); border-right: 1px solid var(--border); display: flex; flex-direction: column; flex-shrink: 0; overflow: hidden; }
+    .sidebar-header { padding: 12px 16px; border-bottom: 1px solid var(--border); font-weight: 600; display: flex; align-items: center; justify-content: space-between; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-secondary); }
+    .sidebar-header-actions { display: flex; gap: 4px; }
+    .sidebar-btn { background: none; border: none; color: var(--text-secondary); cursor: pointer; padding: 4px; border-radius: 4px; font-size: 14px; }
+    .sidebar-btn:hover { background: var(--bg-tertiary); color: var(--text-primary); }
+    .agents-header { padding: 12px 16px 8px; font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+    .agent-list { flex: 1; overflow-y: auto; padding: 0 8px; }
+    .agent-item { padding: 8px 12px; border-radius: 6px; cursor: pointer; margin-bottom: 2px; display: flex; align-items: center; gap: 8px; position: relative; }
+    .agent-item:hover { background: var(--bg-tertiary); }
+    .agent-item.selected { background: var(--accent); }
+    .agent-info { flex: 1; min-width: 0; }
+    .agent-name { font-weight: 500; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .agent-status { font-size: 11px; color: var(--text-muted); display: flex; align-items: center; gap: 4px; }
+    .agent-item.selected .agent-status { color: rgba(255,255,255,0.7); }
+    .agent-delete-btn { background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 2px 4px; border-radius: 3px; font-size: 12px; opacity: 0; }
+    .agent-item:hover .agent-delete-btn { opacity: 1; }
+    .agent-delete-btn:hover { background: var(--error); color: white; }
+
+    /* Status dot */
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+    .status-idle { background: var(--success); }
+    .status-working { background: var(--accent); animation: pulse 1.5s infinite; }
+    .status-thinking { background: var(--warning); animation: pulse 1.2s infinite; }
+    .status-error { background: var(--error); }
+    .status-stopped { background: var(--text-muted); opacity: 0.5; }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
+
+    /* Main content */
+    .main-content { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+    /* Top bar */
+    .top-bar { height: 48px; padding: 0 16px; background: var(--bg-secondary); border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
+    .top-bar-left { display: flex; align-items: center; gap: 8px; }
+    .top-bar-right { display: flex; align-items: center; gap: 12px; }
+    .grid-controls { display: flex; align-items: center; gap: 8px; }
+    .grid-label { font-size: 12px; color: var(--text-secondary); }
+    .grid-buttons { display: flex; gap: 2px; }
+    .grid-btn { width: 24px; height: 24px; border: 1px solid var(--border); background: var(--bg-tertiary); color: var(--text-secondary); border-radius: 4px; cursor: pointer; font-size: 12px; }
+    .grid-btn:hover { background: var(--border); }
+    .grid-btn.active { background: var(--accent); border-color: var(--accent); color: white; }
+
+    /* Broadcast bar */
+    .broadcast-bar { display: flex; align-items: center; gap: 8px; padding: 6px 16px; background: var(--bg-tertiary); border-bottom: 1px solid var(--border); flex-shrink: 0; }
+    .broadcast-bar label { font-size: 11px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; white-space: nowrap; }
+    .broadcast-input { flex: 1; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 4px; color: var(--text-primary); font-size: 13px; padding: 4px 8px; outline: none; font-family: 'SF Mono', Monaco, Consolas, monospace; }
+    .broadcast-input:focus { border-color: var(--accent); }
+    .broadcast-send { background: var(--accent); border: none; color: white; padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 500; }
+    .broadcast-send:hover { opacity: 0.9; }
+
+    /* Terminal grid */
+    .terminal-grid { flex: 1; display: grid; gap: 1px; background: var(--border); overflow: hidden; }
+
+    /* Terminal panel */
+    .terminal-panel { background: var(--bg-primary); display: flex; flex-direction: column; overflow: hidden; }
+    .panel-header { height: 36px; padding: 0 8px 0 12px; background: var(--bg-secondary); border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
+    .panel-title { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 500; min-width: 0; }
+    .panel-title-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .panel-actions { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
+    .panel-btn { background: none; border: none; color: var(--text-secondary); cursor: pointer; padding: 3px 6px; border-radius: 3px; font-size: 11px; }
+    .panel-btn:hover { background: var(--bg-tertiary); color: var(--text-primary); }
+    .panel-btn-stop { color: var(--error); }
+    .panel-btn-stop:hover { background: var(--error); color: white; }
+
+    /* Notification bar in panel */
+    .panel-notification { padding: 4px 12px; font-size: 11px; text-align: center; flex-shrink: 0; }
+    .panel-notification-done { background: rgba(63, 185, 80, 0.15); color: var(--success); }
+    .panel-notification-files { background: rgba(210, 153, 34, 0.15); color: var(--warning); cursor: pointer; }
+
+    /* Panel content — chat area */
+    .panel-content { flex: 1; overflow-y: auto; padding: 0; font-family: 'SF Mono', Monaco, Consolas, monospace; font-size: 13px; line-height: 1.6; }
+    .panel-empty { display: flex; align-items: center; justify-content: center; height: 100%; color: var(--text-muted); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+
+    /* Chat turns */
+    .chat-turn { padding: 10px 14px; border-bottom: 1px solid var(--border); }
+    .chat-turn:last-child { border-bottom: none; }
+    .chat-turn-role { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+    .chat-turn-content { white-space: pre-wrap; word-wrap: break-word; }
+    .chat-turn-user { background: var(--bg-secondary); }
+    .chat-turn-user .chat-turn-role { color: var(--accent); }
+    .chat-turn-assistant { background: var(--bg-primary); }
+    .chat-turn-assistant .chat-turn-role { color: var(--success); }
+    .chat-turn-assistant .chat-turn-content { white-space: normal; }
+    .chat-turn-system { background: var(--bg-tertiary); }
+    .chat-turn-system .chat-turn-role { color: var(--warning); }
+    .chat-turn-system .chat-turn-content { color: var(--text-secondary); font-style: italic; }
+    .chat-turn-streaming { background: var(--bg-primary); }
+    .chat-turn-streaming .chat-turn-role { color: var(--success); }
+    .chat-turn-queued { background: var(--bg-secondary); opacity: 0.5; }
+    .chat-turn-queued .chat-turn-role { color: var(--text-muted); }
+
+    /* Thinking block */
+    .thinking-block { border-left: 3px solid var(--warning); margin: 6px 14px; padding: 8px 12px; background: rgba(210, 153, 34, 0.06); border-radius: 0 6px 6px 0; }
+    .thinking-header { display: flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; font-size: 11px; font-weight: 600; color: var(--warning); text-transform: uppercase; letter-spacing: 0.5px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+    .thinking-header svg { width: 12px; height: 12px; transition: transform 0.2s; }
+    .thinking-header.collapsed svg { transform: rotate(-90deg); }
+    .thinking-content { color: var(--text-secondary); font-style: italic; font-size: 12px; line-height: 1.5; white-space: pre-wrap; word-wrap: break-word; margin-top: 6px; max-height: 300px; overflow-y: auto; }
+    .thinking-content.hidden { display: none; }
+
+    /* Markdown in assistant messages */
+    .chat-turn-assistant .chat-turn-content p { margin: 0 0 8px 0; }
+    .chat-turn-assistant .chat-turn-content p:last-child { margin-bottom: 0; }
+    .chat-turn-assistant .chat-turn-content pre { background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 6px; padding: 12px; margin: 8px 0; overflow-x: auto; position: relative; }
+    .chat-turn-assistant .chat-turn-content code { font-family: 'SF Mono', Monaco, Consolas, monospace; font-size: 12px; }
+    .chat-turn-assistant .chat-turn-content :not(pre) > code { background: var(--bg-tertiary); padding: 2px 5px; border-radius: 3px; font-size: 12px; }
+    .chat-turn-assistant .chat-turn-content ul, .chat-turn-assistant .chat-turn-content ol { padding-left: 20px; margin: 4px 0; }
+    .chat-turn-assistant .chat-turn-content h1, .chat-turn-assistant .chat-turn-content h2, .chat-turn-assistant .chat-turn-content h3 { margin: 12px 0 4px 0; }
+    .chat-turn-assistant .chat-turn-content strong { color: var(--text-primary); }
+    .copy-code-btn { position: absolute; top: 6px; right: 6px; background: var(--bg-secondary); border: 1px solid var(--border); color: var(--text-secondary); padding: 2px 8px; border-radius: 4px; cursor: pointer; font-size: 11px; }
+    .copy-code-btn:hover { background: var(--accent); color: white; border-color: var(--accent); }
+
+    /* Blinking cursor */
+    .cursor { display: inline-block; width: 7px; height: 15px; background: var(--success); animation: blink 1s step-end infinite; vertical-align: text-bottom; margin-left: 2px; }
+    @keyframes blink { 0%,50% { opacity: 1; } 51%,100% { opacity: 0; } }
+    /* Scroll anchor */
+    .scroll-anchor { height: 1px; }
+
+    /* Panel input */
+    .panel-input-container { padding: 8px 12px; background: var(--bg-secondary); border-top: 1px solid var(--border); flex-shrink: 0; }
+    .panel-input-wrapper { display: flex; align-items: flex-end; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 6px; padding: 0 12px; }
+    .panel-input-wrapper:focus-within { border-color: var(--accent); }
+    .panel-textarea { flex: 1; background: transparent; border: none; color: var(--text-primary); font-family: 'SF Mono', Monaco, Consolas, monospace; font-size: 13px; padding: 8px 0; outline: none; resize: none; min-height: 20px; max-height: 120px; line-height: 1.4; }
+    .panel-textarea::placeholder { color: var(--text-muted); }
+
+    /* Buttons */
+    .btn { padding: 6px 12px; border-radius: 6px; font-weight: 500; cursor: pointer; border: 1px solid transparent; font-size: 12px; }
+    .btn-primary { background: var(--success); color: white; }
+    .btn-primary:hover { background: #2ea043; }
+    .btn-secondary { background: var(--bg-tertiary); color: var(--text-primary); border-color: var(--border); }
+    .btn-danger { background: var(--error); color: white; border-color: var(--error); }
+    .btn-danger:hover { opacity: 0.9; }
+    .btn-sm { padding: 3px 8px; font-size: 11px; }
+
+    /* Modal */
+    .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 100; }
+    .modal { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 12px; padding: 24px; width: 100%; max-width: 560px; max-height: 90vh; overflow-y: auto; }
+    .modal-title { font-size: 18px; font-weight: 600; margin-bottom: 20px; }
+    .form-group { margin-bottom: 16px; }
+    .form-label { display: block; font-size: 12px; font-weight: 500; margin-bottom: 6px; color: var(--text-secondary); }
+    .form-input, .form-textarea { width: 100%; padding: 10px 12px; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary); font-size: 14px; }
+    .form-textarea { min-height: 60px; resize: vertical; font-family: 'SF Mono', Monaco, Consolas, monospace; font-size: 13px; }
+    .form-input:focus, .form-textarea:focus { outline: none; border-color: var(--accent); }
+    .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 24px; }
+    .form-hint { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+
+    /* Shared context modal */
+    .shared-context-textarea { width: 100%; min-height: 200px; padding: 12px; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary); font-family: 'SF Mono', Monaco, Consolas, monospace; font-size: 13px; resize: vertical; }
+    .shared-context-textarea:focus { outline: none; border-color: var(--accent); }
+
+    /* Connection status */
+    .connection-error { padding: 8px 16px; background: var(--error); color: white; text-align: center; font-size: 12px; flex-shrink: 0; }
+
+    /* Folder browser */
+    .folder-browser { background: var(--bg-primary); border: 1px solid var(--border); border-radius: 6px; max-height: 200px; overflow: hidden; display: flex; flex-direction: column; }
+    .folder-path { padding: 6px 10px; background: var(--bg-tertiary); border-bottom: 1px solid var(--border); font-size: 11px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .folder-list { flex: 1; overflow-y: auto; padding: 2px; }
+    .folder-item { padding: 5px 10px; border-radius: 4px; cursor: pointer; display: flex; align-items: center; gap: 6px; font-size: 12px; }
+    .folder-item:hover { background: var(--bg-tertiary); }
+    .folder-actions { display: flex; gap: 8px; padding: 6px 10px; border-top: 1px solid var(--border); background: var(--bg-tertiary); }
+    .browse-btn { padding: 5px 10px; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 4px; color: var(--text-primary); cursor: pointer; font-size: 12px; }
+    .browse-btn:hover { background: var(--border); }
+
+    /* Reference paths */
+    .ref-paths-list { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+    .ref-path-item { display: flex; align-items: center; gap: 6px; padding: 4px 8px; background: var(--bg-primary); border: 1px solid var(--border); border-radius: 4px; font-size: 12px; }
+    .ref-path-item button { background: none; border: none; color: var(--error); cursor: pointer; font-size: 14px; padding: 0 2px; }
+
+    /* Keyboard shortcut hint */
+    .shortcuts-hint { font-size: 10px; color: var(--text-muted); padding: 4px 16px 8px; }
+    kbd { background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 3px; padding: 1px 5px; font-size: 10px; font-family: inherit; }
+
+    /* Notes panel */
+    .notes-panel { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+    .notes-list { flex: 1; overflow-y: auto; padding: 4px 8px; }
+    .note-item { padding: 8px 10px; border-radius: 6px; margin-bottom: 4px; background: var(--bg-primary); border: 1px solid var(--border); cursor: pointer; }
+    .note-item:hover { border-color: var(--accent); }
+    .note-item.active { border-color: var(--accent); background: rgba(47, 129, 247, 0.08); }
+    .note-title { font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .note-preview { font-size: 11px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+    .note-editor { flex: 1; display: flex; flex-direction: column; padding: 8px; gap: 6px; overflow: hidden; }
+    .note-editor input { background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 4px; color: var(--text-primary); font-size: 13px; font-weight: 600; padding: 6px 8px; }
+    .note-editor input:focus { outline: none; border-color: var(--accent); }
+    .note-editor textarea { flex: 1; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 4px; color: var(--text-primary); font-size: 12px; padding: 8px; resize: none; font-family: 'SF Mono', Monaco, Consolas, monospace; line-height: 1.5; }
+    .note-editor textarea:focus { outline: none; border-color: var(--accent); }
+    .note-actions { display: flex; gap: 4px; padding: 6px 8px; border-top: 1px solid var(--border); }
+
+    /* Kanban panel */
+    .kanban-panel { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+    .kanban-add { display: flex; gap: 4px; padding: 8px; border-bottom: 1px solid var(--border); }
+    .kanban-add input { flex: 1; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 4px; color: var(--text-primary); font-size: 12px; padding: 5px 8px; }
+    .kanban-add input:focus { outline: none; border-color: var(--accent); }
+    .kanban-columns { flex: 1; overflow-y: auto; padding: 4px 8px; }
+    .kanban-column { margin-bottom: 12px; }
+    .kanban-col-header { display: flex; align-items: center; justify-content: space-between; padding: 4px 0; cursor: pointer; user-select: none; }
+    .kanban-col-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); display: flex; align-items: center; gap: 6px; }
+    .kanban-col-count { font-size: 10px; background: var(--bg-tertiary); border-radius: 8px; padding: 0 6px; color: var(--text-secondary); }
+    .kanban-card { padding: 8px 10px; background: var(--bg-primary); border: 1px solid var(--border); border-radius: 6px; margin-bottom: 4px; font-size: 12px; }
+    .kanban-card-title { font-weight: 500; margin-bottom: 2px; }
+    .kanban-card-desc { color: var(--text-muted); font-size: 11px; }
+    .kanban-card-actions { display: flex; gap: 2px; margin-top: 4px; }
+    .kanban-card-btn { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 11px; padding: 1px 4px; border-radius: 3px; }
+    .kanban-card-btn:hover { background: var(--bg-tertiary); color: var(--text-primary); }
+    .kanban-card-btn.delete:hover { color: var(--error); }
+
+    /* Emulators panel */
+    .emu-panel { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+    .emu-toolbar { display: flex; gap: 4px; padding: 8px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+    .emu-list { flex: 1; overflow-y: auto; padding: 4px 8px; }
+    .emu-runtime { margin-bottom: 8px; }
+    .emu-runtime-header { font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; padding: 4px 0; }
+    .emu-device { display: flex; align-items: center; justify-content: space-between; padding: 6px 8px; background: var(--bg-primary); border: 1px solid var(--border); border-radius: 4px; margin-bottom: 3px; font-size: 12px; }
+    .emu-device-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .emu-device-state { font-size: 10px; padding: 1px 6px; border-radius: 8px; margin: 0 6px; flex-shrink: 0; }
+    .emu-state-booted { background: rgba(63,185,80,0.2); color: var(--success); }
+    .emu-state-shutdown { background: var(--bg-tertiary); color: var(--text-muted); }
+    .emu-device-actions { display: flex; gap: 2px; flex-shrink: 0; }
+    .emu-msg { padding: 12px; text-align: center; color: var(--text-muted); font-size: 12px; }
+
+    /* Scrollbars */
+    .panel-content::-webkit-scrollbar, .notes-list::-webkit-scrollbar, .kanban-columns::-webkit-scrollbar, .emu-list::-webkit-scrollbar, .agent-list::-webkit-scrollbar { width: 6px; }
+    .panel-content::-webkit-scrollbar-track, .notes-list::-webkit-scrollbar-track, .kanban-columns::-webkit-scrollbar-track, .emu-list::-webkit-scrollbar-track, .agent-list::-webkit-scrollbar-track { background: transparent; }
+    .panel-content::-webkit-scrollbar-thumb, .notes-list::-webkit-scrollbar-thumb, .kanban-columns::-webkit-scrollbar-thumb, .emu-list::-webkit-scrollbar-thumb, .agent-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script>
+    const { useState, useEffect, useRef, useCallback, useMemo } = React;
+    const e = React.createElement;
+
+    // Configure marked for markdown rendering
+    marked.setOptions({
+      highlight: function(code, lang) {
+        if (lang && hljs.getLanguage(lang)) {
+          try { return hljs.highlight(code, { language: lang }).value; } catch {}
+        }
+        return hljs.highlightAuto(code).value;
+      },
+      breaks: true,
+    });
+
+    // SVG icon helper
+    function Icon({ d, size }) {
+      size = size || 18;
+      return e('svg', { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round' },
+        Array.isArray(d) ? d.map((p, i) => e('path', { key: i, d: p })) : e('path', { d })
+      );
+    }
+
+    // Icon paths (Lucide-style)
+    const ICONS = {
+      agents: ['M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2', 'M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8', 'M23 21v-2a4 4 0 0 0-3-3.87', 'M16 3.13a4 4 0 0 1 0 7.75'],
+      notes: ['M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z', 'M14 2v6h6', 'M16 13H8', 'M16 17H8', 'M10 9H8'],
+      emulators: ['M12 18h.01', 'M7 21h10a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2z'],
+      kanban: ['M9 3H5a2 2 0 0 0-2 2v4m6-6h10a2 2 0 0 1 2 2v4M9 3v18m0 0h10a2 2 0 0 0 2-2V9M9 21H5a2 2 0 0 1-2-2V9m0 0h18'],
+      settings: ['M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z', 'M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z'],
+      chevron: 'M6 9l6 6 6-6',
+    };
+
+    // ======================== HOOKS ========================
+
+    function useWebSocket() {
+      const [connected, setConnected] = useState(false);
+      const [agents, setAgents] = useState([]);
+      const [messages, setMessages] = useState({});
+      const [liveOutput, setLiveOutput] = useState({});
+      const [queued, setQueued] = useState({});
+      const [sharedContext, setSharedContext] = useState('');
+      const [fileChanges, setFileChanges] = useState({});
+      const [thinkingOutput, setThinkingOutput] = useState({});
+      const [notes, setNotes] = useState([]);
+      const [kanbanItems, setKanbanItems] = useState([]);
+      const wsRef = useRef(null);
+      const agentsRef = useRef([]);
+      const queueRef = useRef({});
+
+      agentsRef.current = agents;
+      queueRef.current = queued;
+
+      const sendRaw = useCallback((msg) => {
+        if (wsRef.current?.readyState === WebSocket.OPEN) {
+          wsRef.current.send(JSON.stringify(msg));
+        }
+      }, []);
+
+      const drainQueue = useCallback((agentId) => {
+        const q = queueRef.current[agentId];
+        if (q && q.length > 0) {
+          const next = q[0];
+          setQueued(prev => {
+            const updated = [...(prev[agentId] || [])];
+            updated.shift();
+            return { ...prev, [agentId]: updated };
+          });
+          sendRaw({ type: 'send_message', agentId, content: next });
+        }
+      }, [sendRaw]);
+
+      useEffect(() => {
+        function connect() {
+          const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+          const ws = new WebSocket(protocol + '//' + location.host);
+          ws.onopen = () => setConnected(true);
+          ws.onclose = () => { setConnected(false); setTimeout(connect, 2000); };
+          ws.onmessage = (event) => {
+            const msg = JSON.parse(event.data);
+            switch (msg.type) {
+              case 'agents_list':
+                setAgents(msg.agents);
+                msg.agents.forEach(a => sendRaw({ type: 'get_history', agentId: a.id }));
+                sendRaw({ type: 'get_shared_context' });
+                break;
+              case 'agent_created':
+                setAgents(prev => [...prev, msg.agent]);
+                break;
+              case 'agent_updated':
+                setAgents(prev => prev.map(a => a.id === msg.agent.id ? msg.agent : a));
+                if (msg.agent.status === 'idle') {
+                  drainQueue(msg.agent.id);
+                  // Clear thinking output when agent goes idle
+                  setThinkingOutput(prev => { const n = {...prev}; delete n[msg.agent.id]; return n; });
+                }
+                break;
+              case 'agent_removed':
+                setAgents(prev => prev.filter(a => a.id !== msg.agentId));
+                setMessages(prev => { const n = {...prev}; delete n[msg.agentId]; return n; });
+                setLiveOutput(prev => { const n = {...prev}; delete n[msg.agentId]; return n; });
+                setThinkingOutput(prev => { const n = {...prev}; delete n[msg.agentId]; return n; });
+                break;
+              case 'message':
+                setMessages(prev => ({
+                  ...prev,
+                  [msg.message.agentId]: [...(prev[msg.message.agentId] || []), msg.message]
+                }));
+                if (msg.message.role === 'assistant') {
+                  setLiveOutput(prev => ({ ...prev, [msg.message.agentId]: '' }));
+                }
+                break;
+              case 'history':
+                setMessages(prev => ({ ...prev, [msg.agentId]: msg.messages }));
+                break;
+              case 'history_cleared':
+                setMessages(prev => ({ ...prev, [msg.agentId]: [] }));
+                setLiveOutput(prev => ({ ...prev, [msg.agentId]: '' }));
+                setThinkingOutput(prev => { const n = {...prev}; delete n[msg.agentId]; return n; });
+                break;
+              case 'output':
+                setLiveOutput(prev => ({
+                  ...prev,
+                  [msg.agentId]: (prev[msg.agentId] || '') + msg.content
+                }));
+                break;
+              case 'thinking_output':
+                setThinkingOutput(prev => ({
+                  ...prev,
+                  [msg.agentId]: (prev[msg.agentId] || '') + msg.content
+                }));
+                break;
+              case 'shared_context':
+                setSharedContext(msg.content);
+                break;
+              case 'file_changed':
+                setFileChanges(prev => ({ ...prev, [msg.agentId]: msg.files }));
+                break;
+              // Notes
+              case 'notes_list':
+                setNotes(msg.notes);
+                break;
+              case 'note_created':
+                setNotes(prev => [...prev, msg.note]);
+                break;
+              case 'note_updated':
+                setNotes(prev => prev.map(n => n.id === msg.note.id ? msg.note : n));
+                break;
+              case 'note_deleted':
+                setNotes(prev => prev.filter(n => n.id !== msg.id));
+                break;
+              // Kanban
+              case 'kanban_list':
+                setKanbanItems(msg.items);
+                break;
+              case 'kanban_item_created':
+                setKanbanItems(prev => [...prev, msg.item]);
+                break;
+              case 'kanban_item_updated':
+                setKanbanItems(prev => prev.map(i => i.id === msg.item.id ? msg.item : i));
+                break;
+              case 'kanban_item_deleted':
+                setKanbanItems(prev => prev.filter(i => i.id !== msg.id));
+                break;
+            }
+          };
+          wsRef.current = ws;
+        }
+        connect();
+        return () => wsRef.current?.close();
+      }, [drainQueue, sendRaw]);
+
+      return {
+        connected, agents, messages, liveOutput, queued, sharedContext, fileChanges, thinkingOutput, notes, kanbanItems,
+        createAgent: (name, cwd, referencePaths, systemPrompt) => {
+          sendRaw({ type: 'create_agent', name, cwd, referencePaths, systemPrompt });
+        },
+        sendMessage: (agentId, content) => {
+          const agent = agentsRef.current.find(a => a.id === agentId);
+          if (agent && (agent.status === 'working' || agent.status === 'thinking')) {
+            setQueued(prev => ({ ...prev, [agentId]: [...(prev[agentId] || []), content] }));
+          } else {
+            sendRaw({ type: 'send_message', agentId, content });
+          }
+        },
+        stopAgent: (agentId) => sendRaw({ type: 'stop_agent', agentId }),
+        killAgent: (agentId) => sendRaw({ type: 'kill_agent', agentId }),
+        removeAgent: (agentId) => sendRaw({ type: 'remove_agent', agentId }),
+        clearHistory: (agentId) => sendRaw({ type: 'clear_history', agentId }),
+        broadcastMessage: (agentIds, content) => sendRaw({ type: 'broadcast_message', agentIds, content }),
+        updateSharedContext: (content) => sendRaw({ type: 'update_shared_context', content }),
+        clearFileChanges: (agentId) => setFileChanges(prev => ({ ...prev, [agentId]: [] })),
+        // Notes
+        createNote: (title, content, agentId) => sendRaw({ type: 'create_note', title, content, agentId }),
+        updateNote: (id, updates) => sendRaw({ type: 'update_note', id, ...updates }),
+        deleteNote: (id) => sendRaw({ type: 'delete_note', id }),
+        // Kanban
+        createKanbanItem: (title, description, column) => sendRaw({ type: 'create_kanban_item', title, description, column }),
+        updateKanbanItem: (id, updates) => sendRaw({ type: 'update_kanban_item', id, ...updates }),
+        deleteKanbanItem: (id) => sendRaw({ type: 'delete_kanban_item', id }),
+      };
+    }
+
+    // ======================== COMPONENTS ========================
+
+    // Markdown renderer for assistant messages
+    function MarkdownContent({ content }) {
+      const ref = useRef(null);
+      useEffect(() => {
+        if (ref.current) {
+          ref.current.querySelectorAll('pre').forEach(pre => {
+            if (pre.querySelector('.copy-code-btn')) return;
+            const btn = document.createElement('button');
+            btn.className = 'copy-code-btn';
+            btn.textContent = 'Copy';
+            btn.onclick = () => {
+              const code = pre.querySelector('code');
+              navigator.clipboard.writeText(code ? code.textContent : pre.textContent);
+              btn.textContent = 'Copied!';
+              setTimeout(() => btn.textContent = 'Copy', 1500);
+            };
+            pre.style.position = 'relative';
+            pre.appendChild(btn);
+          });
+        }
+      }, [content]);
+      const html = useMemo(() => {
+        try { return marked.parse(content); } catch { return content; }
+      }, [content]);
+      return e('div', { ref, className: 'chat-turn-content', dangerouslySetInnerHTML: { __html: html } });
+    }
+
+    // Thinking Block
+    function ThinkingBlock({ content, isActive }) {
+      const [collapsed, setCollapsed] = useState(false);
+      const autoCollapseRef = useRef(null);
+
+      // Auto-collapse 500ms after thinking finishes (isActive goes false)
+      useEffect(() => {
+        if (!isActive && content) {
+          autoCollapseRef.current = setTimeout(() => setCollapsed(true), 500);
+          return () => clearTimeout(autoCollapseRef.current);
+        }
+        if (isActive) {
+          setCollapsed(false);
+        }
+      }, [isActive, content]);
+
+      if (!content) return null;
+
+      const chevronSvg = e('svg', { width: 12, height: 12, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2 },
+        e('path', { d: collapsed ? 'M9 18l6-6-6-6' : 'M6 9l6 6 6-6' })
+      );
+
+      return e('div', { className: 'thinking-block' },
+        e('div', { className: 'thinking-header' + (collapsed ? ' collapsed' : ''), onClick: () => setCollapsed(prev => !prev) },
+          chevronSvg,
+          isActive ? 'Thinking...' : 'Thought process'
+        ),
+        e('div', { className: 'thinking-content' + (collapsed ? ' hidden' : '') }, content)
+      );
+    }
+
+    // Folder Browser
+    function FolderBrowser({ onSelect }) {
+      const [currentPath, setCurrentPath] = useState('');
+      const [directories, setDirectories] = useState([]);
+      const [homePath, setHomePath] = useState('');
+      const [loading, setLoading] = useState(true);
+
+      const load = useCallback((path) => {
+        setLoading(true);
+        const url = path ? '/api/directories?path=' + encodeURIComponent(path) : '/api/directories';
+        fetch(url).then(r => r.json()).then(data => {
+          setCurrentPath(data.path); setDirectories(data.directories || []); setHomePath(data.home); setLoading(false);
+        }).catch(() => setLoading(false));
+      }, []);
+
+      useEffect(() => { load(''); }, [load]);
+
+      const goUp = () => { const parts = currentPath.split('/').filter(Boolean); parts.pop(); load('/' + parts.join('/') || '/'); };
+      const canGoUp = currentPath && currentPath !== '/' && currentPath !== homePath;
+
+      return e('div', { className: 'folder-browser' },
+        e('div', { className: 'folder-path' }, currentPath || 'Loading...'),
+        e('div', { className: 'folder-list' },
+          loading ? e('div', { style: { padding: 8, color: 'var(--text-muted)', fontSize: 11 } }, 'Loading...') :
+          e(React.Fragment, null,
+            canGoUp && e('div', { className: 'folder-item', onClick: goUp }, '\u2191 ..'),
+            directories.map(dir => e('div', { key: dir.path, className: 'folder-item', onClick: () => load(dir.path) }, '\uD83D\uDCC1 ' + dir.name)),
+            directories.length === 0 && e('div', { style: { padding: 8, color: 'var(--text-muted)', fontSize: 11 } }, 'Empty')
+          )
+        ),
+        e('div', { className: 'folder-actions' },
+          e('button', { type: 'button', className: 'browse-btn', onClick: () => load(homePath || '') }, 'Home'),
+          e('button', { type: 'button', className: 'btn btn-primary', onClick: () => onSelect(currentPath), style: { marginLeft: 'auto' }, disabled: !currentPath }, 'Select')
+        )
+      );
+    }
+
+    // New Agent Modal
+    function NewAgentModal({ isOpen, onClose, onCreate }) {
+      const [name, setName] = useState('');
+      const [cwd, setCwd] = useState('');
+      const [systemPrompt, setSystemPrompt] = useState('');
+      const [referencePaths, setReferencePaths] = useState([]);
+      const [showCwdBrowser, setShowCwdBrowser] = useState(false);
+      const [showRefBrowser, setShowRefBrowser] = useState(false);
+
+      if (!isOpen) return null;
+
+      const handleCreate = () => {
+        if (name.trim() && cwd.trim()) {
+          onCreate(name.trim(), cwd.trim(), referencePaths, systemPrompt.trim());
+          setName(''); setCwd(''); setSystemPrompt(''); setReferencePaths([]);
+          setShowCwdBrowser(false); setShowRefBrowser(false); onClose();
+        }
+      };
+
+      return e('div', { className: 'modal-overlay', onClick: (ev) => ev.target === ev.currentTarget && onClose() },
+        e('div', { className: 'modal' },
+          e('h2', { className: 'modal-title' }, 'Create New Agent'),
+          e('div', { className: 'form-group' },
+            e('label', { className: 'form-label' }, 'Agent Name'),
+            e('input', { className: 'form-input', value: name, onChange: (ev) => setName(ev.target.value), placeholder: 'e.g., Frontend Work', autoFocus: true })
+          ),
+          e('div', { className: 'form-group' },
+            e('label', { className: 'form-label' }, 'Working Directory'),
+            showCwdBrowser
+              ? e(FolderBrowser, { onSelect: (p) => { setCwd(p); setShowCwdBrowser(false); } })
+              : e('button', { type: 'button', className: 'browse-btn', onClick: () => setShowCwdBrowser(true), style: { width: '100%', textAlign: 'left' } }, cwd || 'Browse for folder...'),
+            cwd && !showCwdBrowser && e('div', { className: 'form-hint' }, 'Selected: ' + cwd)
+          ),
+          e('div', { className: 'form-group' },
+            e('label', { className: 'form-label' }, 'Reference Directories (optional)'),
+            e('div', { className: 'form-hint', style: { marginBottom: 6 } }, 'Additional repos/folders this agent should be aware of'),
+            showRefBrowser
+              ? e(FolderBrowser, { onSelect: (p) => { if (!referencePaths.includes(p)) setReferencePaths(prev => [...prev, p]); setShowRefBrowser(false); } })
+              : e('button', { type: 'button', className: 'browse-btn', onClick: () => setShowRefBrowser(true), style: { width: '100%', textAlign: 'left' } }, '+ Add reference directory'),
+            referencePaths.length > 0 && e('div', { className: 'ref-paths-list' },
+              referencePaths.map((p, i) => e('div', { key: i, className: 'ref-path-item' },
+                e('span', { style: { flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, p),
+                e('button', { onClick: () => setReferencePaths(prev => prev.filter((_, j) => j !== i)) }, '\u00D7')
+              ))
+            )
+          ),
+          e('div', { className: 'form-group' },
+            e('label', { className: 'form-label' }, 'System Prompt (optional)'),
+            e('textarea', { className: 'form-textarea', value: systemPrompt, onChange: (ev) => setSystemPrompt(ev.target.value), placeholder: 'e.g., You are a senior code reviewer. Be thorough and critical.', rows: 3 }),
+            e('div', { className: 'form-hint' }, 'Give this agent a specific role or personality')
+          ),
+          e('div', { className: 'modal-actions' },
+            e('button', { type: 'button', className: 'btn btn-secondary', onClick: onClose }, 'Cancel'),
+            e('button', { type: 'button', className: 'btn btn-primary', disabled: !name.trim() || !cwd.trim(), onClick: handleCreate }, 'Create Agent')
+          )
+        )
+      );
+    }
+
+    // Shared Context Modal
+    function SharedContextModal({ isOpen, onClose, content, onSave }) {
+      const [text, setText] = useState(content);
+      useEffect(() => { setText(content); }, [content]);
+      if (!isOpen) return null;
+      return e('div', { className: 'modal-overlay', onClick: (ev) => ev.target === ev.currentTarget && onClose() },
+        e('div', { className: 'modal' },
+          e('h2', { className: 'modal-title' }, 'Shared Project Context'),
+          e('div', { className: 'form-hint', style: { marginBottom: 12 } }, 'This context is prepended to every agent\'s prompt automatically.'),
+          e('textarea', { className: 'shared-context-textarea', value: text, onChange: (ev) => setText(ev.target.value), placeholder: 'e.g., We are building a REST API in Go, using PostgreSQL, deployed on AWS...' }),
+          e('div', { className: 'modal-actions' },
+            e('button', { type: 'button', className: 'btn btn-secondary', onClick: onClose }, 'Cancel'),
+            e('button', { type: 'button', className: 'btn btn-primary', onClick: () => { onSave(text); onClose(); } }, 'Save')
+          )
+        )
+      );
+    }
+
+    // Chat Turn
+    function ChatTurn({ role, content, isStreaming }) {
+      const roleLabels = { user: 'You', assistant: 'Claude', system: 'System' };
+      const turnClass = isStreaming ? 'chat-turn chat-turn-streaming' : 'chat-turn chat-turn-' + role;
+
+      return e('div', { className: turnClass },
+        e('div', { className: 'chat-turn-role' }, roleLabels[role] || role),
+        role === 'assistant' && !isStreaming
+          ? e(MarkdownContent, { content })
+          : e('div', { className: 'chat-turn-content' },
+              content,
+              isStreaming && e('span', { className: 'cursor' })
+            )
+      );
+    }
+
+    // Terminal Panel
+    function TerminalPanel({ agent, messages, liveOutput, queuedMessages, fileChanges, thinkingOutput, onSendMessage, onStop, onClearHistory, onClearFileChanges }) {
+      const [input, setInput] = useState('');
+      const [inputHistory, setInputHistory] = useState([]);
+      const [historyIdx, setHistoryIdx] = useState(-1);
+      const [notification, setNotification] = useState(null);
+      const contentRef = useRef(null);
+      const inputRef = useRef(null);
+      const anchorRef = useRef(null);
+      const userScrolledUp = useRef(false);
+      const prevStatus = useRef(agent?.status);
+
+      // Smart auto-scroll: use IntersectionObserver on anchor element
+      useEffect(() => {
+        if (!anchorRef.current || !contentRef.current) return;
+        const observer = new IntersectionObserver(
+          ([entry]) => { userScrolledUp.current = !entry.isIntersecting; },
+          { root: contentRef.current, threshold: 0.1 }
+        );
+        observer.observe(anchorRef.current);
+        return () => observer.disconnect();
+      }, [agent]);
+
+      // Auto-scroll when new content arrives (unless user scrolled up)
+      useEffect(() => {
+        if (!userScrolledUp.current && contentRef.current) {
+          contentRef.current.scrollTop = contentRef.current.scrollHeight;
+        }
+      }, [messages, liveOutput, queuedMessages, thinkingOutput]);
+
+      // Notification when agent finishes
+      useEffect(() => {
+        if (agent && prevStatus.current === 'working' && agent.status === 'idle') {
+          setNotification('done');
+          const t = setTimeout(() => setNotification(null), 4000);
+          return () => clearTimeout(t);
+        }
+        prevStatus.current = agent?.status;
+      }, [agent?.status]);
+
+      const handleSubmit = () => {
+        if (input.trim() && agent) {
+          onSendMessage(input.trim());
+          setInputHistory(prev => [...prev, input.trim()]);
+          setHistoryIdx(-1);
+          setInput('');
+          requestAnimationFrame(() => inputRef.current?.focus());
+        }
+      };
+
+      const handleKeyDown = (ev) => {
+        if (ev.key === 'Enter' && !ev.shiftKey) {
+          ev.preventDefault();
+          handleSubmit();
+        }
+        if (ev.key === 'ArrowUp' && !input) {
+          ev.preventDefault();
+          if (inputHistory.length > 0) {
+            const newIdx = historyIdx === -1 ? inputHistory.length - 1 : Math.max(0, historyIdx - 1);
+            setHistoryIdx(newIdx);
+            setInput(inputHistory[newIdx]);
+          }
+        }
+        if (ev.key === 'ArrowDown' && historyIdx >= 0) {
+          ev.preventDefault();
+          if (historyIdx >= inputHistory.length - 1) {
+            setHistoryIdx(-1);
+            setInput('');
+          } else {
+            setHistoryIdx(historyIdx + 1);
+            setInput(inputHistory[historyIdx + 1]);
+          }
+        }
+      };
+
+      // Auto-resize textarea
+      useEffect(() => {
+        if (inputRef.current) {
+          inputRef.current.style.height = 'auto';
+          inputRef.current.style.height = Math.min(inputRef.current.scrollHeight, 120) + 'px';
+        }
+      }, [input]);
+
+      if (!agent) {
+        return e('div', { className: 'terminal-panel' }, e('div', { className: 'panel-content panel-empty' }, 'No agent assigned'));
+      }
+
+      const isWorking = agent.status === 'working' || agent.status === 'thinking';
+      const msgs = messages || [];
+      const queued = queuedMessages || [];
+      const files = fileChanges || [];
+      const thinking = thinkingOutput || '';
+
+      return e('div', { className: 'terminal-panel' },
+        // Header
+        e('div', { className: 'panel-header' },
+          e('div', { className: 'panel-title' },
+            e('span', { className: 'status-dot status-' + agent.status }),
+            e('span', { className: 'panel-title-name' }, agent.name)
+          ),
+          e('div', { className: 'panel-actions' },
+            isWorking && e('button', { className: 'panel-btn panel-btn-stop', onClick: () => onStop(agent.id), title: 'Stop (Esc)' }, 'Stop'),
+            e('button', { className: 'panel-btn', onClick: () => onClearHistory(agent.id), title: 'Clear chat' }, 'Clear'),
+          )
+        ),
+        // Notifications
+        notification === 'done' && e('div', { className: 'panel-notification panel-notification-done' }, 'Response complete'),
+        files.length > 0 && e('div', { className: 'panel-notification panel-notification-files', onClick: () => onClearFileChanges(agent.id) },
+          files.length + ' file' + (files.length > 1 ? 's' : '') + ' changed \u2014 click to dismiss'
+        ),
+        // Chat content
+        e('div', { className: 'panel-content', ref: contentRef },
+          msgs.length === 0 && !liveOutput && queued.length === 0 && !thinking
+            ? e('div', { className: 'panel-empty' },
+                e('div', { style: { textAlign: 'center' } },
+                  e('div', null, 'Send a message to start...'),
+                  agent.systemPrompt && e('div', { style: { fontSize: 11, color: 'var(--text-muted)', marginTop: 4 } }, 'Persona: ' + agent.systemPrompt.substring(0, 80) + (agent.systemPrompt.length > 80 ? '...' : ''))
+                )
+              )
+            : e(React.Fragment, null,
+                msgs.map((m, i) => e(ChatTurn, { key: m.id || i, role: m.role, content: m.content })),
+                // Thinking block (shown during active thinking or with accumulated content)
+                thinking && e(ThinkingBlock, { key: 'thinking', content: thinking, isActive: agent.status === 'thinking' }),
+                liveOutput && e(ChatTurn, { key: 'live', role: 'assistant', content: liveOutput, isStreaming: isWorking }),
+                queued.map((q, i) => e('div', { key: 'q' + i, className: 'chat-turn chat-turn-queued' },
+                  e('div', { className: 'chat-turn-role' }, 'Queued'),
+                  e('div', { className: 'chat-turn-content' }, q)
+                )),
+                e('div', { ref: anchorRef, className: 'scroll-anchor' })
+              )
+        ),
+        // Input
+        e('div', { className: 'panel-input-container' },
+          e('div', { className: 'panel-input-wrapper' },
+            e('textarea', {
+              ref: inputRef,
+              className: 'panel-textarea',
+              value: input,
+              onChange: (ev) => { setInput(ev.target.value); setHistoryIdx(-1); },
+              onKeyDown: handleKeyDown,
+              placeholder: isWorking
+                ? (queued.length > 0 ? queued.length + ' queued \u2014 type more...' : 'Type to queue...')
+                : 'Message... (Enter to send, Shift+Enter for newline)',
+              rows: 1,
+            })
+          )
+        )
+      );
+    }
+
+    // ======================== SIDEBAR PANELS ========================
+
+    // Agents Sidebar
+    function AgentsSidebar({ agents, selectedAgents, totalPanels, onToggle, onRemove, onNewAgent }) {
+      return e(React.Fragment, null,
+        e('div', { className: 'sidebar-header' },
+          e('span', null, 'Agents'),
+          e('div', { className: 'sidebar-header-actions' },
+            e('button', { className: 'sidebar-btn', onClick: onNewAgent, title: 'New Agent' }, '+')
+          )
+        ),
+        e('div', { className: 'agent-list' },
+          agents.length === 0
+            ? e('div', { style: { padding: 12, color: 'var(--text-muted)', fontSize: 12 } }, 'No agents yet.')
+            : agents.map(agent =>
+                e('div', {
+                  key: agent.id,
+                  className: 'agent-item' + (selectedAgents.includes(agent.id) ? ' selected' : ''),
+                  onClick: () => onToggle(agent.id)
+                },
+                  e('span', { className: 'status-dot status-' + agent.status }),
+                  e('div', { className: 'agent-info' },
+                    e('div', { className: 'agent-name' }, agent.name),
+                    e('div', { className: 'agent-status' },
+                      agent.status === 'thinking' ? 'Thinking...'
+                        : agent.status === 'working' ? 'Working...'
+                        : agent.cwd.split('/').pop()
+                    )
+                  ),
+                  e('button', {
+                    className: 'agent-delete-btn',
+                    onClick: (ev) => { ev.stopPropagation(); if (confirm('Delete agent "' + agent.name + '"?')) onRemove(agent.id); },
+                    title: 'Delete agent'
+                  }, '\u00D7')
+                )
+              )
+        ),
+        e('div', { style: { padding: '8px' } },
+          e('button', { className: 'btn btn-primary', style: { width: '100%' }, onClick: onNewAgent }, '+ New Agent')
+        ),
+        e('div', { className: 'shortcuts-hint' },
+          e('span', null, e(React.Fragment, null, e('kbd', null, 'Ctrl+N'), ' new ', e('kbd', null, 'Esc'), ' stop ', e('kbd', null, 'Ctrl+B'), ' broadcast'))
+        )
+      );
+    }
+
+    // Notes Panel
+    function NotesPanel({ notes, agents, onCreateNote, onUpdateNote, onDeleteNote }) {
+      const [activeNoteId, setActiveNoteId] = useState(null);
+      const [editTitle, setEditTitle] = useState('');
+      const [editContent, setEditContent] = useState('');
+      const [creating, setCreating] = useState(false);
+
+      const activeNote = notes.find(n => n.id === activeNoteId);
+
+      useEffect(() => {
+        if (activeNote) {
+          setEditTitle(activeNote.title);
+          setEditContent(activeNote.content);
+        }
+      }, [activeNoteId]);
+
+      const handleCreate = () => {
+        setCreating(true);
+        setActiveNoteId(null);
+        setEditTitle('');
+        setEditContent('');
+      };
+
+      const handleSaveNew = () => {
+        if (editTitle.trim()) {
+          onCreateNote(editTitle.trim(), editContent);
+          setCreating(false);
+        }
+      };
+
+      const handleSaveEdit = () => {
+        if (activeNote && editTitle.trim()) {
+          onUpdateNote(activeNote.id, { title: editTitle.trim(), content: editContent });
+        }
+      };
+
+      const handleDelete = (id) => {
+        if (confirm('Delete this note?')) {
+          onDeleteNote(id);
+          if (activeNoteId === id) setActiveNoteId(null);
+        }
+      };
+
+      // List view (no active note, not creating)
+      if (!activeNote && !creating) {
+        return e('div', { className: 'notes-panel' },
+          e('div', { className: 'sidebar-header' },
+            e('span', null, 'Notes'),
+            e('div', { className: 'sidebar-header-actions' },
+              e('button', { className: 'sidebar-btn', onClick: handleCreate, title: 'New note' }, '+')
+            )
+          ),
+          e('div', { className: 'notes-list' },
+            notes.length === 0
+              ? e('div', { style: { padding: 12, color: 'var(--text-muted)', fontSize: 12, textAlign: 'center' } }, 'No notes yet. Notes are injected into agent prompts.')
+              : notes.map(note =>
+                  e('div', { key: note.id, className: 'note-item', onClick: () => setActiveNoteId(note.id) },
+                    e('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
+                      e('div', { className: 'note-title' }, note.title),
+                      e('button', { className: 'agent-delete-btn', style: { opacity: 1, fontSize: 11 }, onClick: (ev) => { ev.stopPropagation(); handleDelete(note.id); } }, '\u00D7')
+                    ),
+                    e('div', { className: 'note-preview' }, note.content || '(empty)')
+                  )
+                )
+          )
+        );
+      }
+
+      // Editor view
+      return e('div', { className: 'notes-panel' },
+        e('div', { className: 'sidebar-header' },
+          e('span', null, creating ? 'New Note' : 'Edit Note'),
+          e('div', { className: 'sidebar-header-actions' },
+            e('button', { className: 'sidebar-btn', onClick: () => { setActiveNoteId(null); setCreating(false); }, title: 'Back' }, '\u2190')
+          )
+        ),
+        e('div', { className: 'note-editor' },
+          e('input', { value: editTitle, onChange: (ev) => setEditTitle(ev.target.value), placeholder: 'Note title...', autoFocus: true }),
+          e('textarea', { value: editContent, onChange: (ev) => setEditContent(ev.target.value), placeholder: 'Note content...' })
+        ),
+        e('div', { className: 'note-actions' },
+          e('button', { className: 'btn btn-secondary btn-sm', onClick: () => { setActiveNoteId(null); setCreating(false); } }, 'Cancel'),
+          e('div', { style: { flex: 1 } }),
+          creating
+            ? e('button', { className: 'btn btn-primary btn-sm', onClick: handleSaveNew, disabled: !editTitle.trim() }, 'Create')
+            : e('button', { className: 'btn btn-primary btn-sm', onClick: handleSaveEdit, disabled: !editTitle.trim() }, 'Save')
+        )
+      );
+    }
+
+    // Kanban Panel
+    function KanbanPanel({ items, onCreateItem, onUpdateItem, onDeleteItem }) {
+      const [newTitle, setNewTitle] = useState('');
+      const COLUMNS = [
+        { key: 'backlog', label: 'Backlog' },
+        { key: 'in_progress', label: 'In Progress' },
+        { key: 'done', label: 'Done' },
+      ];
+      const columnOrder = { backlog: 'in_progress', in_progress: 'done' };
+      const columnBack = { in_progress: 'backlog', done: 'in_progress' };
+
+      const handleAdd = () => {
+        if (newTitle.trim()) {
+          onCreateItem(newTitle.trim(), '', 'backlog');
+          setNewTitle('');
+        }
+      };
+
+      return e('div', { className: 'kanban-panel' },
+        e('div', { className: 'sidebar-header' }, e('span', null, 'Kanban')),
+        e('div', { className: 'kanban-add' },
+          e('input', {
+            value: newTitle,
+            onChange: (ev) => setNewTitle(ev.target.value),
+            onKeyDown: (ev) => { if (ev.key === 'Enter') handleAdd(); },
+            placeholder: 'Add task...'
+          }),
+          e('button', { className: 'btn btn-primary btn-sm', onClick: handleAdd, disabled: !newTitle.trim() }, '+')
+        ),
+        e('div', { className: 'kanban-columns' },
+          COLUMNS.map(col => {
+            const colItems = items.filter(i => i.column === col.key).sort((a, b) => a.order - b.order);
+            return e('div', { key: col.key, className: 'kanban-column' },
+              e('div', { className: 'kanban-col-header' },
+                e('div', { className: 'kanban-col-title' },
+                  col.label,
+                  e('span', { className: 'kanban-col-count' }, colItems.length)
+                )
+              ),
+              colItems.map(item =>
+                e('div', { key: item.id, className: 'kanban-card' },
+                  e('div', { className: 'kanban-card-title' }, item.title),
+                  item.description && e('div', { className: 'kanban-card-desc' }, item.description),
+                  e('div', { className: 'kanban-card-actions' },
+                    columnBack[col.key] && e('button', { className: 'kanban-card-btn', onClick: () => onUpdateItem(item.id, { column: columnBack[col.key] }), title: 'Move back' }, '\u2190'),
+                    columnOrder[col.key] && e('button', { className: 'kanban-card-btn', onClick: () => onUpdateItem(item.id, { column: columnOrder[col.key] }), title: 'Move forward' }, '\u2192'),
+                    e('button', { className: 'kanban-card-btn delete', onClick: () => { if (confirm('Delete "' + item.title + '"?')) onDeleteItem(item.id); }, title: 'Delete' }, '\u00D7')
+                  )
+                )
+              ),
+              colItems.length === 0 && e('div', { style: { padding: '8px', fontSize: 11, color: 'var(--text-muted)', textAlign: 'center' } }, 'Empty')
+            );
+          })
+        )
+      );
+    }
+
+    // Emulators Panel
+    function EmulatorsPanel() {
+      const [devices, setDevices] = useState({});
+      const [loading, setLoading] = useState(false);
+      const [error, setError] = useState(null);
+      const [actionMsg, setActionMsg] = useState(null);
+
+      const loadDevices = useCallback(() => {
+        setLoading(true);
+        setError(null);
+        fetch('/api/simulators').then(r => r.json()).then(data => {
+          if (data.error) {
+            setError(data.error);
+            setDevices({});
+          } else {
+            setDevices(data.devices || {});
+          }
+          setLoading(false);
+        }).catch(err => {
+          setError('Failed to fetch simulators');
+          setLoading(false);
+        });
+      }, []);
+
+      useEffect(() => { loadDevices(); }, [loadDevices]);
+
+      const simAction = (endpoint, udid) => {
+        setActionMsg('Working...');
+        fetch('/api/simulators/' + endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ udid })
+        }).then(r => r.json()).then(data => {
+          setActionMsg(data.ok ? 'Done' : (data.message || 'Failed'));
+          setTimeout(() => setActionMsg(null), 2000);
+          loadDevices();
+        }).catch(() => {
+          setActionMsg('Request failed');
+          setTimeout(() => setActionMsg(null), 2000);
+        });
+      };
+
+      const cleanDerived = () => {
+        if (!confirm('Delete all Xcode Derived Data? This is safe but builds will need to recompile.')) return;
+        setActionMsg('Cleaning...');
+        fetch('/api/simulators/clean-derived-data', { method: 'POST' }).then(r => r.json()).then(data => {
+          setActionMsg(data.ok ? 'Cleaned!' : (data.message || 'Failed'));
+          setTimeout(() => setActionMsg(null), 3000);
+        }).catch(() => {
+          setActionMsg('Request failed');
+          setTimeout(() => setActionMsg(null), 2000);
+        });
+      };
+
+      // Group and filter out empty runtimes
+      const runtimes = Object.entries(devices)
+        .filter(([_, devs]) => devs.length > 0)
+        .sort(([a], [b]) => a.localeCompare(b));
+
+      return e('div', { className: 'emu-panel' },
+        e('div', { className: 'sidebar-header' },
+          e('span', null, 'Emulators'),
+          e('div', { className: 'sidebar-header-actions' },
+            e('button', { className: 'sidebar-btn', onClick: loadDevices, title: 'Refresh' }, '\u21BB')
+          )
+        ),
+        e('div', { className: 'emu-toolbar' },
+          e('button', { className: 'btn btn-danger btn-sm', onClick: cleanDerived }, 'Clean Derived Data'),
+          actionMsg && e('span', { style: { fontSize: 11, color: 'var(--text-secondary)' } }, actionMsg)
+        ),
+        e('div', { className: 'emu-list' },
+          loading && e('div', { className: 'emu-msg' }, 'Loading simulators...'),
+          error && e('div', { className: 'emu-msg' }, error),
+          !loading && !error && runtimes.length === 0 && e('div', { className: 'emu-msg' }, 'No simulators found. Is Xcode installed?'),
+          runtimes.map(([runtime, devs]) =>
+            e('div', { key: runtime, className: 'emu-runtime' },
+              e('div', { className: 'emu-runtime-header' }, runtime.replace('com.apple.CoreSimulator.SimRuntime.', '').replace(/-/g, ' ')),
+              devs.map(dev =>
+                e('div', { key: dev.udid, className: 'emu-device' },
+                  e('span', { className: 'emu-device-name' }, dev.name),
+                  e('span', { className: 'emu-device-state ' + (dev.state === 'Booted' ? 'emu-state-booted' : 'emu-state-shutdown') }, dev.state),
+                  e('div', { className: 'emu-device-actions' },
+                    dev.state !== 'Booted'
+                      ? e('button', { className: 'btn btn-sm btn-secondary', onClick: () => simAction('boot', dev.udid) }, 'Boot')
+                      : e('button', { className: 'btn btn-sm btn-secondary', onClick: () => simAction('shutdown', dev.udid) }, 'Stop'),
+                    e('button', { className: 'btn btn-sm btn-secondary', onClick: () => { if (confirm('Erase all data on ' + dev.name + '?')) simAction('erase', dev.udid); } }, 'Erase')
+                  )
+                )
+              )
+            )
+          )
+        )
+      );
+    }
+
+    // ======================== MAIN APP ========================
+
+    function App() {
+      const ws = useWebSocket();
+      const { connected, agents, messages, liveOutput, queued, sharedContext, fileChanges, thinkingOutput, notes, kanbanItems } = ws;
+      const [columns, setColumns] = useState(2);
+      const [rows, setRows] = useState(2);
+      const [showModal, setShowModal] = useState(false);
+      const [showSharedContext, setShowSharedContext] = useState(false);
+      const [showBroadcast, setShowBroadcast] = useState(false);
+      const [broadcastInput, setBroadcastInput] = useState('');
+      const [selectedAgents, setSelectedAgents] = useState([]);
+      const [sidebarTab, setSidebarTab] = useState('agents');
+
+      useEffect(() => {
+        setSelectedAgents(prev => prev.filter(id => agents.some(a => a.id === id)));
+      }, [agents]);
+
+      // Global keyboard shortcuts
+      useEffect(() => {
+        const handler = (ev) => {
+          if ((ev.ctrlKey || ev.metaKey) && ev.key === 'n') {
+            ev.preventDefault();
+            setShowModal(true);
+          }
+          if (ev.key === 'Escape') {
+            agents.forEach(a => { if (a.status === 'working' || a.status === 'thinking') ws.stopAgent(a.id); });
+          }
+          if ((ev.ctrlKey || ev.metaKey) && ev.key === 'b') {
+            ev.preventDefault();
+            setShowBroadcast(prev => !prev);
+          }
+        };
+        window.addEventListener('keydown', handler);
+        return () => window.removeEventListener('keydown', handler);
+      }, [agents, ws]);
+
+      const totalPanels = columns * rows;
+      const displayAgents = [...selectedAgents];
+      agents.forEach(agent => {
+        if (!displayAgents.includes(agent.id) && displayAgents.length < totalPanels) {
+          displayAgents.push(agent.id);
+        }
+      });
+
+      const gridStyle = {
+        gridTemplateColumns: 'repeat(' + columns + ', 1fr)',
+        gridTemplateRows: 'repeat(' + rows + ', 1fr)'
+      };
+
+      const handleBroadcast = () => {
+        if (broadcastInput.trim() && agents.length > 0) {
+          ws.broadcastMessage(agents.map(a => a.id), broadcastInput.trim());
+          setBroadcastInput('');
+        }
+      };
+
+      const toggleAgent = (agentId) => {
+        setSelectedAgents(prev =>
+          prev.includes(agentId)
+            ? prev.filter(id => id !== agentId)
+            : prev.length < totalPanels ? [...prev, agentId] : prev
+        );
+      };
+
+      // Activity bar tabs
+      const tabs = [
+        { id: 'agents', icon: ICONS.agents, label: 'Agents' },
+        { id: 'notes', icon: ICONS.notes, label: 'Notes' },
+        { id: 'emulators', icon: ICONS.emulators, label: 'Emulators' },
+        { id: 'kanban', icon: ICONS.kanban, label: 'Kanban' },
+      ];
+
+      return e('div', { className: 'app' },
+        // Activity Bar
+        e('div', { className: 'activity-bar' },
+          tabs.map(tab =>
+            e('button', {
+              key: tab.id,
+              className: 'activity-bar-btn' + (sidebarTab === tab.id ? ' active' : ''),
+              onClick: () => setSidebarTab(tab.id),
+              title: tab.label
+            }, e(Icon, { d: tab.icon, size: 20 }))
+          ),
+          e('div', { className: 'activity-bar-spacer' }),
+          e('button', {
+            className: 'activity-bar-btn activity-bar-bottom',
+            onClick: () => setShowSharedContext(true),
+            title: 'Settings'
+          }, e(Icon, { d: ICONS.settings, size: 20 }))
+        ),
+
+        // Sidebar Panel
+        e('div', { className: 'sidebar-panel' },
+          sidebarTab === 'agents' && e(AgentsSidebar, {
+            agents,
+            selectedAgents,
+            totalPanels,
+            onToggle: toggleAgent,
+            onRemove: ws.removeAgent,
+            onNewAgent: () => setShowModal(true),
+          }),
+          sidebarTab === 'notes' && e(NotesPanel, {
+            notes,
+            agents,
+            onCreateNote: ws.createNote,
+            onUpdateNote: ws.updateNote,
+            onDeleteNote: ws.deleteNote,
+          }),
+          sidebarTab === 'emulators' && e(EmulatorsPanel),
+          sidebarTab === 'kanban' && e(KanbanPanel, {
+            items: kanbanItems,
+            onCreateItem: ws.createKanbanItem,
+            onUpdateItem: ws.updateKanbanItem,
+            onDeleteItem: ws.deleteKanbanItem,
+          })
+        ),
+
+        // Main content
+        e('div', { className: 'main-content' },
+          !connected && e('div', { className: 'connection-error' }, 'Disconnected. Reconnecting...'),
+
+          // Top bar
+          e('div', { className: 'top-bar' },
+            e('div', { className: 'top-bar-left' }),
+            e('div', { className: 'top-bar-right' },
+              e('div', { className: 'grid-controls' },
+                e('span', { className: 'grid-label' }, 'Col'),
+                e('div', { className: 'grid-buttons' },
+                  [1,2,3,4].map(n => e('button', { key: n, className: 'grid-btn' + (columns === n ? ' active' : ''), onClick: () => setColumns(n) }, n))
+                )
+              ),
+              e('div', { className: 'grid-controls' },
+                e('span', { className: 'grid-label' }, 'Row'),
+                e('div', { className: 'grid-buttons' },
+                  [1,2,3].map(n => e('button', { key: n, className: 'grid-btn' + (rows === n ? ' active' : ''), onClick: () => setRows(n) }, n))
+                )
+              ),
+            )
+          ),
+
+          // Broadcast bar
+          showBroadcast && e('div', { className: 'broadcast-bar' },
+            e('label', null, 'Broadcast'),
+            e('input', {
+              className: 'broadcast-input',
+              value: broadcastInput,
+              onChange: (ev) => setBroadcastInput(ev.target.value),
+              onKeyDown: (ev) => { if (ev.key === 'Enter') handleBroadcast(); },
+              placeholder: 'Send to all agents... (Enter to send)',
+              autoFocus: true
+            }),
+            e('button', { className: 'broadcast-send', onClick: handleBroadcast }, 'Send All')
+          ),
+
+          // Terminal grid
+          e('div', { className: 'terminal-grid', style: gridStyle },
+            Array.from({ length: totalPanels }).map((_, i) => {
+              const agentId = displayAgents[i];
+              const agent = agentId ? agents.find(a => a.id === agentId) : null;
+              return e(TerminalPanel, {
+                key: agentId || 'empty-' + i,
+                agent,
+                messages: agentId ? messages[agentId] : [],
+                liveOutput: agentId ? liveOutput[agentId] : '',
+                queuedMessages: agentId ? queued[agentId] : [],
+                fileChanges: agentId ? fileChanges[agentId] : [],
+                thinkingOutput: agentId ? thinkingOutput[agentId] : '',
+                onSendMessage: (content) => agent && ws.sendMessage(agent.id, content),
+                onStop: ws.stopAgent,
+                onClearHistory: ws.clearHistory,
+                onClearFileChanges: ws.clearFileChanges,
+              });
+            })
+          )
+        ),
+
+        // Modals
+        e(NewAgentModal, { isOpen: showModal, onClose: () => setShowModal(false), onCreate: ws.createAgent }),
+        e(SharedContextModal, { isOpen: showSharedContext, onClose: () => setShowSharedContext(false), content: sharedContext, onSave: ws.updateSharedContext })
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(e(App));
+  </script>
+</body>
+</html>
