@@ -1,7 +1,9 @@
 import type { Subprocess } from 'bun';
 import { watch, type FSWatcher } from 'fs';
 import { existsSync } from 'fs';
-import type { AgentInfo, AgentStatus, ChatMessage, PersistedData, ProjectNote, KanbanItem } from '../shared/protocol';
+import { join } from 'path';
+import { tmpdir } from 'os';
+import type { AgentInfo, AgentStatus, ChatMessage, PersistedData, ProjectNote, KanbanItem, KanbanBoard, LiveDocument, AppSettings } from '../shared/protocol';
 
 const DATA_FILE = './data.json';
 const PROCESS_TIMEOUT_MS = 10 * 60 * 1000; // 10 minute timeout (agents do real work now)
@@ -22,6 +24,12 @@ interface ManagedAgent {
   outputBuffer: string;
   watcher: FSWatcher | null;
   lastFileChange: string[];
+  // Token tracking
+  contextTokens: number;      // Latest input_tokens (current context window usage)
+  totalInputTokens: number;   // Cumulative input tokens across all turns
+  totalOutputTokens: number;  // Cumulative output tokens across all turns
+  totalCostUsd: number;       // Cumulative cost
+  numTurns: number;           // Number of API turns
 }
 
 type OutputCallback = (agentId: string, content: string, stream: 'stdout' | 'stderr') => void;
@@ -29,6 +37,7 @@ type StatusCallback = (agent: AgentInfo) => void;
 type MessageCallback = (message: ChatMessage) => void;
 type FileChangeCallback = (agentId: string, files: string[]) => void;
 type ThinkingCallback = (agentId: string, content: string) => void;
+type TokenUsageCallback = (agentId: string, contextTokens: number, contextLimit: number, totalInputTokens: number, totalOutputTokens: number, totalCostUsd: number, numTurns: number) => void;
 
 export class AgentManager {
   private agents: Map<string, ManagedAgent> = new Map();
@@ -36,11 +45,15 @@ export class AgentManager {
   private sharedContext: string = '';
   private notes: Map<string, ProjectNote> = new Map();
   private kanbanItems: Map<string, KanbanItem> = new Map();
+  private kanbanBoards: Map<string, KanbanBoard> = new Map();
+  private documents: Map<string, LiveDocument> = new Map();
+  private settings: AppSettings = {};
   private onOutput: OutputCallback | null = null;
   private onStatusChange: StatusCallback | null = null;
   private onMessage: MessageCallback | null = null;
   private onFileChange: FileChangeCallback | null = null;
   private onThinking: ThinkingCallback | null = null;
+  private onTokenUsage: TokenUsageCallback | null = null;
 
   constructor() {
     this.loadPersistedData();
@@ -51,6 +64,7 @@ export class AgentManager {
   setMessageCallback(cb: MessageCallback) { this.onMessage = cb; }
   setFileChangeCallback(cb: FileChangeCallback) { this.onFileChange = cb; }
   setThinkingCallback(cb: ThinkingCallback) { this.onThinking = cb; }
+  setTokenUsageCallback(cb: TokenUsageCallback) { this.onTokenUsage = cb; }
 
   // --- Persistence ---
 
@@ -72,6 +86,11 @@ export class AgentManager {
             outputBuffer: '',
             watcher: null,
             lastFileChange: [],
+            contextTokens: 0,
+            totalInputTokens: 0,
+            totalOutputTokens: 0,
+            totalCostUsd: 0,
+            numTurns: 0,
           };
           this.agents.set(agent.id, managed);
           this.startFileWatcher(agent.id);
@@ -95,7 +114,23 @@ export class AgentManager {
             this.kanbanItems.set(item.id, item);
           }
         }
-        console.log(`Loaded ${data.agents.length} agents, ${data.messages.length} messages, ${this.notes.size} notes, ${this.kanbanItems.size} kanban items from disk`);
+        // Load kanban boards
+        if (data.kanbanBoards) {
+          for (const board of data.kanbanBoards) {
+            this.kanbanBoards.set(board.id, board);
+          }
+        }
+        // Load documents
+        if (data.documents) {
+          for (const doc of data.documents) {
+            this.documents.set(doc.id, doc);
+          }
+        }
+        // Load settings
+        if (data.settings) {
+          this.settings = data.settings;
+        }
+        console.log(`Loaded ${data.agents.length} agents, ${data.messages.length} messages, ${this.notes.size} notes, ${this.kanbanItems.size} kanban items, ${this.kanbanBoards.size} boards, ${this.documents.size} documents from disk`);
       }
     } catch (e) {
       console.error('Failed to load persisted data:', e);
@@ -112,6 +147,9 @@ export class AgentManager {
       sharedContext: this.sharedContext,
       notes: Array.from(this.notes.values()),
       kanbanItems: Array.from(this.kanbanItems.values()),
+      kanbanBoards: Array.from(this.kanbanBoards.values()),
+      documents: Array.from(this.documents.values()),
+      settings: this.settings,
     };
     await Bun.write(DATA_FILE, JSON.stringify(data, null, 2));
   }
@@ -136,6 +174,19 @@ export class AgentManager {
 
   getSharedContext(): string {
     return this.sharedContext;
+  }
+
+  getTokenUsage(agentId: string): { contextTokens: number; contextLimit: number; totalInputTokens: number; totalOutputTokens: number; totalCostUsd: number; numTurns: number } | null {
+    const agent = this.agents.get(agentId);
+    if (!agent) return null;
+    return {
+      contextTokens: agent.contextTokens,
+      contextLimit: 200000,
+      totalInputTokens: agent.totalInputTokens,
+      totalOutputTokens: agent.totalOutputTokens,
+      totalCostUsd: agent.totalCostUsd,
+      numTurns: agent.numTurns,
+    };
   }
 
   // --- Notes CRUD ---
@@ -182,7 +233,7 @@ export class AgentManager {
     return Array.from(this.kanbanItems.values()).sort((a, b) => a.order - b.order);
   }
 
-  async createKanbanItem(title: string, description: string = '', column: KanbanItem['column'] = 'backlog'): Promise<KanbanItem> {
+  async createKanbanItem(title: string, description: string = '', column: KanbanItem['column'] = 'backlog', boardId?: string): Promise<KanbanItem> {
     const itemsInColumn = Array.from(this.kanbanItems.values()).filter(i => i.column === column);
     const maxOrder = itemsInColumn.length > 0 ? Math.max(...itemsInColumn.map(i => i.order)) : -1;
     const item: KanbanItem = {
@@ -192,19 +243,21 @@ export class AgentManager {
       column,
       order: maxOrder + 1,
       createdAt: Date.now(),
+      boardId,
     };
     this.kanbanItems.set(item.id, item);
     await this.persistData();
     return item;
   }
 
-  async updateKanbanItem(id: string, updates: { title?: string; description?: string; column?: KanbanItem['column']; order?: number }): Promise<KanbanItem | null> {
+  async updateKanbanItem(id: string, updates: { title?: string; description?: string; column?: KanbanItem['column']; order?: number; boardId?: string }): Promise<KanbanItem | null> {
     const item = this.kanbanItems.get(id);
     if (!item) return null;
     if (updates.title !== undefined) item.title = updates.title;
     if (updates.description !== undefined) item.description = updates.description;
     if (updates.column !== undefined) item.column = updates.column;
     if (updates.order !== undefined) item.order = updates.order;
+    if (updates.boardId !== undefined) item.boardId = updates.boardId;
     await this.persistData();
     return item;
   }
@@ -215,9 +268,93 @@ export class AgentManager {
     return deleted;
   }
 
+  // --- Kanban Boards CRUD ---
+
+  getKanbanBoards(): KanbanBoard[] {
+    return Array.from(this.kanbanBoards.values()).sort((a, b) => a.createdAt - b.createdAt);
+  }
+
+  async createKanbanBoard(name: string, projectPath?: string): Promise<KanbanBoard> {
+    const board: KanbanBoard = {
+      id: this.generateId(),
+      name,
+      projectPath,
+      createdAt: Date.now(),
+    };
+    this.kanbanBoards.set(board.id, board);
+    await this.persistData();
+    return board;
+  }
+
+  async deleteKanbanBoard(id: string): Promise<boolean> {
+    const deleted = this.kanbanBoards.delete(id);
+    if (deleted) {
+      // Move items from this board to unassigned
+      for (const item of this.kanbanItems.values()) {
+        if (item.boardId === id) {
+          item.boardId = undefined;
+        }
+      }
+      await this.persistData();
+    }
+    return deleted;
+  }
+
+  // --- Documents CRUD ---
+
+  getDocuments(): LiveDocument[] {
+    return Array.from(this.documents.values()).sort((a, b) => b.updatedAt - a.updatedAt);
+  }
+
+  async createDocument(title: string, content: string, agentId?: string): Promise<LiveDocument> {
+    const now = Date.now();
+    const doc: LiveDocument = {
+      id: this.generateId(),
+      title,
+      content,
+      lastEditedBy: 'user',
+      agentId,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.documents.set(doc.id, doc);
+    await this.persistData();
+    return doc;
+  }
+
+  async updateDocument(id: string, updates: { title?: string; content?: string; agentId?: string | null; lastEditedBy?: string }): Promise<LiveDocument | null> {
+    const doc = this.documents.get(id);
+    if (!doc) return null;
+    if (updates.title !== undefined) doc.title = updates.title;
+    if (updates.content !== undefined) doc.content = updates.content;
+    if (updates.agentId !== undefined) doc.agentId = updates.agentId || undefined;
+    if (updates.lastEditedBy !== undefined) doc.lastEditedBy = updates.lastEditedBy;
+    doc.updatedAt = Date.now();
+    await this.persistData();
+    return doc;
+  }
+
+  async deleteDocument(id: string): Promise<boolean> {
+    const deleted = this.documents.delete(id);
+    if (deleted) await this.persistData();
+    return deleted;
+  }
+
+  // --- Settings ---
+
+  getSettings(): AppSettings {
+    return { ...this.settings };
+  }
+
+  async updateSettings(updates: Partial<AppSettings>): Promise<AppSettings> {
+    this.settings = { ...this.settings, ...updates };
+    await this.persistData();
+    return this.settings;
+  }
+
   // --- Messages ---
 
-  private addMessage(agentId: string, role: ChatMessage['role'], content: string): ChatMessage {
+  private addMessage(agentId: string, role: ChatMessage['role'], content: string, imageData?: string, imageMimeType?: string): ChatMessage {
     const msg: ChatMessage = {
       id: this.generateId(),
       agentId,
@@ -225,6 +362,8 @@ export class AgentManager {
       content,
       timestamp: Date.now(),
     };
+    if (imageData) msg.imageData = imageData;
+    if (imageMimeType) msg.imageMimeType = imageMimeType;
     if (!this.messages.has(agentId)) {
       this.messages.set(agentId, []);
     }
@@ -298,6 +437,18 @@ export class AgentManager {
     return `Project Notes:\n${noteText}`;
   }
 
+  // --- Build documents context for agent prompts ---
+
+  private getDocumentsForAgent(agentId: string): string {
+    const allDocs = Array.from(this.documents.values());
+    const globalDocs = allDocs.filter(d => !d.agentId);
+    const agentDocs = allDocs.filter(d => d.agentId === agentId);
+    const relevant = [...globalDocs, ...agentDocs];
+    if (relevant.length === 0) return '';
+    const docText = relevant.map(d => `--- Document: ${d.title} ---\n${d.content}\n--- End ---`).join('\n\n');
+    return `Living Documents:\n${docText}`;
+  }
+
   // --- Process Management ---
 
   private spawnProcess(agentId: string): Subprocess<'pipe', 'pipe', 'pipe'> | null {
@@ -320,7 +471,7 @@ export class AgentManager {
       ];
 
       // Append to default system prompt (keeps Claude Code's built-in behavior)
-      // Guardrails + per-agent persona + shared context + notes
+      // Guardrails + per-agent persona + shared context + notes + documents + default simulator
       const appendParts: string[] = [DEFAULT_GUARDRAILS];
       if (agent.info.systemPrompt) {
         appendParts.push(`Agent Persona:\n${agent.info.systemPrompt}`);
@@ -331,6 +482,18 @@ export class AgentManager {
       const notesContext = this.getNotesForAgent(agentId);
       if (notesContext) {
         appendParts.push(notesContext);
+      }
+      const docsContext = this.getDocumentsForAgent(agentId);
+      if (docsContext) {
+        appendParts.push(docsContext);
+      }
+      // Inject default simulator if set and agent cwd looks iOS-related
+      if (this.settings.defaultSimulatorUdid) {
+        const cwdLower = agent.info.cwd.toLowerCase();
+        const isIos = cwdLower.includes('ios') || cwdLower.includes('xcode') || cwdLower.includes('swift') || cwdLower.includes('apple');
+        if (isIos || this.settings.defaultSimulatorName) {
+          appendParts.push(`Default iOS Simulator: ${this.settings.defaultSimulatorName || 'Unknown'} (UDID: ${this.settings.defaultSimulatorUdid})`);
+        }
       }
       args.push('--append-system-prompt', appendParts.join('\n\n'));
 
@@ -402,6 +565,18 @@ export class AgentManager {
                 console.log(`Agent ${agentId} session: ${msg.session_id}`);
               }
             } else if (msg.type === 'assistant') {
+              // Extract token usage from assistant message
+              const usage = msg.message?.usage;
+              if (usage) {
+                if (usage.input_tokens) {
+                  agent.contextTokens = usage.input_tokens;
+                  agent.totalInputTokens += usage.input_tokens;
+                }
+                if (usage.output_tokens) {
+                  agent.totalOutputTokens += usage.output_tokens;
+                }
+                this.onTokenUsage?.(agentId, agent.contextTokens, 200000, agent.totalInputTokens, agent.totalOutputTokens, agent.totalCostUsd, agent.numTurns);
+              }
               // Extract content from assistant message
               const content = msg.message?.content;
               if (Array.isArray(content)) {
@@ -446,10 +621,16 @@ export class AgentManager {
                 }
               }
 
-              // Log cost info
+              // Capture cost and turn count from result
               if (msg.total_cost_usd) {
+                agent.totalCostUsd = msg.total_cost_usd;
                 console.log(`Agent ${agentId} cost: $${msg.total_cost_usd.toFixed(4)} (${msg.num_turns} turns)`);
               }
+              if (msg.num_turns) {
+                agent.numTurns = msg.num_turns;
+              }
+              // Emit final usage update
+              this.onTokenUsage?.(agentId, agent.contextTokens, 200000, agent.totalInputTokens, agent.totalOutputTokens, agent.totalCostUsd, agent.numTurns);
 
               // Capture session ID from result too
               if (msg.session_id) {
@@ -513,6 +694,11 @@ export class AgentManager {
       outputBuffer: '',
       watcher: null,
       lastFileChange: [],
+      contextTokens: 0,
+      totalInputTokens: 0,
+      totalOutputTokens: 0,
+      totalCostUsd: 0,
+      numTurns: 0,
     });
 
     this.startFileWatcher(id);
@@ -534,6 +720,32 @@ export class AgentManager {
     this.messages.delete(agentId);
     await this.persistData();
     return true;
+  }
+
+  async updateAgent(agentId: string, updates: { name?: string; cwd?: string; referencePaths?: string[]; systemPrompt?: string }): Promise<AgentInfo | null> {
+    const agent = this.agents.get(agentId);
+    if (!agent) return null;
+
+    // Validate new cwd if provided
+    if (updates.cwd !== undefined) {
+      if (!existsSync(updates.cwd)) {
+        throw new Error(`Working directory does not exist: ${updates.cwd}`);
+      }
+      const cwdChanged = updates.cwd !== agent.info.cwd;
+      agent.info.cwd = updates.cwd;
+      // Restart file watcher if cwd changes
+      if (cwdChanged) {
+        this.stopFileWatcher(agentId);
+        this.startFileWatcher(agentId);
+      }
+    }
+
+    if (updates.name !== undefined) agent.info.name = updates.name;
+    if (updates.referencePaths !== undefined) agent.info.referencePaths = updates.referencePaths;
+    if (updates.systemPrompt !== undefined) agent.info.systemPrompt = updates.systemPrompt;
+
+    await this.persistData();
+    return agent.info;
   }
 
   async clearHistory(agentId: string): Promise<boolean> {
@@ -661,6 +873,39 @@ export class AgentManager {
       agent.process = null;
       agent.info.status = 'error';
       this.onStatusChange?.(agent.info);
+    }
+  }
+
+  // --- Image handling ---
+
+  async sendImage(agentId: string, imageData: string, mimeType: string, prompt?: string): Promise<void> {
+    const agent = this.agents.get(agentId);
+    if (!agent) return;
+
+    // Determine file extension from mime type
+    const ext = mimeType === 'image/png' ? '.png' : mimeType === 'image/jpeg' ? '.jpg' : mimeType === 'image/gif' ? '.gif' : mimeType === 'image/webp' ? '.webp' : '.png';
+
+    // Save image to a temp file in agent's cwd
+    const filename = `screenshot_${Date.now()}${ext}`;
+    const filepath = join(agent.info.cwd, filename);
+
+    try {
+      const buffer = Buffer.from(imageData, 'base64');
+      await Bun.write(filepath, buffer);
+
+      // Add image message to chat history
+      const imgMsg = this.addMessage(agentId, 'user', `[Image uploaded: ${filename}]` + (prompt ? '\n' + prompt : ''), imageData, mimeType);
+      this.onMessage?.(imgMsg);
+
+      // Send a message to the agent referencing the image file
+      const content = prompt
+        ? `I've uploaded a screenshot/image to your working directory: ${filename}\n\n${prompt}`
+        : `I've uploaded a screenshot/image to your working directory: ${filename}\nPlease examine this image file at ./${filename} and describe what you see or act on it as appropriate.`;
+      await this.sendMessage(agentId, content);
+    } catch (e) {
+      console.error(`Failed to save image for agent ${agentId}:`, e);
+      const errMsg = this.addMessage(agentId, 'system', 'Failed to process uploaded image.');
+      this.onMessage?.(errMsg);
     }
   }
 }
