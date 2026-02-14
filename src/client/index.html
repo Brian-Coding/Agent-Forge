@@ -248,10 +248,136 @@
     .emu-device-actions { display: flex; gap: 2px; flex-shrink: 0; }
     .emu-msg { padding: 12px; text-align: center; color: var(--text-muted); font-size: 12px; }
 
+    /* Auto-scroll button (Feature 4) */
+    .auto-scroll-btn { position: sticky; bottom: 8px; align-self: flex-end; z-index: 2; margin: 4px 8px; padding: 4px 10px; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 12px; color: var(--text-secondary); cursor: pointer; font-size: 11px; opacity: 0.85; white-space: nowrap; }
+    .auto-scroll-btn:hover { background: var(--accent); color: white; border-color: var(--accent); opacity: 1; }
+
+    /* Verbose status elapsed (Feature 5) */
+    .status-elapsed { font-size: 10px; color: var(--text-muted); margin-left: 2px; }
+    .status-stuck { color: var(--warning); font-weight: 600; }
+
+    /* Tool filter toggle (Feature 7) */
+    .tool-filter-btn { font-size: 10px; padding: 2px 6px; border-radius: 3px; }
+    .tool-filter-btn.active { background: var(--accent); color: white; }
+    .tool-hidden-count { font-size: 10px; color: var(--text-muted); padding: 2px 14px; font-style: italic; }
+
+    /* Minimized panels (Feature 2) */
+    .panel-minimized { height: 36px; flex-shrink: 0; background: var(--bg-secondary); border-bottom: 1px solid var(--border); display: flex; align-items: center; padding: 0 12px; gap: 8px; cursor: pointer; }
+    .panel-minimized:hover { background: var(--bg-tertiary); }
+    .panel-minimized-name { font-size: 12px; font-weight: 500; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .panel-unread-badge { background: var(--accent); color: white; font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 8px; min-width: 16px; text-align: center; }
+    .panel-minimize-btn { font-size: 14px; padding: 2px 4px; }
+
+    /* Default emulator star (Feature 9) */
+    .emu-default-btn { background: none; border: none; cursor: pointer; font-size: 14px; padding: 0 4px; color: var(--text-muted); }
+    .emu-default-btn:hover { color: var(--warning); }
+    .emu-default-btn.is-default { color: var(--warning); }
+
+    /* Kanban board selector (Feature 6) */
+    .kanban-board-bar { display: flex; align-items: center; gap: 4px; padding: 6px 8px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+    .kanban-board-tab { padding: 2px 8px; font-size: 11px; border-radius: 4px; border: 1px solid var(--border); background: var(--bg-tertiary); color: var(--text-secondary); cursor: pointer; }
+    .kanban-board-tab:hover { border-color: var(--accent); }
+    .kanban-board-tab.active { background: var(--accent); color: white; border-color: var(--accent); }
+    .kanban-board-tab.delete:hover { color: var(--error); }
+
+    /* Documents panel (Feature 1) */
+    .docs-panel { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+    .docs-list { flex: 1; overflow-y: auto; padding: 4px 8px; }
+    .doc-item { padding: 8px 10px; border-radius: 6px; margin-bottom: 4px; background: var(--bg-primary); border: 1px solid var(--border); cursor: pointer; }
+    .doc-item:hover { border-color: var(--accent); }
+    .doc-item.active { border-color: var(--accent); background: rgba(47, 129, 247, 0.08); }
+    .doc-title { font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .doc-meta { font-size: 10px; color: var(--text-muted); margin-top: 2px; }
+    .doc-editor-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 100; }
+    .doc-editor { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 12px; width: 90%; max-width: 900px; height: 80vh; display: flex; flex-direction: column; overflow: hidden; }
+    .doc-editor-header { padding: 12px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; }
+    .doc-editor-header input { flex: 1; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 4px; color: var(--text-primary); font-size: 16px; font-weight: 600; padding: 6px 10px; }
+    .doc-editor-header input:focus { outline: none; border-color: var(--accent); }
+    .doc-editor-body { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+    .doc-editor-body textarea { flex: 1; background: var(--bg-primary); border: none; border-bottom: 1px solid var(--border); color: var(--text-primary); font-family: 'SF Mono', Monaco, Consolas, monospace; font-size: 13px; padding: 12px 16px; resize: none; line-height: 1.6; }
+    .doc-editor-body textarea:focus { outline: none; }
+    .doc-editor-preview { flex: 1; overflow-y: auto; padding: 12px 16px; font-size: 13px; line-height: 1.6; }
+    .doc-editor-preview p { margin: 0 0 8px; }
+    .doc-editor-preview pre { background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 6px; padding: 12px; margin: 8px 0; overflow-x: auto; }
+    .doc-editor-preview code { font-family: 'SF Mono', Monaco, Consolas, monospace; font-size: 12px; }
+    .doc-editor-preview :not(pre) > code { background: var(--bg-tertiary); padding: 2px 5px; border-radius: 3px; }
+    .doc-editor-footer { padding: 8px 16px; border-top: 1px solid var(--border); display: flex; align-items: center; gap: 8px; }
+
+    /* Context bar & token tracker */
+    .context-bar { height: 3px; background: var(--bg-tertiary); flex-shrink: 0; position: relative; overflow: hidden; }
+    .context-bar-fill { height: 100%; transition: width 0.3s ease; }
+    .context-bar-fill.low { background: var(--success); }
+    .context-bar-fill.medium { background: var(--warning); }
+    .context-bar-fill.high { background: var(--error); }
+    .token-info { display: flex; align-items: center; gap: 6px; padding: 0 8px; font-size: 10px; color: var(--text-muted); flex-shrink: 0; height: 18px; background: var(--bg-secondary); border-bottom: 1px solid var(--border); }
+    .token-info span { white-space: nowrap; }
+
+    /* Image upload (Feature 3) */
+    .drop-zone-active { position: absolute; inset: 0; background: rgba(47, 129, 247, 0.15); border: 2px dashed var(--accent); border-radius: 6px; z-index: 10; display: flex; align-items: center; justify-content: center; pointer-events: none; }
+    .drop-zone-active span { background: var(--accent); color: white; padding: 8px 16px; border-radius: 8px; font-size: 14px; font-weight: 600; }
+    .chat-image { max-width: 200px; max-height: 150px; border-radius: 6px; border: 1px solid var(--border); margin: 4px 0; cursor: pointer; }
+    .chat-image:hover { border-color: var(--accent); }
+    .image-upload-btn { background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 4px 6px; font-size: 16px; }
+    .image-upload-btn:hover { color: var(--text-primary); }
+
+    /* Copy message button (Feature 7) */
+    .chat-turn { position: relative; }
+    .copy-msg-btn { position: absolute; top: 6px; right: 6px; background: var(--bg-tertiary); border: 1px solid var(--border); color: var(--text-secondary); padding: 2px 8px; border-radius: 4px; cursor: pointer; font-size: 11px; opacity: 0; transition: opacity 0.15s; z-index: 1; }
+    .chat-turn:hover .copy-msg-btn { opacity: 1; }
+    .copy-msg-btn:hover { background: var(--accent); color: white; border-color: var(--accent); }
+
+    /* Search chat history (Feature 1) */
+    .panel-search-bar { display: flex; align-items: center; gap: 6px; padding: 4px 8px; background: var(--bg-secondary); border-bottom: 1px solid var(--border); flex-shrink: 0; }
+    .panel-search-input { flex: 1; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 4px; color: var(--text-primary); font-size: 12px; padding: 3px 8px; outline: none; font-family: 'SF Mono', Monaco, Consolas, monospace; }
+    .panel-search-input:focus { border-color: var(--accent); }
+    .panel-search-nav { display: flex; align-items: center; gap: 2px; }
+    .panel-search-nav button { background: none; border: none; color: var(--text-secondary); cursor: pointer; padding: 2px 4px; border-radius: 3px; font-size: 12px; }
+    .panel-search-nav button:hover { background: var(--bg-tertiary); color: var(--text-primary); }
+    .panel-search-count { font-size: 10px; color: var(--text-muted); white-space: nowrap; min-width: 40px; text-align: center; }
+    mark.search-highlight { background: rgba(210, 153, 34, 0.4); color: inherit; border-radius: 2px; padding: 0 1px; }
+    mark.search-highlight.active { background: var(--warning); color: var(--bg-primary); }
+
+    /* Retry button (Feature 9) */
+    .retry-btn { background: none; border: 1px solid var(--border); color: var(--text-secondary); cursor: pointer; padding: 2px 8px; border-radius: 4px; font-size: 11px; margin-top: 4px; }
+    .retry-btn:hover { background: var(--bg-tertiary); color: var(--text-primary); border-color: var(--accent); }
+
+    /* Focused panel (Feature 2 - Escape safety) */
+    .terminal-panel.focused { box-shadow: inset 0 0 0 1px var(--accent); }
+
+    /* Maximized panel (Feature 4) */
+    .maximize-btn { font-size: 13px; }
+
+    /* Cost dashboard (Feature 3) */
+    .cost-dashboard { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-secondary); }
+    .cost-value { color: var(--text-primary); font-weight: 500; }
+    .cost-sep { color: var(--text-muted); }
+
+    /* Broadcast toggle (Feature 10) */
+    .broadcast-toggle { display: flex; align-items: center; gap: 6px; background: var(--bg-tertiary); border: 1px solid var(--border); color: var(--text-secondary); padding: 4px 10px; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 500; }
+    .broadcast-toggle:hover { border-color: var(--accent); color: var(--text-primary); }
+    .broadcast-toggle.active { background: rgba(47, 129, 247, 0.15); border-color: var(--accent); color: var(--accent); }
+
+    /* Enhanced broadcast bar (Feature 10) */
+    .broadcast-bar-enhanced { display: flex; align-items: center; gap: 8px; padding: 10px 16px; background: var(--bg-tertiary); border-bottom: 1px solid var(--border); border-left: 3px solid var(--accent); flex-shrink: 0; }
+    .broadcast-bar-enhanced label { font-size: 12px; color: var(--accent); text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700; white-space: nowrap; }
+
+    /* Selective broadcast chips (Feature 8) */
+    .broadcast-chips { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+    .broadcast-chip { padding: 2px 8px; font-size: 11px; border-radius: 12px; border: 1px solid var(--border); cursor: pointer; white-space: nowrap; }
+    .broadcast-chip.selected { background: var(--accent); color: white; border-color: var(--accent); }
+    .broadcast-chip.unselected { background: var(--bg-secondary); color: var(--text-muted); }
+    .broadcast-chip:hover { opacity: 0.85; }
+    .broadcast-chip-count { font-size: 10px; color: var(--text-muted); white-space: nowrap; }
+
+    /* Agent edit button */
+    .agent-edit-btn { background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 2px 4px; border-radius: 3px; font-size: 12px; opacity: 0; }
+    .agent-item:hover .agent-edit-btn { opacity: 1; }
+    .agent-edit-btn:hover { background: var(--bg-tertiary); color: var(--text-primary); }
+
     /* Scrollbars */
-    .panel-content::-webkit-scrollbar, .notes-list::-webkit-scrollbar, .kanban-columns::-webkit-scrollbar, .emu-list::-webkit-scrollbar, .agent-list::-webkit-scrollbar { width: 6px; }
-    .panel-content::-webkit-scrollbar-track, .notes-list::-webkit-scrollbar-track, .kanban-columns::-webkit-scrollbar-track, .emu-list::-webkit-scrollbar-track, .agent-list::-webkit-scrollbar-track { background: transparent; }
-    .panel-content::-webkit-scrollbar-thumb, .notes-list::-webkit-scrollbar-thumb, .kanban-columns::-webkit-scrollbar-thumb, .emu-list::-webkit-scrollbar-thumb, .agent-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+    .panel-content::-webkit-scrollbar, .notes-list::-webkit-scrollbar, .kanban-columns::-webkit-scrollbar, .emu-list::-webkit-scrollbar, .agent-list::-webkit-scrollbar, .docs-list::-webkit-scrollbar { width: 6px; }
+    .panel-content::-webkit-scrollbar-track, .notes-list::-webkit-scrollbar-track, .kanban-columns::-webkit-scrollbar-track, .emu-list::-webkit-scrollbar-track, .agent-list::-webkit-scrollbar-track, .docs-list::-webkit-scrollbar-track { background: transparent; }
+    .panel-content::-webkit-scrollbar-thumb, .notes-list::-webkit-scrollbar-thumb, .kanban-columns::-webkit-scrollbar-thumb, .emu-list::-webkit-scrollbar-thumb, .agent-list::-webkit-scrollbar-thumb, .docs-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
   </style>
 </head>
 <body>
@@ -287,9 +413,36 @@
       kanban: ['M9 3H5a2 2 0 0 0-2 2v4m6-6h10a2 2 0 0 1 2 2v4M9 3v18m0 0h10a2 2 0 0 0 2-2V9M9 21H5a2 2 0 0 1-2-2V9m0 0h18'],
       settings: ['M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z', 'M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z'],
       chevron: 'M6 9l6 6 6-6',
+      documents: ['M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z', 'M14 2v6h6', 'M16 13H8', 'M16 17H8'],
+      image: ['M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4', 'M17 8l-5-5-5 5', 'M12 3v12'],
     };
 
     // ======================== HOOKS ========================
+
+    // Hook: elapsed time since a status started (Feature 5)
+    function useElapsed(status, statusStartTime) {
+      const [elapsed, setElapsed] = useState('');
+      useEffect(() => {
+        if (!statusStartTime || (status !== 'working' && status !== 'thinking')) {
+          setElapsed('');
+          return;
+        }
+        const tick = () => {
+          const diff = Math.floor((Date.now() - statusStartTime) / 1000);
+          if (diff < 60) setElapsed(diff + 's');
+          else {
+            const m = Math.floor(diff / 60);
+            const s = diff % 60;
+            setElapsed(m + 'm ' + (s < 10 ? '0' : '') + s + 's');
+          }
+        };
+        tick();
+        const id = setInterval(tick, 1000);
+        return () => clearInterval(id);
+      }, [status, statusStartTime]);
+      const isStuck = statusStartTime && status === 'working' && (Date.now() - statusStartTime) > 600000;
+      return { elapsed, isStuck };
+    }
 
     function useWebSocket() {
       const [connected, setConnected] = useState(false);
@@ -302,6 +455,11 @@
       const [thinkingOutput, setThinkingOutput] = useState({});
       const [notes, setNotes] = useState([]);
       const [kanbanItems, setKanbanItems] = useState([]);
+      const [kanbanBoards, setKanbanBoards] = useState([]);
+      const [documents, setDocuments] = useState([]);
+      const [settings, setSettings] = useState({});
+      const [statusStartTimes, setStatusStartTimes] = useState({});
+      const [tokenUsage, setTokenUsage] = useState({});
       const wsRef = useRef(null);
       const agentsRef = useRef([]);
       const queueRef = useRef({});
@@ -346,10 +504,15 @@
                 setAgents(prev => [...prev, msg.agent]);
                 break;
               case 'agent_updated':
-                setAgents(prev => prev.map(a => a.id === msg.agent.id ? msg.agent : a));
+                setAgents(prev => {
+                  const old = prev.find(a => a.id === msg.agent.id);
+                  if (old && old.status !== msg.agent.status) {
+                    setStatusStartTimes(st => ({ ...st, [msg.agent.id]: Date.now() }));
+                  }
+                  return prev.map(a => a.id === msg.agent.id ? msg.agent : a);
+                });
                 if (msg.agent.status === 'idle') {
                   drainQueue(msg.agent.id);
-                  // Clear thinking output when agent goes idle
                   setThinkingOutput(prev => { const n = {...prev}; delete n[msg.agent.id]; return n; });
                 }
                 break;
@@ -420,6 +583,37 @@
               case 'kanban_item_deleted':
                 setKanbanItems(prev => prev.filter(i => i.id !== msg.id));
                 break;
+              // Kanban Boards
+              case 'kanban_boards_list':
+                setKanbanBoards(msg.boards);
+                break;
+              case 'kanban_board_created':
+                setKanbanBoards(prev => [...prev, msg.board]);
+                break;
+              case 'kanban_board_deleted':
+                setKanbanBoards(prev => prev.filter(b => b.id !== msg.id));
+                break;
+              // Documents
+              case 'documents_list':
+                setDocuments(msg.documents);
+                break;
+              case 'document_created':
+                setDocuments(prev => [...prev, msg.document]);
+                break;
+              case 'document_updated':
+                setDocuments(prev => prev.map(d => d.id === msg.document.id ? msg.document : d));
+                break;
+              case 'document_deleted':
+                setDocuments(prev => prev.filter(d => d.id !== msg.id));
+                break;
+              // Settings
+              case 'settings':
+                setSettings(msg.settings);
+                break;
+              // Token usage
+              case 'token_usage':
+                setTokenUsage(prev => ({ ...prev, [msg.agentId]: { contextTokens: msg.contextTokens, contextLimit: msg.contextLimit, totalInputTokens: msg.totalInputTokens, totalOutputTokens: msg.totalOutputTokens, totalCostUsd: msg.totalCostUsd, numTurns: msg.numTurns } }));
+                break;
             }
           };
           wsRef.current = ws;
@@ -429,7 +623,7 @@
       }, [drainQueue, sendRaw]);
 
       return {
-        connected, agents, messages, liveOutput, queued, sharedContext, fileChanges, thinkingOutput, notes, kanbanItems,
+        connected, agents, messages, liveOutput, queued, sharedContext, fileChanges, thinkingOutput, notes, kanbanItems, kanbanBoards, documents, settings, statusStartTimes, tokenUsage,
         createAgent: (name, cwd, referencePaths, systemPrompt) => {
           sendRaw({ type: 'create_agent', name, cwd, referencePaths, systemPrompt });
         },
@@ -453,16 +647,50 @@
         updateNote: (id, updates) => sendRaw({ type: 'update_note', id, ...updates }),
         deleteNote: (id) => sendRaw({ type: 'delete_note', id }),
         // Kanban
-        createKanbanItem: (title, description, column) => sendRaw({ type: 'create_kanban_item', title, description, column }),
+        createKanbanItem: (title, description, column, boardId) => sendRaw({ type: 'create_kanban_item', title, description, column, boardId }),
         updateKanbanItem: (id, updates) => sendRaw({ type: 'update_kanban_item', id, ...updates }),
         deleteKanbanItem: (id) => sendRaw({ type: 'delete_kanban_item', id }),
+        // Kanban Boards
+        createKanbanBoard: (name, projectPath) => sendRaw({ type: 'create_kanban_board', name, projectPath }),
+        deleteKanbanBoard: (id) => sendRaw({ type: 'delete_kanban_board', id }),
+        // Documents
+        createDocument: (title, content, agentId) => sendRaw({ type: 'create_document', title, content, agentId }),
+        updateDocument: (id, updates) => sendRaw({ type: 'update_document', id, ...updates }),
+        deleteDocument: (id) => sendRaw({ type: 'delete_document', id }),
+        // Settings
+        updateSettings: (settings) => sendRaw({ type: 'update_settings', settings }),
+        // Image
+        sendImage: (agentId, imageData, mimeType, prompt) => sendRaw({ type: 'send_image', agentId, imageData, mimeType, prompt }),
+        // Update agent
+        updateAgent: (id, updates) => sendRaw({ type: 'update_agent', id, ...updates }),
       };
     }
 
     // ======================== COMPONENTS ========================
 
+    // Tool message filter (Feature 7)
+    function filterToolMessages(text, show) {
+      if (show) return text;
+      return text.replace(/\n?\[Using tool: [^\]]+\]\n?/g, '');
+    }
+    function countToolMessages(text) {
+      const matches = text.match(/\[Using tool: [^\]]+\]/g);
+      return matches ? matches.length : 0;
+    }
+
+    // Highlight search query in HTML string (outside of tags)
+    function highlightInHtml(html, query) {
+      if (!query) return html;
+      const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      // Replace text outside of HTML tags
+      return html.replace(/>([^<]+)</g, (match, text) => {
+        const highlighted = text.replace(new RegExp('(' + escaped + ')', 'gi'), '<mark class="search-highlight">$1</mark>');
+        return '>' + highlighted + '<';
+      });
+    }
+
     // Markdown renderer for assistant messages
-    function MarkdownContent({ content }) {
+    function MarkdownContent({ content, searchQuery }) {
       const ref = useRef(null);
       useEffect(() => {
         if (ref.current) {
@@ -481,10 +709,14 @@
             pre.appendChild(btn);
           });
         }
-      }, [content]);
+      }, [content, searchQuery]);
       const html = useMemo(() => {
-        try { return marked.parse(content); } catch { return content; }
-      }, [content]);
+        try {
+          let parsed = marked.parse(content);
+          if (searchQuery) parsed = highlightInHtml(parsed, searchQuery);
+          return parsed;
+        } catch { return content; }
+      }, [content, searchQuery]);
       return e('div', { ref, className: 'chat-turn-content', dangerouslySetInnerHTML: { __html: html } });
     }
 
@@ -556,8 +788,8 @@
       );
     }
 
-    // New Agent Modal
-    function NewAgentModal({ isOpen, onClose, onCreate }) {
+    // New Agent Modal (also used for editing)
+    function NewAgentModal({ isOpen, onClose, onCreate, editAgent, onUpdate }) {
       const [name, setName] = useState('');
       const [cwd, setCwd] = useState('');
       const [systemPrompt, setSystemPrompt] = useState('');
@@ -565,11 +797,31 @@
       const [showCwdBrowser, setShowCwdBrowser] = useState(false);
       const [showRefBrowser, setShowRefBrowser] = useState(false);
 
+      const isEditing = !!editAgent;
+
+      // Reset form when editAgent or isOpen changes
+      useEffect(() => {
+        if (isOpen && editAgent) {
+          setName(editAgent.name || '');
+          setCwd(editAgent.cwd || '');
+          setSystemPrompt(editAgent.systemPrompt || '');
+          setReferencePaths(editAgent.referencePaths || []);
+        } else if (isOpen && !editAgent) {
+          setName(''); setCwd(''); setSystemPrompt(''); setReferencePaths([]);
+        }
+        setShowCwdBrowser(false);
+        setShowRefBrowser(false);
+      }, [isOpen, editAgent]);
+
       if (!isOpen) return null;
 
-      const handleCreate = () => {
+      const handleSubmit = () => {
         if (name.trim() && cwd.trim()) {
-          onCreate(name.trim(), cwd.trim(), referencePaths, systemPrompt.trim());
+          if (isEditing && onUpdate) {
+            onUpdate(editAgent.id, { name: name.trim(), cwd: cwd.trim(), referencePaths, systemPrompt: systemPrompt.trim() });
+          } else {
+            onCreate(name.trim(), cwd.trim(), referencePaths, systemPrompt.trim());
+          }
           setName(''); setCwd(''); setSystemPrompt(''); setReferencePaths([]);
           setShowCwdBrowser(false); setShowRefBrowser(false); onClose();
         }
@@ -577,7 +829,7 @@
 
       return e('div', { className: 'modal-overlay', onClick: (ev) => ev.target === ev.currentTarget && onClose() },
         e('div', { className: 'modal' },
-          e('h2', { className: 'modal-title' }, 'Create New Agent'),
+          e('h2', { className: 'modal-title' }, isEditing ? 'Edit Agent' : 'Create New Agent'),
           e('div', { className: 'form-group' },
             e('label', { className: 'form-label' }, 'Agent Name'),
             e('input', { className: 'form-input', value: name, onChange: (ev) => setName(ev.target.value), placeholder: 'e.g., Frontend Work', autoFocus: true })
@@ -609,7 +861,7 @@
           ),
           e('div', { className: 'modal-actions' },
             e('button', { type: 'button', className: 'btn btn-secondary', onClick: onClose }, 'Cancel'),
-            e('button', { type: 'button', className: 'btn btn-primary', disabled: !name.trim() || !cwd.trim(), onClick: handleCreate }, 'Create Agent')
+            e('button', { type: 'button', className: 'btn btn-primary', disabled: !name.trim() || !cwd.trim(), onClick: handleSubmit }, isEditing ? 'Save Changes' : 'Create Agent')
           )
         )
       );
@@ -633,51 +885,98 @@
       );
     }
 
+    // Highlight search text in plain text content
+    function highlightText(text, query) {
+      if (!query) return text;
+      const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const parts = text.split(new RegExp('(' + escaped + ')', 'gi'));
+      return parts.map((part, i) =>
+        part.toLowerCase() === query.toLowerCase()
+          ? e('mark', { key: i, className: 'search-highlight' }, part)
+          : part
+      );
+    }
+
     // Chat Turn
-    function ChatTurn({ role, content, isStreaming }) {
+    function ChatTurn({ role, content, isStreaming, imageData, imageMimeType, showToolMessages, searchQuery, showRetry, onRetry }) {
+      const [copied, setCopied] = useState(false);
       const roleLabels = { user: 'You', assistant: 'Claude', system: 'System' };
       const turnClass = isStreaming ? 'chat-turn chat-turn-streaming' : 'chat-turn chat-turn-' + role;
+      const displayContent = (role === 'assistant' || isStreaming) ? filterToolMessages(content, showToolMessages) : content;
+      const hiddenCount = (role === 'assistant' || isStreaming) && !showToolMessages ? countToolMessages(content) : 0;
+
+      const handleCopy = () => {
+        navigator.clipboard.writeText(content);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      };
 
       return e('div', { className: turnClass },
+        e('button', { className: 'copy-msg-btn', onClick: handleCopy }, copied ? 'Copied!' : 'Copy'),
         e('div', { className: 'chat-turn-role' }, roleLabels[role] || role),
+        imageData && e('img', { className: 'chat-image', src: 'data:' + (imageMimeType || 'image/png') + ';base64,' + imageData, alt: 'Uploaded image', onClick: () => window.open('data:' + (imageMimeType || 'image/png') + ';base64,' + imageData) }),
         role === 'assistant' && !isStreaming
-          ? e(MarkdownContent, { content })
-          : e('div', { className: 'chat-turn-content' },
-              content,
-              isStreaming && e('span', { className: 'cursor' })
+          ? e(React.Fragment, null,
+              e(MarkdownContent, { content: displayContent, searchQuery }),
+              hiddenCount > 0 && e('div', { className: 'tool-hidden-count' }, hiddenCount + ' tool call' + (hiddenCount > 1 ? 's' : '') + ' hidden')
             )
+          : e('div', { className: 'chat-turn-content' },
+              searchQuery && !isStreaming ? highlightText(displayContent, searchQuery) : displayContent,
+              isStreaming && e('span', { className: 'cursor' }),
+              isStreaming && hiddenCount > 0 && e('div', { className: 'tool-hidden-count' }, hiddenCount + ' tool call' + (hiddenCount > 1 ? 's' : '') + ' hidden')
+            ),
+        showRetry && onRetry && e('button', { className: 'retry-btn', onClick: onRetry }, '\u21BB Retry')
       );
     }
 
     // Terminal Panel
-    function TerminalPanel({ agent, messages, liveOutput, queuedMessages, fileChanges, thinkingOutput, onSendMessage, onStop, onClearHistory, onClearFileChanges }) {
+    function TerminalPanel({ agent, messages, liveOutput, queuedMessages, fileChanges, thinkingOutput, statusStartTime, tokenUsage, onSendMessage, onSendImage, onStop, onClearHistory, onClearFileChanges, onMinimize, onMaximize, isMaximized, onFocus, isFocused }) {
       const [input, setInput] = useState('');
       const [inputHistory, setInputHistory] = useState([]);
       const [historyIdx, setHistoryIdx] = useState(-1);
       const [notification, setNotification] = useState(null);
+      const [autoScrollEnabled, setAutoScrollEnabled] = useState(true);
+      const [showToolMessages, setShowToolMessages] = useState(false);
+      const [dragging, setDragging] = useState(false);
+      const [pendingImage, setPendingImage] = useState(null);
+      // Search state (Feature 1)
+      const [searchVisible, setSearchVisible] = useState(false);
+      const [searchQuery, setSearchQuery] = useState('');
+      const [searchMatchIndex, setSearchMatchIndex] = useState(0);
       const contentRef = useRef(null);
       const inputRef = useRef(null);
       const anchorRef = useRef(null);
-      const userScrolledUp = useRef(false);
       const prevStatus = useRef(agent?.status);
+      const fileInputRef = useRef(null);
+      const searchInputRef = useRef(null);
 
-      // Smart auto-scroll: use IntersectionObserver on anchor element
-      useEffect(() => {
-        if (!anchorRef.current || !contentRef.current) return;
-        const observer = new IntersectionObserver(
-          ([entry]) => { userScrolledUp.current = !entry.isIntersecting; },
-          { root: contentRef.current, threshold: 0.1 }
-        );
-        observer.observe(anchorRef.current);
-        return () => observer.disconnect();
-      }, [agent]);
+      // Elapsed time for status (Feature 5)
+      const { elapsed, isStuck } = useElapsed(agent?.status, statusStartTime);
 
-      // Auto-scroll when new content arrives (unless user scrolled up)
+      // Auto-scroll: track whether user has scrolled up (Feature 4)
       useEffect(() => {
-        if (!userScrolledUp.current && contentRef.current) {
+        const el = contentRef.current;
+        if (!el) return;
+        let ticking = false;
+        const onScroll = () => {
+          if (ticking) return;
+          ticking = true;
+          requestAnimationFrame(() => {
+            const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 50;
+            setAutoScrollEnabled(atBottom);
+            ticking = false;
+          });
+        };
+        el.addEventListener('scroll', onScroll, { passive: true });
+        return () => el.removeEventListener('scroll', onScroll);
+      }, []);
+
+      // Auto-scroll when new content arrives (only if enabled)
+      useEffect(() => {
+        if (autoScrollEnabled && contentRef.current) {
           contentRef.current.scrollTop = contentRef.current.scrollHeight;
         }
-      }, [messages, liveOutput, queuedMessages, thinkingOutput]);
+      }, [messages, liveOutput, queuedMessages, thinkingOutput, autoScrollEnabled]);
 
       // Notification when agent finishes
       useEffect(() => {
@@ -689,14 +988,39 @@
         prevStatus.current = agent?.status;
       }, [agent?.status]);
 
+      // Focus input on window focus and visibility change (Feature 8)
+      useEffect(() => {
+        const focusInput = () => { if (inputRef.current) inputRef.current.focus(); };
+        window.addEventListener('focus', focusInput);
+        const onVis = () => { if (!document.hidden) focusInput(); };
+        document.addEventListener('visibilitychange', onVis);
+        return () => { window.removeEventListener('focus', focusInput); document.removeEventListener('visibilitychange', onVis); };
+      }, []);
+
       const handleSubmit = () => {
-        if (input.trim() && agent) {
-          onSendMessage(input.trim());
-          setInputHistory(prev => [...prev, input.trim()]);
+        if (!agent) return;
+        const text = input.trim();
+        // If there's a pending image, send it (with or without text)
+        if (pendingImage) {
+          onSendImage(agent.id, pendingImage.data, pendingImage.mimeType, text || undefined);
+          setPendingImage(null);
+          if (text) setInputHistory(prev => [...prev, text]);
           setHistoryIdx(-1);
           setInput('');
-          requestAnimationFrame(() => inputRef.current?.focus());
+        } else if (text) {
+          onSendMessage(text);
+          setInputHistory(prev => [...prev, text]);
+          setHistoryIdx(-1);
+          setInput('');
+        } else {
+          return;
         }
+        // Force auto-scroll on after sending
+        setAutoScrollEnabled(true);
+        requestAnimationFrame(() => {
+          if (contentRef.current) contentRef.current.scrollTop = contentRef.current.scrollHeight;
+          inputRef.current?.focus();
+        });
       };
 
       const handleKeyDown = (ev) => {
@@ -732,6 +1056,65 @@
         }
       }, [input]);
 
+      // Image handling (Feature 3) — stage image, send on Enter
+      const handleImageUpload = useCallback((file) => {
+        if (!file || !file.type.startsWith('image/') || !agent) return;
+        const reader = new FileReader();
+        reader.onload = () => {
+          const base64 = reader.result.split(',')[1];
+          setPendingImage({ data: base64, mimeType: file.type, name: file.name });
+          inputRef.current?.focus();
+        };
+        reader.readAsDataURL(file);
+      }, [agent]);
+
+      const handleDrop = useCallback((ev) => {
+        ev.preventDefault();
+        setDragging(false);
+        const files = ev.dataTransfer?.files;
+        if (files && files.length > 0) handleImageUpload(files[0]);
+      }, [handleImageUpload]);
+
+      const handlePaste = useCallback((ev) => {
+        const items = ev.clipboardData?.items;
+        if (!items) return;
+        for (const item of items) {
+          if (item.type.startsWith('image/')) {
+            ev.preventDefault();
+            handleImageUpload(item.getAsFile());
+            return;
+          }
+        }
+      }, [handleImageUpload]);
+
+      // Search matches (Feature 1)
+      const searchMatches = useMemo(() => {
+        if (!searchQuery || !messages) return [];
+        const matches = [];
+        const q = searchQuery.toLowerCase();
+        (messages || []).forEach((m, i) => {
+          if (m.content && m.content.toLowerCase().includes(q)) {
+            matches.push(i);
+          }
+        });
+        return matches;
+      }, [messages, searchQuery]);
+
+      // Compute last user message index for retry (Feature 9)
+      const lastUserMsgIndex = useMemo(() => {
+        const msgs = messages || [];
+        for (let i = msgs.length - 1; i >= 0; i--) {
+          if (msgs[i].role === 'user') return i;
+        }
+        return -1;
+      }, [messages]);
+
+      // Click in content area focuses input (Feature 8)
+      const handleContentClick = useCallback((ev) => {
+        if (window.getSelection()?.toString()) return; // Don't steal focus during text selection
+        inputRef.current?.focus();
+      }, []);
+
       if (!agent) {
         return e('div', { className: 'terminal-panel' }, e('div', { className: 'panel-content panel-empty' }, 'No agent assigned'));
       }
@@ -742,16 +1125,66 @@
       const files = fileChanges || [];
       const thinking = thinkingOutput || '';
 
-      return e('div', { className: 'terminal-panel' },
+      // Status text for header (Feature 5)
+      const statusText = isWorking && elapsed ? (agent.status === 'thinking' ? 'Thinking' : 'Working') + '... ' + elapsed + (isStuck ? ' (may be stuck)' : '') : '';
+
+      return e('div', {
+        className: 'terminal-panel' + (isFocused ? ' focused' : ''),
+        style: { position: 'relative' },
+        onMouseDown: () => onFocus && onFocus(agent.id),
+        onKeyDown: (ev) => {
+          // Ctrl+F opens search
+          if ((ev.ctrlKey || ev.metaKey) && ev.key === 'f') {
+            ev.preventDefault();
+            ev.stopPropagation();
+            setSearchVisible(true);
+            setTimeout(() => searchInputRef.current?.focus(), 50);
+          }
+        },
+      },
         // Header
-        e('div', { className: 'panel-header' },
+        e('div', { className: 'panel-header', onDoubleClick: () => onMaximize && onMaximize(agent.id) },
           e('div', { className: 'panel-title' },
             e('span', { className: 'status-dot status-' + agent.status }),
-            e('span', { className: 'panel-title-name' }, agent.name)
+            e('span', { className: 'panel-title-name' }, agent.name),
+            statusText && e('span', { className: 'status-elapsed' + (isStuck ? ' status-stuck' : '') }, statusText)
           ),
           e('div', { className: 'panel-actions' },
+            e('button', { className: 'panel-btn', onClick: () => { setSearchVisible(prev => !prev); setTimeout(() => searchInputRef.current?.focus(), 50); }, title: 'Search (Ctrl+F)' }, '\uD83D\uDD0D'),
+            e('button', { className: 'panel-btn tool-filter-btn' + (showToolMessages ? ' active' : ''), onClick: () => setShowToolMessages(prev => !prev), title: showToolMessages ? 'Hide tool calls' : 'Show tool calls' }, 'Tools'),
             isWorking && e('button', { className: 'panel-btn panel-btn-stop', onClick: () => onStop(agent.id), title: 'Stop (Esc)' }, 'Stop'),
+            onMaximize && e('button', { className: 'panel-btn maximize-btn', onClick: () => onMaximize(agent.id), title: isMaximized ? 'Restore' : 'Maximize' }, isMaximized ? '\u25E7' : '\u25FB'),
+            !isMaximized && onMinimize && e('button', { className: 'panel-btn panel-minimize-btn', onClick: () => onMinimize(agent.id), title: 'Minimize' }, '_'),
             e('button', { className: 'panel-btn', onClick: () => onClearHistory(agent.id), title: 'Clear chat' }, 'Clear'),
+          )
+        ),
+        // Context bar + token info
+        tokenUsage && tokenUsage.contextLimit > 0 && e(React.Fragment, null,
+          e('div', { className: 'context-bar', title: 'Context: ' + Math.round((tokenUsage.contextTokens / tokenUsage.contextLimit) * 100) + '% used' },
+            e('div', { className: 'context-bar-fill' + (tokenUsage.contextTokens / tokenUsage.contextLimit > 0.9 ? ' high' : tokenUsage.contextTokens / tokenUsage.contextLimit > 0.7 ? ' medium' : ' low'), style: { width: Math.min(100, (tokenUsage.contextTokens / tokenUsage.contextLimit) * 100) + '%' } })
+          ),
+          e('div', { className: 'token-info' },
+            e('span', null, Math.round(((tokenUsage.contextLimit - tokenUsage.contextTokens) / 1000)) + 'k left'),
+            e('span', null, '\u00B7'),
+            e('span', null, Math.round(tokenUsage.contextTokens / 1000) + 'k / ' + Math.round(tokenUsage.contextLimit / 1000) + 'k ctx'),
+            tokenUsage.totalCostUsd > 0 && e('span', null, '\u00B7'),
+            tokenUsage.totalCostUsd > 0 && e('span', null, '$' + tokenUsage.totalCostUsd.toFixed(2)),
+            tokenUsage.numTurns > 0 && e('span', null, '\u00B7'),
+            tokenUsage.numTurns > 0 && e('span', null, tokenUsage.numTurns + ' turns')
+          )
+        ),
+        // Search bar (Feature 1)
+        searchVisible && e('div', { className: 'panel-search-bar', onKeyDown: (ev) => {
+          if (ev.key === 'Escape') { ev.stopPropagation(); setSearchVisible(false); setSearchQuery(''); }
+          if (ev.key === 'Enter' && !ev.shiftKey) { setSearchMatchIndex(prev => searchMatches.length > 0 ? (prev + 1) % searchMatches.length : 0); }
+          if (ev.key === 'Enter' && ev.shiftKey) { setSearchMatchIndex(prev => searchMatches.length > 0 ? (prev - 1 + searchMatches.length) % searchMatches.length : 0); }
+        } },
+          e('input', { ref: searchInputRef, className: 'panel-search-input', value: searchQuery, onChange: (ev) => { setSearchQuery(ev.target.value); setSearchMatchIndex(0); }, placeholder: 'Search messages...', autoFocus: true }),
+          e('div', { className: 'panel-search-nav' },
+            e('span', { className: 'panel-search-count' }, searchQuery ? (searchMatches.length > 0 ? (searchMatchIndex + 1) + ' of ' + searchMatches.length : '0 results') : ''),
+            e('button', { onClick: () => setSearchMatchIndex(prev => searchMatches.length > 0 ? (prev - 1 + searchMatches.length) % searchMatches.length : 0), title: 'Previous (Shift+Enter)' }, '\u25B2'),
+            e('button', { onClick: () => setSearchMatchIndex(prev => searchMatches.length > 0 ? (prev + 1) % searchMatches.length : 0), title: 'Next (Enter)' }, '\u25BC'),
+            e('button', { onClick: () => { setSearchVisible(false); setSearchQuery(''); }, title: 'Close' }, '\u00D7')
           )
         ),
         // Notifications
@@ -759,8 +1192,17 @@
         files.length > 0 && e('div', { className: 'panel-notification panel-notification-files', onClick: () => onClearFileChanges(agent.id) },
           files.length + ' file' + (files.length > 1 ? 's' : '') + ' changed \u2014 click to dismiss'
         ),
+        // Drop zone overlay (Feature 3)
+        dragging && e('div', { className: 'drop-zone-active' }, e('span', null, 'Drop image here')),
         // Chat content
-        e('div', { className: 'panel-content', ref: contentRef },
+        e('div', {
+          className: 'panel-content', ref: contentRef, onClick: handleContentClick,
+          onDragOver: (ev) => { ev.preventDefault(); setDragging(true); },
+          onDragEnter: (ev) => { ev.preventDefault(); setDragging(true); },
+          onDragLeave: (ev) => { ev.preventDefault(); if (!ev.currentTarget.contains(ev.relatedTarget)) setDragging(false); },
+          onDrop: handleDrop,
+          style: { display: 'flex', flexDirection: 'column' },
+        },
           msgs.length === 0 && !liveOutput && queued.length === 0 && !thinking
             ? e('div', { className: 'panel-empty' },
                 e('div', { style: { textAlign: 'center' } },
@@ -769,31 +1211,57 @@
                 )
               )
             : e(React.Fragment, null,
-                msgs.map((m, i) => e(ChatTurn, { key: m.id || i, role: m.role, content: m.content })),
-                // Thinking block (shown during active thinking or with accumulated content)
+                msgs.map((m, i) => e(ChatTurn, {
+                  key: m.id || i,
+                  role: m.role,
+                  content: m.content,
+                  imageData: m.imageData,
+                  imageMimeType: m.imageMimeType,
+                  showToolMessages,
+                  searchQuery: searchVisible ? searchQuery : '',
+                  showRetry: i === lastUserMsgIndex && m.role === 'user' && !isWorking,
+                  onRetry: i === lastUserMsgIndex ? () => onSendMessage(m.content) : undefined,
+                })),
                 thinking && e(ThinkingBlock, { key: 'thinking', content: thinking, isActive: agent.status === 'thinking' }),
-                liveOutput && e(ChatTurn, { key: 'live', role: 'assistant', content: liveOutput, isStreaming: isWorking }),
+                liveOutput && e(ChatTurn, { key: 'live', role: 'assistant', content: liveOutput, isStreaming: isWorking, showToolMessages }),
                 queued.map((q, i) => e('div', { key: 'q' + i, className: 'chat-turn chat-turn-queued' },
                   e('div', { className: 'chat-turn-role' }, 'Queued'),
                   e('div', { className: 'chat-turn-content' }, q)
                 )),
                 e('div', { ref: anchorRef, className: 'scroll-anchor' })
-              )
+              ),
+          // Auto-scroll button (Feature 4)
+          !autoScrollEnabled && e('button', {
+            className: 'auto-scroll-btn',
+            onClick: () => { setAutoScrollEnabled(true); if (contentRef.current) contentRef.current.scrollTop = contentRef.current.scrollHeight; }
+          }, '\u2193 Auto-scroll')
         ),
         // Input
         e('div', { className: 'panel-input-container' },
+          pendingImage && e('div', { style: { display: 'flex', alignItems: 'center', gap: 8, padding: '4px 12px', fontSize: 11, color: 'var(--text-secondary)' } },
+            e('img', { src: 'data:' + pendingImage.mimeType + ';base64,' + pendingImage.data, style: { width: 32, height: 32, borderRadius: 4, objectFit: 'cover', border: '1px solid var(--border)' } }),
+            e('span', null, pendingImage.name || 'Image ready'),
+            e('button', { style: { background: 'none', border: 'none', color: 'var(--error)', cursor: 'pointer', fontSize: 14 }, onClick: () => setPendingImage(null), title: 'Remove image' }, '\u00D7'),
+            e('span', { style: { color: 'var(--text-muted)', marginLeft: 'auto' } }, 'Enter to send')
+          ),
           e('div', { className: 'panel-input-wrapper' },
+            e('button', { className: 'image-upload-btn', onClick: () => fileInputRef.current?.click(), title: 'Upload image' }, '\uD83D\uDCCE'),
             e('textarea', {
               ref: inputRef,
               className: 'panel-textarea',
               value: input,
               onChange: (ev) => { setInput(ev.target.value); setHistoryIdx(-1); },
               onKeyDown: handleKeyDown,
-              placeholder: isWorking
-                ? (queued.length > 0 ? queued.length + ' queued \u2014 type more...' : 'Type to queue...')
-                : 'Message... (Enter to send, Shift+Enter for newline)',
+              onPaste: handlePaste,
+              placeholder: pendingImage
+                ? 'Add context for the image... (Enter to send)'
+                : isWorking
+                  ? (queued.length > 0 ? queued.length + ' queued \u2014 type more...' : 'Type to queue...')
+                  : 'Message... (Enter to send, Shift+Enter for newline)',
               rows: 1,
-            })
+              autoFocus: true,
+            }),
+            e('input', { ref: fileInputRef, type: 'file', accept: 'image/*', style: { display: 'none' }, onChange: (ev) => { if (ev.target.files[0]) handleImageUpload(ev.target.files[0]); ev.target.value = ''; } })
           )
         )
       );
@@ -801,8 +1269,19 @@
 
     // ======================== SIDEBAR PANELS ========================
 
-    // Agents Sidebar
-    function AgentsSidebar({ agents, selectedAgents, totalPanels, onToggle, onRemove, onNewAgent }) {
+    // Agents Sidebar - with verbose status (Feature 5)
+    function AgentStatusText({ agent, statusStartTimes }) {
+      const { elapsed, isStuck } = useElapsed(agent.status, statusStartTimes[agent.id]);
+      if (agent.status === 'thinking') return e('span', { className: isStuck ? 'status-stuck' : '' }, 'Thinking...' + (elapsed ? ' ' + elapsed : ''));
+      if (agent.status === 'working') return e('span', { className: isStuck ? 'status-stuck' : '' }, 'Working...' + (elapsed ? ' ' + elapsed : '') + (isStuck ? ' (may be stuck)' : ''));
+      if (agent.status === 'idle' && statusStartTimes[agent.id]) {
+        const ago = Math.floor((Date.now() - statusStartTimes[agent.id]) / 1000);
+        if (ago < 300) return e('span', null, 'Idle ' + (ago < 60 ? ago + 's' : Math.floor(ago/60) + 'm') + ' ago');
+      }
+      return e('span', null, agent.cwd.split('/').pop());
+    }
+
+    function AgentsSidebar({ agents, selectedAgents, totalPanels, onToggle, onRemove, onNewAgent, onEdit, statusStartTimes }) {
       return e(React.Fragment, null,
         e('div', { className: 'sidebar-header' },
           e('span', null, 'Agents'),
@@ -823,11 +1302,14 @@
                   e('div', { className: 'agent-info' },
                     e('div', { className: 'agent-name' }, agent.name),
                     e('div', { className: 'agent-status' },
-                      agent.status === 'thinking' ? 'Thinking...'
-                        : agent.status === 'working' ? 'Working...'
-                        : agent.cwd.split('/').pop()
+                      e(AgentStatusText, { agent, statusStartTimes })
                     )
                   ),
+                  onEdit && e('button', {
+                    className: 'agent-edit-btn',
+                    onClick: (ev) => { ev.stopPropagation(); onEdit(agent); },
+                    title: 'Edit agent'
+                  }, '\u270E'),
                   e('button', {
                     className: 'agent-delete-btn',
                     onClick: (ev) => { ev.stopPropagation(); if (confirm('Delete agent "' + agent.name + '"?')) onRemove(agent.id); },
@@ -935,9 +1417,12 @@
       );
     }
 
-    // Kanban Panel
-    function KanbanPanel({ items, onCreateItem, onUpdateItem, onDeleteItem }) {
+    // Kanban Panel — with per-project boards (Feature 6)
+    function KanbanPanel({ items, boards, onCreateItem, onUpdateItem, onDeleteItem, onCreateBoard, onDeleteBoard }) {
       const [newTitle, setNewTitle] = useState('');
+      const [selectedBoard, setSelectedBoard] = useState(null); // null = 'All'
+      const [newBoardName, setNewBoardName] = useState('');
+      const [showNewBoard, setShowNewBoard] = useState(false);
       const COLUMNS = [
         { key: 'backlog', label: 'Backlog' },
         { key: 'in_progress', label: 'In Progress' },
@@ -946,15 +1431,38 @@
       const columnOrder = { backlog: 'in_progress', in_progress: 'done' };
       const columnBack = { in_progress: 'backlog', done: 'in_progress' };
 
+      const filteredItems = selectedBoard ? items.filter(i => i.boardId === selectedBoard) : items;
+
       const handleAdd = () => {
         if (newTitle.trim()) {
-          onCreateItem(newTitle.trim(), '', 'backlog');
+          onCreateItem(newTitle.trim(), '', 'backlog', selectedBoard || undefined);
           setNewTitle('');
+        }
+      };
+
+      const handleNewBoard = () => {
+        if (newBoardName.trim()) {
+          onCreateBoard(newBoardName.trim());
+          setNewBoardName('');
+          setShowNewBoard(false);
         }
       };
 
       return e('div', { className: 'kanban-panel' },
         e('div', { className: 'sidebar-header' }, e('span', null, 'Kanban')),
+        // Board selector bar (Feature 6)
+        e('div', { className: 'kanban-board-bar' },
+          e('button', { className: 'kanban-board-tab' + (!selectedBoard ? ' active' : ''), onClick: () => setSelectedBoard(null) }, 'All'),
+          boards.map(board =>
+            e('button', { key: board.id, className: 'kanban-board-tab' + (selectedBoard === board.id ? ' active' : ''), onClick: () => setSelectedBoard(board.id), onContextMenu: (ev) => { ev.preventDefault(); if (confirm('Delete board "' + board.name + '"? Items will become unassigned.')) onDeleteBoard(board.id); } }, board.name)
+          ),
+          showNewBoard
+            ? e(React.Fragment, null,
+                e('input', { value: newBoardName, onChange: (ev) => setNewBoardName(ev.target.value), onKeyDown: (ev) => { if (ev.key === 'Enter') handleNewBoard(); if (ev.key === 'Escape') setShowNewBoard(false); }, placeholder: 'Board name...', autoFocus: true, style: { fontSize: 11, padding: '2px 6px', width: 80, background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-primary)' } }),
+                e('button', { className: 'kanban-board-tab', onClick: handleNewBoard }, '\u2713')
+              )
+            : e('button', { className: 'kanban-board-tab', onClick: () => setShowNewBoard(true) }, '+')
+        ),
         e('div', { className: 'kanban-add' },
           e('input', {
             value: newTitle,
@@ -966,7 +1474,7 @@
         ),
         e('div', { className: 'kanban-columns' },
           COLUMNS.map(col => {
-            const colItems = items.filter(i => i.column === col.key).sort((a, b) => a.order - b.order);
+            const colItems = filteredItems.filter(i => i.column === col.key).sort((a, b) => a.order - b.order);
             return e('div', { key: col.key, className: 'kanban-column' },
               e('div', { className: 'kanban-col-header' },
                 e('div', { className: 'kanban-col-title' },
@@ -992,8 +1500,8 @@
       );
     }
 
-    // Emulators Panel
-    function EmulatorsPanel() {
+    // Emulators Panel — with default simulator setting (Feature 9)
+    function EmulatorsPanel({ settings, onUpdateSettings }) {
       const [devices, setDevices] = useState({});
       const [loading, setLoading] = useState(false);
       const [error, setError] = useState(null);
@@ -1071,6 +1579,7 @@
               e('div', { className: 'emu-runtime-header' }, runtime.replace('com.apple.CoreSimulator.SimRuntime.', '').replace(/-/g, ' ')),
               devs.map(dev =>
                 e('div', { key: dev.udid, className: 'emu-device' },
+                  e('button', { className: 'emu-default-btn' + (settings?.defaultSimulatorUdid === dev.udid ? ' is-default' : ''), onClick: () => onUpdateSettings({ defaultSimulatorUdid: dev.udid, defaultSimulatorName: dev.name }), title: settings?.defaultSimulatorUdid === dev.udid ? 'Current default' : 'Set as default' }, settings?.defaultSimulatorUdid === dev.udid ? '\u2605' : '\u2606'),
                   e('span', { className: 'emu-device-name' }, dev.name),
                   e('span', { className: 'emu-device-state ' + (dev.state === 'Booted' ? 'emu-state-booted' : 'emu-state-shutdown') }, dev.state),
                   e('div', { className: 'emu-device-actions' },
@@ -1087,11 +1596,156 @@
       );
     }
 
+    // Documents Panel (Feature 1)
+    function DocumentsPanel({ documents, agents, onCreateDocument, onUpdateDocument, onDeleteDocument }) {
+      const [activeDocId, setActiveDocId] = useState(null);
+      const [creating, setCreating] = useState(false);
+      const [editTitle, setEditTitle] = useState('');
+      const [editContent, setEditContent] = useState('');
+      const [editAgentId, setEditAgentId] = useState('');
+      const [showEditor, setShowEditor] = useState(false);
+      const saveTimerRef = useRef(null);
+
+      const activeDoc = documents.find(d => d.id === activeDocId);
+
+      useEffect(() => {
+        if (activeDoc) {
+          setEditTitle(activeDoc.title);
+          setEditContent(activeDoc.content);
+          setEditAgentId(activeDoc.agentId || '');
+        }
+      }, [activeDocId]);
+
+      const handleCreate = () => {
+        setCreating(true);
+        setActiveDocId(null);
+        setEditTitle('');
+        setEditContent('');
+        setEditAgentId('');
+        setShowEditor(true);
+      };
+
+      const handleSaveNew = () => {
+        if (editTitle.trim()) {
+          onCreateDocument(editTitle.trim(), editContent, editAgentId || undefined);
+          setCreating(false);
+          setShowEditor(false);
+        }
+      };
+
+      // Auto-save on content change (debounced 500ms)
+      const handleContentChange = (val) => {
+        setEditContent(val);
+        if (!creating && activeDoc) {
+          if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+          saveTimerRef.current = setTimeout(() => {
+            onUpdateDocument(activeDoc.id, { content: val, lastEditedBy: 'user' });
+          }, 500);
+        }
+      };
+
+      const handleTitleBlur = () => {
+        if (!creating && activeDoc && editTitle.trim()) {
+          onUpdateDocument(activeDoc.id, { title: editTitle.trim(), lastEditedBy: 'user' });
+        }
+      };
+
+      const handleAgentChange = (val) => {
+        setEditAgentId(val);
+        if (!creating && activeDoc) {
+          onUpdateDocument(activeDoc.id, { agentId: val || null, lastEditedBy: 'user' });
+        }
+      };
+
+      const handleDelete = (id) => {
+        if (confirm('Delete this document?')) {
+          onDeleteDocument(id);
+          if (activeDocId === id) { setActiveDocId(null); setShowEditor(false); }
+        }
+      };
+
+      const openDoc = (id) => {
+        setActiveDocId(id);
+        setCreating(false);
+        setShowEditor(true);
+      };
+
+      const previewHtml = useMemo(() => {
+        try { return marked.parse(editContent || ''); } catch { return editContent; }
+      }, [editContent]);
+
+      // List view in sidebar
+      const listView = e('div', { className: 'docs-panel' },
+        e('div', { className: 'sidebar-header' },
+          e('span', null, 'Documents'),
+          e('div', { className: 'sidebar-header-actions' },
+            e('button', { className: 'sidebar-btn', onClick: handleCreate, title: 'New document' }, '+')
+          )
+        ),
+        e('div', { className: 'docs-list' },
+          documents.length === 0
+            ? e('div', { style: { padding: 12, color: 'var(--text-muted)', fontSize: 12, textAlign: 'center' } }, 'No documents yet. Documents tagged to an agent are injected into its prompt.')
+            : documents.map(doc =>
+                e('div', { key: doc.id, className: 'doc-item' + (activeDocId === doc.id ? ' active' : ''), onClick: () => openDoc(doc.id) },
+                  e('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
+                    e('div', { className: 'doc-title' }, doc.title),
+                    e('button', { className: 'agent-delete-btn', style: { opacity: 1, fontSize: 11 }, onClick: (ev) => { ev.stopPropagation(); handleDelete(doc.id); } }, '\u00D7')
+                  ),
+                  e('div', { className: 'doc-meta' },
+                    'by ' + doc.lastEditedBy + ' \u2014 ' + new Date(doc.updatedAt).toLocaleDateString(),
+                    doc.agentId && ' \u2014 Agent: ' + (agents.find(a => a.id === doc.agentId)?.name || 'Unknown')
+                  )
+                )
+              )
+        )
+      );
+
+      // Editor modal overlay
+      const editorModal = showEditor && e('div', { className: 'doc-editor-modal', onClick: (ev) => { if (ev.target === ev.currentTarget) { setShowEditor(false); setCreating(false); } } },
+        e('div', { className: 'doc-editor' },
+          e('div', { className: 'doc-editor-header' },
+            e('input', { value: editTitle, onChange: (ev) => setEditTitle(ev.target.value), onBlur: handleTitleBlur, placeholder: 'Document title...', autoFocus: creating }),
+            e('select', { value: editAgentId, onChange: (ev) => handleAgentChange(ev.target.value), style: { background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-primary)', fontSize: 12, padding: '4px 8px' } },
+              e('option', { value: '' }, 'No agent (global)'),
+              agents.map(a => e('option', { key: a.id, value: a.id }, a.name))
+            ),
+            e('button', { className: 'btn btn-secondary btn-sm', onClick: () => { setShowEditor(false); setCreating(false); } }, 'Close')
+          ),
+          e('div', { className: 'doc-editor-body' },
+            e('textarea', { value: editContent, onChange: (ev) => handleContentChange(ev.target.value), placeholder: 'Write markdown content...' }),
+            e('div', { className: 'doc-editor-preview', dangerouslySetInnerHTML: { __html: previewHtml } })
+          ),
+          e('div', { className: 'doc-editor-footer' },
+            creating
+              ? e(React.Fragment, null,
+                  e('button', { className: 'btn btn-secondary btn-sm', onClick: () => { setShowEditor(false); setCreating(false); } }, 'Cancel'),
+                  e('div', { style: { flex: 1 } }),
+                  e('button', { className: 'btn btn-primary btn-sm', onClick: handleSaveNew, disabled: !editTitle.trim() }, 'Create')
+                )
+              : e(React.Fragment, null,
+                  e('span', { style: { fontSize: 11, color: 'var(--text-muted)' } }, 'Auto-saved'),
+                  e('div', { style: { flex: 1 } }),
+                  activeDoc && e('span', { style: { fontSize: 11, color: 'var(--text-muted)' } }, 'Last edited by ' + activeDoc.lastEditedBy)
+                )
+          )
+        )
+      );
+
+      return e(React.Fragment, null, listView, editorModal);
+    }
+
     // ======================== MAIN APP ========================
+
+    // Token formatting helper
+    function formatTokens(n) {
+      if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+      if (n >= 1000) return Math.round(n / 1000) + 'k';
+      return String(n);
+    }
 
     function App() {
       const ws = useWebSocket();
-      const { connected, agents, messages, liveOutput, queued, sharedContext, fileChanges, thinkingOutput, notes, kanbanItems } = ws;
+      const { connected, agents, messages, liveOutput, queued, sharedContext, fileChanges, thinkingOutput, notes, kanbanItems, kanbanBoards, documents, settings, statusStartTimes, tokenUsage } = ws;
       const [columns, setColumns] = useState(2);
       const [rows, setRows] = useState(2);
       const [showModal, setShowModal] = useState(false);
@@ -1100,9 +1754,74 @@
       const [broadcastInput, setBroadcastInput] = useState('');
       const [selectedAgents, setSelectedAgents] = useState([]);
       const [sidebarTab, setSidebarTab] = useState('agents');
+      // Feature 2: Collapsible panels
+      const [minimizedAgents, setMinimizedAgents] = useState(new Set());
+      const [unreadCounts, setUnreadCounts] = useState({});
+      // Feature 2: Escape focused agent
+      const [focusedAgentId, setFocusedAgentId] = useState(null);
+      // Feature 4: Maximize panel
+      const [maximizedAgent, setMaximizedAgent] = useState(null);
+      // Feature 6: Edit agent
+      const [editingAgent, setEditingAgent] = useState(null);
+      // Feature 8: Selective broadcast
+      const [broadcastTargets, setBroadcastTargets] = useState(new Set());
+      // Feature 5: Persistent layout guard
+      const settingsLoadedRef = useRef(false);
 
       useEffect(() => {
         setSelectedAgents(prev => prev.filter(id => agents.some(a => a.id === id)));
+      }, [agents]);
+
+      // Track unread messages for minimized agents (Feature 2)
+      const prevMessagesRef = useRef({});
+      useEffect(() => {
+        for (const [agentId, msgs] of Object.entries(messages)) {
+          const prevLen = prevMessagesRef.current[agentId] || 0;
+          const newLen = (msgs || []).length;
+          if (newLen > prevLen && minimizedAgents.has(agentId)) {
+            setUnreadCounts(prev => ({ ...prev, [agentId]: (prev[agentId] || 0) + (newLen - prevLen) }));
+          }
+          prevMessagesRef.current[agentId] = newLen;
+        }
+      }, [messages, minimizedAgents]);
+
+      // Feature 5: Load persisted layout from settings on first settings load
+      useEffect(() => {
+        if (settingsLoadedRef.current) return;
+        if (settings && Object.keys(settings).length > 0) {
+          settingsLoadedRef.current = true;
+          if (settings.gridColumns) setColumns(settings.gridColumns);
+          if (settings.gridRows) setRows(settings.gridRows);
+          if (settings.selectedAgentIds) {
+            const validIds = settings.selectedAgentIds.filter(id => agents.some(a => a.id === id));
+            if (validIds.length > 0) setSelectedAgents(validIds);
+          }
+        }
+      }, [settings, agents]);
+
+      // Feature 5: Persist layout changes (debounced 500ms)
+      const layoutTimerRef = useRef(null);
+      useEffect(() => {
+        if (!settingsLoadedRef.current) return;
+        if (layoutTimerRef.current) clearTimeout(layoutTimerRef.current);
+        layoutTimerRef.current = setTimeout(() => {
+          ws.updateSettings({ gridColumns: columns, gridRows: rows, selectedAgentIds: selectedAgents });
+        }, 500);
+        return () => { if (layoutTimerRef.current) clearTimeout(layoutTimerRef.current); };
+      }, [columns, rows, selectedAgents]);
+
+      // Feature 8: Auto-sync broadcast targets with agents list
+      useEffect(() => {
+        setBroadcastTargets(prev => {
+          const next = new Set(prev);
+          // Add new agents
+          agents.forEach(a => { if (!next.has(a.id)) next.add(a.id); });
+          // Remove deleted agents
+          for (const id of next) {
+            if (!agents.some(a => a.id === id)) next.delete(id);
+          }
+          return next;
+        });
       }, [agents]);
 
       // Global keyboard shortcuts
@@ -1110,19 +1829,37 @@
         const handler = (ev) => {
           if ((ev.ctrlKey || ev.metaKey) && ev.key === 'n') {
             ev.preventDefault();
+            setEditingAgent(null);
             setShowModal(true);
           }
           if (ev.key === 'Escape') {
-            agents.forEach(a => { if (a.status === 'working' || a.status === 'thinking') ws.stopAgent(a.id); });
+            // Priority chain: 1) un-maximize, 2) stop focused agent, 3) do nothing
+            if (maximizedAgent) {
+              setMaximizedAgent(null);
+            } else if (focusedAgentId) {
+              const focused = agents.find(a => a.id === focusedAgentId);
+              if (focused && (focused.status === 'working' || focused.status === 'thinking')) {
+                ws.stopAgent(focusedAgentId);
+              }
+            }
           }
           if ((ev.ctrlKey || ev.metaKey) && ev.key === 'b') {
             ev.preventDefault();
             setShowBroadcast(prev => !prev);
           }
+          // Ctrl+M / Cmd+M toggles maximize on focused agent
+          if ((ev.ctrlKey || ev.metaKey) && ev.key === 'm') {
+            ev.preventDefault();
+            if (maximizedAgent) {
+              setMaximizedAgent(null);
+            } else if (focusedAgentId) {
+              setMaximizedAgent(focusedAgentId);
+            }
+          }
         };
         window.addEventListener('keydown', handler);
         return () => window.removeEventListener('keydown', handler);
-      }, [agents, ws]);
+      }, [agents, ws, focusedAgentId, maximizedAgent]);
 
       const totalPanels = columns * rows;
       const displayAgents = [...selectedAgents];
@@ -1132,14 +1869,43 @@
         }
       });
 
-      const gridStyle = {
-        gridTemplateColumns: 'repeat(' + columns + ', 1fr)',
-        gridTemplateRows: 'repeat(' + rows + ', 1fr)'
+      // Split into minimized and non-minimized
+      const minimizedDisplayAgents = displayAgents.filter(id => minimizedAgents.has(id));
+
+      const handleMinimize = (agentId) => {
+        setMinimizedAgents(prev => { const next = new Set(prev); next.add(agentId); return next; });
+      };
+      const handleRestore = (agentId) => {
+        setMinimizedAgents(prev => { const next = new Set(prev); next.delete(agentId); return next; });
+        setUnreadCounts(prev => { const n = { ...prev }; delete n[agentId]; return n; });
+      };
+      // Feature 4: Toggle maximize
+      const handleToggleMaximize = (agentId) => {
+        setMaximizedAgent(prev => prev === agentId ? null : agentId);
       };
 
+      // Grid uses user-chosen columns/rows — override when maximized
+      const gridStyle = maximizedAgent
+        ? { gridTemplateColumns: '1fr', gridTemplateRows: '1fr' }
+        : { gridTemplateColumns: 'repeat(' + columns + ', 1fr)', gridTemplateRows: 'repeat(' + rows + ', 1fr)' };
+
+      // Feature 3: Cost dashboard — aggregate all token usage
+      const costDashboard = useMemo(() => {
+        let totalCost = 0, totalTokens = 0, totalTurns = 0;
+        for (const usage of Object.values(tokenUsage)) {
+          if (usage) {
+            totalCost += usage.totalCostUsd || 0;
+            totalTokens += (usage.totalInputTokens || 0) + (usage.totalOutputTokens || 0);
+            totalTurns += usage.numTurns || 0;
+          }
+        }
+        return { totalCost, totalTokens, totalTurns };
+      }, [tokenUsage]);
+
       const handleBroadcast = () => {
-        if (broadcastInput.trim() && agents.length > 0) {
-          ws.broadcastMessage(agents.map(a => a.id), broadcastInput.trim());
+        const targets = Array.from(broadcastTargets);
+        if (broadcastInput.trim() && targets.length > 0) {
+          ws.broadcastMessage(targets, broadcastInput.trim());
           setBroadcastInput('');
         }
       };
@@ -1152,10 +1918,11 @@
         );
       };
 
-      // Activity bar tabs
+      // Activity bar tabs — added Documents between Notes and Emulators
       const tabs = [
         { id: 'agents', icon: ICONS.agents, label: 'Agents' },
         { id: 'notes', icon: ICONS.notes, label: 'Notes' },
+        { id: 'documents', icon: ICONS.documents, label: 'Documents' },
         { id: 'emulators', icon: ICONS.emulators, label: 'Emulators' },
         { id: 'kanban', icon: ICONS.kanban, label: 'Kanban' },
       ];
@@ -1187,7 +1954,9 @@
             totalPanels,
             onToggle: toggleAgent,
             onRemove: ws.removeAgent,
-            onNewAgent: () => setShowModal(true),
+            onNewAgent: () => { setEditingAgent(null); setShowModal(true); },
+            onEdit: (agent) => { setEditingAgent(agent); setShowModal(true); },
+            statusStartTimes,
           }),
           sidebarTab === 'notes' && e(NotesPanel, {
             notes,
@@ -1196,12 +1965,22 @@
             onUpdateNote: ws.updateNote,
             onDeleteNote: ws.deleteNote,
           }),
-          sidebarTab === 'emulators' && e(EmulatorsPanel),
+          sidebarTab === 'documents' && e(DocumentsPanel, {
+            documents,
+            agents,
+            onCreateDocument: ws.createDocument,
+            onUpdateDocument: ws.updateDocument,
+            onDeleteDocument: ws.deleteDocument,
+          }),
+          sidebarTab === 'emulators' && e(EmulatorsPanel, { settings, onUpdateSettings: ws.updateSettings }),
           sidebarTab === 'kanban' && e(KanbanPanel, {
             items: kanbanItems,
+            boards: kanbanBoards,
             onCreateItem: ws.createKanbanItem,
             onUpdateItem: ws.updateKanbanItem,
             onDeleteItem: ws.deleteKanbanItem,
+            onCreateBoard: ws.createKanbanBoard,
+            onDeleteBoard: ws.deleteKanbanBoard,
           })
         ),
 
@@ -1211,7 +1990,22 @@
 
           // Top bar
           e('div', { className: 'top-bar' },
-            e('div', { className: 'top-bar-left' }),
+            e('div', { className: 'top-bar-left' },
+              // Feature 3: Cost dashboard
+              (costDashboard.totalCost > 0 || costDashboard.totalTurns > 0) && e('div', { className: 'cost-dashboard' },
+                e('span', { className: 'cost-value' }, '$' + costDashboard.totalCost.toFixed(2) + ' total'),
+                e('span', { className: 'cost-sep' }, '\u00B7'),
+                e('span', null, formatTokens(costDashboard.totalTokens) + ' tokens'),
+                e('span', { className: 'cost-sep' }, '\u00B7'),
+                e('span', null, costDashboard.totalTurns + ' turns')
+              ),
+              // Feature 10: Broadcast toggle
+              e('button', {
+                className: 'broadcast-toggle' + (showBroadcast ? ' active' : ''),
+                onClick: () => setShowBroadcast(prev => !prev),
+                title: 'Toggle broadcast bar (Ctrl+B)'
+              }, '\uD83D\uDCE2 Broadcast', agents.length > 0 && e('span', { style: { fontSize: 10, opacity: 0.7 } }, ' (' + agents.length + ')'))
+            ),
             e('div', { className: 'top-bar-right' },
               e('div', { className: 'grid-controls' },
                 e('span', { className: 'grid-label' }, 'Col'),
@@ -1228,44 +2022,118 @@
             )
           ),
 
-          // Broadcast bar
-          showBroadcast && e('div', { className: 'broadcast-bar' },
+          // Broadcast bar (enhanced — Feature 10 + Feature 8)
+          showBroadcast && e('div', { className: 'broadcast-bar-enhanced' },
             e('label', null, 'Broadcast'),
+            // Feature 8: Selective broadcast chips
+            e('div', { className: 'broadcast-chips' },
+              agents.map(a => e('button', {
+                key: a.id,
+                className: 'broadcast-chip ' + (broadcastTargets.has(a.id) ? 'selected' : 'unselected'),
+                onClick: () => setBroadcastTargets(prev => {
+                  const next = new Set(prev);
+                  if (next.has(a.id)) next.delete(a.id); else next.add(a.id);
+                  return next;
+                }),
+              }, a.name)),
+              e('span', { className: 'broadcast-chip-count' }, broadcastTargets.size + '/' + agents.length)
+            ),
             e('input', {
               className: 'broadcast-input',
               value: broadcastInput,
               onChange: (ev) => setBroadcastInput(ev.target.value),
-              onKeyDown: (ev) => { if (ev.key === 'Enter') handleBroadcast(); },
-              placeholder: 'Send to all agents... (Enter to send)',
+              onKeyDown: (ev) => {
+                if (ev.key === 'Enter') handleBroadcast();
+                if (ev.key === 'Escape') { ev.stopPropagation(); setShowBroadcast(false); }
+              },
+              placeholder: 'Send to selected agents... (Enter to send)',
               autoFocus: true
             }),
-            e('button', { className: 'broadcast-send', onClick: handleBroadcast }, 'Send All')
+            e('button', { className: 'broadcast-send', onClick: handleBroadcast }, 'Send (' + broadcastTargets.size + ')')
           ),
 
-          // Terminal grid
-          e('div', { className: 'terminal-grid', style: gridStyle },
-            Array.from({ length: totalPanels }).map((_, i) => {
-              const agentId = displayAgents[i];
-              const agent = agentId ? agents.find(a => a.id === agentId) : null;
-              return e(TerminalPanel, {
-                key: agentId || 'empty-' + i,
-                agent,
-                messages: agentId ? messages[agentId] : [],
-                liveOutput: agentId ? liveOutput[agentId] : '',
-                queuedMessages: agentId ? queued[agentId] : [],
-                fileChanges: agentId ? fileChanges[agentId] : [],
-                thinkingOutput: agentId ? thinkingOutput[agentId] : '',
-                onSendMessage: (content) => agent && ws.sendMessage(agent.id, content),
-                onStop: ws.stopAgent,
-                onClearHistory: ws.clearHistory,
-                onClearFileChanges: ws.clearFileChanges,
-              });
+          // Minimized panels bar (Feature 2)
+          !maximizedAgent && minimizedDisplayAgents.length > 0 && e('div', { style: { flexShrink: 0 } },
+            minimizedDisplayAgents.map(agentId => {
+              const agent = agents.find(a => a.id === agentId);
+              if (!agent) return null;
+              return e('div', { key: agentId, className: 'panel-minimized', onClick: () => handleRestore(agentId) },
+                e('span', { className: 'status-dot status-' + agent.status }),
+                e('span', { className: 'panel-minimized-name' }, agent.name),
+                unreadCounts[agentId] > 0 && e('span', { className: 'panel-unread-badge' }, unreadCounts[agentId]),
+                e('button', { className: 'panel-btn', onClick: (ev) => { ev.stopPropagation(); handleRestore(agentId); }, title: 'Expand' }, '\u25A1')
+              );
             })
+          ),
+
+          // Terminal grid — fill all col*row slots, skip minimized agents
+          e('div', { className: 'terminal-grid', style: gridStyle },
+            (() => {
+              // When maximized, only show that agent
+              if (maximizedAgent) {
+                const agent = agents.find(a => a.id === maximizedAgent);
+                if (!agent) return e('div', { key: 'empty-max', className: 'terminal-panel' }, e('div', { className: 'panel-content panel-empty' }, 'Agent not found'));
+                return e(TerminalPanel, {
+                  key: maximizedAgent,
+                  agent,
+                  messages: messages[maximizedAgent] || [],
+                  liveOutput: liveOutput[maximizedAgent] || '',
+                  queuedMessages: queued[maximizedAgent] || [],
+                  fileChanges: fileChanges[maximizedAgent] || [],
+                  thinkingOutput: thinkingOutput[maximizedAgent] || '',
+                  statusStartTime: statusStartTimes[maximizedAgent],
+                  tokenUsage: tokenUsage[maximizedAgent],
+                  onSendMessage: (content) => ws.sendMessage(agent.id, content),
+                  onSendImage: ws.sendImage,
+                  onStop: ws.stopAgent,
+                  onClearHistory: ws.clearHistory,
+                  onClearFileChanges: ws.clearFileChanges,
+                  onMinimize: null,
+                  onMaximize: handleToggleMaximize,
+                  isMaximized: true,
+                  onFocus: setFocusedAgentId,
+                  isFocused: focusedAgentId === maximizedAgent,
+                });
+              }
+              const nonMinimized = displayAgents.filter(id => !minimizedAgents.has(id));
+              return Array.from({ length: totalPanels }).map((_, i) => {
+                const agentId = nonMinimized[i];
+                const agent = agentId ? agents.find(a => a.id === agentId) : null;
+                if (!agent) return e('div', { key: 'empty-' + i, className: 'terminal-panel' }, e('div', { className: 'panel-content panel-empty' }, 'No agent assigned'));
+                return e(TerminalPanel, {
+                  key: agentId,
+                  agent,
+                  messages: messages[agentId] || [],
+                  liveOutput: liveOutput[agentId] || '',
+                  queuedMessages: queued[agentId] || [],
+                  fileChanges: fileChanges[agentId] || [],
+                  thinkingOutput: thinkingOutput[agentId] || '',
+                  statusStartTime: statusStartTimes[agentId],
+                  tokenUsage: tokenUsage[agentId],
+                  onSendMessage: (content) => ws.sendMessage(agent.id, content),
+                  onSendImage: ws.sendImage,
+                  onStop: ws.stopAgent,
+                  onClearHistory: ws.clearHistory,
+                  onClearFileChanges: ws.clearFileChanges,
+                  onMinimize: handleMinimize,
+                  onMaximize: handleToggleMaximize,
+                  isMaximized: false,
+                  onFocus: setFocusedAgentId,
+                  isFocused: focusedAgentId === agentId,
+                });
+              });
+            })()
           )
         ),
 
         // Modals
-        e(NewAgentModal, { isOpen: showModal, onClose: () => setShowModal(false), onCreate: ws.createAgent }),
+        e(NewAgentModal, {
+          isOpen: showModal,
+          onClose: () => { setShowModal(false); setEditingAgent(null); },
+          onCreate: ws.createAgent,
+          editAgent: editingAgent,
+          onUpdate: ws.updateAgent,
+        }),
         e(SharedContextModal, { isOpen: showSharedContext, onClose: () => setShowSharedContext(false), content: sharedContext, onSave: ws.updateSharedContext })
       );
     }

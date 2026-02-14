@@ -18,6 +18,8 @@ export interface ChatMessage {
   role: 'user' | 'assistant' | 'system';
   content: string;
   timestamp: number;
+  imageData?: string;         // Base64 encoded image data
+  imageMimeType?: string;     // e.g. 'image/png', 'image/jpeg'
 }
 
 export interface ProjectNote {
@@ -29,6 +31,13 @@ export interface ProjectNote {
   updatedAt: number;
 }
 
+export interface KanbanBoard {
+  id: string;
+  name: string;
+  projectPath?: string;
+  createdAt: number;
+}
+
 export interface KanbanItem {
   id: string;
   title: string;
@@ -36,11 +45,31 @@ export interface KanbanItem {
   column: 'backlog' | 'in_progress' | 'done';
   order: number;
   createdAt: number;
+  boardId?: string;       // Optional: assign to a specific board
+}
+
+export interface LiveDocument {
+  id: string;
+  title: string;
+  content: string;
+  lastEditedBy: string;   // 'user' or agent name
+  agentId?: string;       // Optional: assign to a specific agent
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface AppSettings {
+  defaultSimulatorUdid?: string;
+  defaultSimulatorName?: string;
+  gridColumns?: number;
+  gridRows?: number;
+  selectedAgentIds?: string[];
 }
 
 // Client -> Server messages
 export type ClientMessage =
   | { type: 'create_agent'; name: string; cwd: string; referencePaths?: string[]; systemPrompt?: string }
+  | { type: 'update_agent'; id: string; name?: string; cwd?: string; referencePaths?: string[]; systemPrompt?: string }
   | { type: 'send_message'; agentId: string; content: string }
   | { type: 'kill_agent'; agentId: string }
   | { type: 'stop_agent'; agentId: string }
@@ -58,9 +87,23 @@ export type ClientMessage =
   | { type: 'delete_note'; id: string }
   // Kanban
   | { type: 'get_kanban' }
-  | { type: 'create_kanban_item'; title: string; description?: string; column?: KanbanItem['column'] }
-  | { type: 'update_kanban_item'; id: string; title?: string; description?: string; column?: KanbanItem['column']; order?: number }
-  | { type: 'delete_kanban_item'; id: string };
+  | { type: 'create_kanban_item'; title: string; description?: string; column?: KanbanItem['column']; boardId?: string }
+  | { type: 'update_kanban_item'; id: string; title?: string; description?: string; column?: KanbanItem['column']; order?: number; boardId?: string }
+  | { type: 'delete_kanban_item'; id: string }
+  // Kanban Boards
+  | { type: 'get_kanban_boards' }
+  | { type: 'create_kanban_board'; name: string; projectPath?: string }
+  | { type: 'delete_kanban_board'; id: string }
+  // Documents
+  | { type: 'get_documents' }
+  | { type: 'create_document'; title: string; content: string; agentId?: string }
+  | { type: 'update_document'; id: string; title?: string; content?: string; agentId?: string | null; lastEditedBy?: string }
+  | { type: 'delete_document'; id: string }
+  // Settings
+  | { type: 'get_settings' }
+  | { type: 'update_settings'; settings: Partial<AppSettings> }
+  // Image
+  | { type: 'send_image'; agentId: string; imageData: string; mimeType: string; prompt?: string };
 
 // Server -> Client messages
 export type ServerMessage =
@@ -85,7 +128,20 @@ export type ServerMessage =
   | { type: 'kanban_list'; items: KanbanItem[] }
   | { type: 'kanban_item_created'; item: KanbanItem }
   | { type: 'kanban_item_updated'; item: KanbanItem }
-  | { type: 'kanban_item_deleted'; id: string };
+  | { type: 'kanban_item_deleted'; id: string }
+  // Kanban Boards
+  | { type: 'kanban_boards_list'; boards: KanbanBoard[] }
+  | { type: 'kanban_board_created'; board: KanbanBoard }
+  | { type: 'kanban_board_deleted'; id: string }
+  // Documents
+  | { type: 'documents_list'; documents: LiveDocument[] }
+  | { type: 'document_created'; document: LiveDocument }
+  | { type: 'document_updated'; document: LiveDocument }
+  | { type: 'document_deleted'; id: string }
+  // Settings
+  | { type: 'settings'; settings: AppSettings }
+  // Token usage
+  | { type: 'token_usage'; agentId: string; contextTokens: number; contextLimit: number; totalInputTokens: number; totalOutputTokens: number; totalCostUsd: number; numTurns: number };
 
 // Persistence types
 export interface PersistedData {
@@ -94,4 +150,7 @@ export interface PersistedData {
   sharedContext: string;
   notes: ProjectNote[];
   kanbanItems: KanbanItem[];
+  kanbanBoards: KanbanBoard[];
+  documents: LiveDocument[];
+  settings: AppSettings;
 }

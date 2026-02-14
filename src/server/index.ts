@@ -66,6 +66,10 @@ agentManager.setThinkingCallback((agentId, content) => {
   broadcast({ type: 'thinking_output', agentId, content });
 });
 
+agentManager.setTokenUsageCallback((agentId, contextTokens, contextLimit, totalInputTokens, totalOutputTokens, totalCostUsd, numTurns) => {
+  broadcast({ type: 'token_usage', agentId, contextTokens, contextLimit, totalInputTokens, totalOutputTokens, totalCostUsd, numTurns });
+});
+
 // Handle incoming WebSocket messages
 async function handleMessage(ws: ServerWebSocket<unknown>, message: ClientMessage) {
   switch (message.type) {
@@ -80,6 +84,21 @@ async function handleMessage(ws: ServerWebSocket<unknown>, message: ClientMessag
         broadcast({ type: 'agent_created', agent });
       } catch (e: any) {
         ws.send(JSON.stringify({ type: 'error', message: e.message || `Failed to create agent` }));
+      }
+      break;
+    }
+
+    case 'update_agent': {
+      try {
+        const { id, type: _type, ...updates } = message;
+        const agent = await agentManager.updateAgent(id, updates);
+        if (agent) {
+          broadcast({ type: 'agent_updated', agent });
+        } else {
+          ws.send(JSON.stringify({ type: 'error', message: 'Agent not found', agentId: id }));
+        }
+      } catch (e: any) {
+        ws.send(JSON.stringify({ type: 'error', message: e.message || 'Failed to update agent' }));
       }
       break;
     }
@@ -196,7 +215,7 @@ async function handleMessage(ws: ServerWebSocket<unknown>, message: ClientMessag
     }
 
     case 'create_kanban_item': {
-      const item = await agentManager.createKanbanItem(message.title, message.description, message.column);
+      const item = await agentManager.createKanbanItem(message.title, message.description, message.column, message.boardId);
       broadcast({ type: 'kanban_item_created', item });
       break;
     }
@@ -219,6 +238,82 @@ async function handleMessage(ws: ServerWebSocket<unknown>, message: ClientMessag
       } else {
         ws.send(JSON.stringify({ type: 'error', message: 'Kanban item not found' }));
       }
+      break;
+    }
+
+    // --- Kanban Boards ---
+    case 'get_kanban_boards': {
+      const boards = agentManager.getKanbanBoards();
+      ws.send(JSON.stringify({ type: 'kanban_boards_list', boards }));
+      break;
+    }
+
+    case 'create_kanban_board': {
+      const board = await agentManager.createKanbanBoard(message.name, message.projectPath);
+      broadcast({ type: 'kanban_board_created', board });
+      break;
+    }
+
+    case 'delete_kanban_board': {
+      const deleted = await agentManager.deleteKanbanBoard(message.id);
+      if (deleted) {
+        broadcast({ type: 'kanban_board_deleted', id: message.id });
+      } else {
+        ws.send(JSON.stringify({ type: 'error', message: 'Kanban board not found' }));
+      }
+      break;
+    }
+
+    // --- Documents ---
+    case 'get_documents': {
+      const documents = agentManager.getDocuments();
+      ws.send(JSON.stringify({ type: 'documents_list', documents }));
+      break;
+    }
+
+    case 'create_document': {
+      const doc = await agentManager.createDocument(message.title, message.content, message.agentId);
+      broadcast({ type: 'document_created', document: doc });
+      break;
+    }
+
+    case 'update_document': {
+      const { id: docId, type: _docType, ...docUpdates } = message;
+      const doc = await agentManager.updateDocument(docId, docUpdates);
+      if (doc) {
+        broadcast({ type: 'document_updated', document: doc });
+      } else {
+        ws.send(JSON.stringify({ type: 'error', message: 'Document not found' }));
+      }
+      break;
+    }
+
+    case 'delete_document': {
+      const deleted = await agentManager.deleteDocument(message.id);
+      if (deleted) {
+        broadcast({ type: 'document_deleted', id: message.id });
+      } else {
+        ws.send(JSON.stringify({ type: 'error', message: 'Document not found' }));
+      }
+      break;
+    }
+
+    // --- Settings ---
+    case 'get_settings': {
+      const settings = agentManager.getSettings();
+      ws.send(JSON.stringify({ type: 'settings', settings }));
+      break;
+    }
+
+    case 'update_settings': {
+      const settings = await agentManager.updateSettings(message.settings);
+      broadcast({ type: 'settings', settings });
+      break;
+    }
+
+    // --- Image ---
+    case 'send_image': {
+      agentManager.sendImage(message.agentId, message.imageData, message.mimeType, message.prompt);
       break;
     }
 
@@ -358,6 +453,19 @@ const server = Bun.serve({
       ws.send(JSON.stringify({ type: 'notes_list', notes }));
       const items = agentManager.getKanbanItems();
       ws.send(JSON.stringify({ type: 'kanban_list', items }));
+      const boards = agentManager.getKanbanBoards();
+      ws.send(JSON.stringify({ type: 'kanban_boards_list', boards }));
+      const documents = agentManager.getDocuments();
+      ws.send(JSON.stringify({ type: 'documents_list', documents }));
+      const settings = agentManager.getSettings();
+      ws.send(JSON.stringify({ type: 'settings', settings }));
+      // Send token usage for each agent
+      for (const agent of agents) {
+        const usage = agentManager.getTokenUsage(agent.id);
+        if (usage) {
+          ws.send(JSON.stringify({ type: 'token_usage', agentId: agent.id, ...usage }));
+        }
+      }
     },
 
     message(ws, message) {
