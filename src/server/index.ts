@@ -70,6 +70,14 @@ agentManager.setTokenUsageCallback((agentId, contextTokens, contextLimit, totalI
   broadcast({ type: 'token_usage', agentId, contextTokens, contextLimit, totalInputTokens, totalOutputTokens, totalCostUsd, numTurns });
 });
 
+agentManager.setTerminalOutputCallback((terminalId, content) => {
+  broadcast({ type: 'terminal_output', terminalId, content });
+});
+
+agentManager.setTerminalExitCallback((terminalId, exitCode) => {
+  broadcast({ type: 'terminal_exited', terminalId, exitCode });
+});
+
 // Handle incoming WebSocket messages
 async function handleMessage(ws: ServerWebSocket<unknown>, message: ClientMessage) {
   switch (message.type) {
@@ -214,63 +222,6 @@ async function handleMessage(ws: ServerWebSocket<unknown>, message: ClientMessag
       break;
     }
 
-    // --- Kanban ---
-    case 'get_kanban': {
-      const items = agentManager.getKanbanItems();
-      ws.send(JSON.stringify({ type: 'kanban_list', items }));
-      break;
-    }
-
-    case 'create_kanban_item': {
-      const item = await agentManager.createKanbanItem(message.title, message.description, message.column, message.boardId);
-      broadcast({ type: 'kanban_item_created', item });
-      break;
-    }
-
-    case 'update_kanban_item': {
-      const { id: itemId, type: _type, ...itemUpdates } = message;
-      const item = await agentManager.updateKanbanItem(itemId, itemUpdates);
-      if (item) {
-        broadcast({ type: 'kanban_item_updated', item });
-      } else {
-        ws.send(JSON.stringify({ type: 'error', message: 'Kanban item not found' }));
-      }
-      break;
-    }
-
-    case 'delete_kanban_item': {
-      const deleted = await agentManager.deleteKanbanItem(message.id);
-      if (deleted) {
-        broadcast({ type: 'kanban_item_deleted', id: message.id });
-      } else {
-        ws.send(JSON.stringify({ type: 'error', message: 'Kanban item not found' }));
-      }
-      break;
-    }
-
-    // --- Kanban Boards ---
-    case 'get_kanban_boards': {
-      const boards = agentManager.getKanbanBoards();
-      ws.send(JSON.stringify({ type: 'kanban_boards_list', boards }));
-      break;
-    }
-
-    case 'create_kanban_board': {
-      const board = await agentManager.createKanbanBoard(message.name, message.projectPath);
-      broadcast({ type: 'kanban_board_created', board });
-      break;
-    }
-
-    case 'delete_kanban_board': {
-      const deleted = await agentManager.deleteKanbanBoard(message.id);
-      if (deleted) {
-        broadcast({ type: 'kanban_board_deleted', id: message.id });
-      } else {
-        ws.send(JSON.stringify({ type: 'error', message: 'Kanban board not found' }));
-      }
-      break;
-    }
-
     // --- Documents ---
     case 'get_documents': {
       const documents = agentManager.getDocuments();
@@ -375,6 +326,31 @@ async function handleMessage(ws: ServerWebSocket<unknown>, message: ClientMessag
       break;
     }
 
+    // --- Terminals ---
+    case 'create_terminal': {
+      try {
+        const terminal = await agentManager.createTerminal(message.agentId, message.command);
+        broadcast({ type: 'terminal_created', terminal });
+      } catch (e: any) {
+        ws.send(JSON.stringify({ type: 'error', message: e.message || 'Failed to create terminal' }));
+      }
+      break;
+    }
+
+    case 'kill_terminal': {
+      const success = await agentManager.killTerminal(message.id);
+      if (!success) {
+        ws.send(JSON.stringify({ type: 'error', message: 'Terminal not found' }));
+      }
+      break;
+    }
+
+    case 'get_terminals': {
+      const terminals = agentManager.getTerminals();
+      ws.send(JSON.stringify({ type: 'terminals_list', terminals }));
+      break;
+    }
+
     default:
       ws.send(JSON.stringify({ type: 'error', message: 'Unknown message type' }));
   }
@@ -429,6 +405,84 @@ const server = Bun.serve({
           headers: { 'Content-Type': 'application/json' }
         })
       );
+    }
+
+    // --- Running ports ---
+
+    if (url.pathname === '/api/ports' && req.method === 'GET') {
+      return (async () => {
+        try {
+          const proc = Bun.spawn(['lsof', '-iTCP', '-sTCP:LISTEN', '-nP'], {
+            stdout: 'pipe',
+            stderr: 'pipe',
+          });
+          const exitCode = await proc.exited;
+          const stdout = await new Response(proc.stdout).text();
+          if (exitCode !== 0) return jsonResponse({ ports: [] });
+          const lines = stdout.trim().split('\n').slice(1); // Skip header
+          const seen = new Set<string>();
+          const ports: { port: number; pid: number; command: string }[] = [];
+          for (const line of lines) {
+            const parts = line.split(/\s+/);
+            if (parts.length < 9) continue;
+            const command = parts[0];
+            const pid = parseInt(parts[1], 10);
+            const nameField = parts[8]; // e.g., *:3333
+            const portMatch = nameField.match(/:(\d+)$/);
+            if (!portMatch) continue;
+            const port = parseInt(portMatch[1], 10);
+            const key = port + ':' + pid;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            ports.push({ port, pid, command });
+          }
+          ports.sort((a, b) => a.port - b.port);
+          return jsonResponse({ ports });
+        } catch {
+          return jsonResponse({ ports: [] });
+        }
+      })();
+    }
+
+    // --- Kill port (by PID) ---
+
+    if (url.pathname === '/api/ports/kill' && req.method === 'POST') {
+      return (async () => {
+        try {
+          const body = await req.json() as { pid: number };
+          if (!body.pid) return jsonResponse({ error: 'Missing pid' }, 400);
+          const proc = Bun.spawn(['kill', '-9', String(body.pid)], {
+            stdout: 'pipe',
+            stderr: 'pipe',
+          });
+          const exitCode = await proc.exited;
+          return jsonResponse({ ok: exitCode === 0 });
+        } catch (e: any) {
+          return jsonResponse({ ok: false, error: e.message }, 500);
+        }
+      })();
+    }
+
+    // --- Git branch ---
+
+    if (url.pathname === '/api/git-branch' && req.method === 'GET') {
+      const path = url.searchParams.get('path');
+      if (!path) return jsonResponse({ branch: null });
+      return (async () => {
+        try {
+          const proc = Bun.spawn(['git', 'rev-parse', '--abbrev-ref', 'HEAD'], {
+            cwd: path,
+            stdout: 'pipe',
+            stderr: 'pipe',
+          });
+          const exitCode = await proc.exited;
+          if (exitCode !== 0) return jsonResponse({ branch: null });
+          const stdout = await new Response(proc.stdout).text();
+          return jsonResponse({ branch: stdout.trim() || null });
+        } catch {
+          return jsonResponse({ branch: null });
+        }
+      })();
     }
 
     // --- Xcode Simulator REST endpoints ---
@@ -509,10 +563,6 @@ const server = Bun.serve({
       ws.send(JSON.stringify({ type: 'agents_list', agents }));
       const notes = agentManager.getNotes();
       ws.send(JSON.stringify({ type: 'notes_list', notes }));
-      const items = agentManager.getKanbanItems();
-      ws.send(JSON.stringify({ type: 'kanban_list', items }));
-      const boards = agentManager.getKanbanBoards();
-      ws.send(JSON.stringify({ type: 'kanban_boards_list', boards }));
       const documents = agentManager.getDocuments();
       ws.send(JSON.stringify({ type: 'documents_list', documents }));
       const settings = agentManager.getSettings();
@@ -520,6 +570,9 @@ const server = Bun.serve({
       // Send workspaces
       const workspaces = agentManager.getWorkspaces();
       ws.send(JSON.stringify({ type: 'workspaces_list', workspaces }));
+      // Send terminals
+      const terminals = agentManager.getTerminals();
+      ws.send(JSON.stringify({ type: 'terminals_list', terminals }));
       // Send token usage for each agent
       for (const agent of agents) {
         const usage = agentManager.getTokenUsage(agent.id);

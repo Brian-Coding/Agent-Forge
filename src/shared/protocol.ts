@@ -41,22 +41,6 @@ export interface ProjectNote {
   updatedAt: number;
 }
 
-export interface KanbanBoard {
-  id: string;
-  name: string;
-  projectPath?: string;
-  createdAt: number;
-}
-
-export interface KanbanItem {
-  id: string;
-  title: string;
-  description: string;
-  column: 'backlog' | 'in_progress' | 'done';
-  order: number;
-  createdAt: number;
-  boardId?: string;       // Optional: assign to a specific board
-}
 
 export interface LiveDocument {
   id: string;
@@ -72,10 +56,20 @@ export interface AppSettings {
   defaultSimulatorUdid?: string;
   defaultSimulatorName?: string;
   activeWorkspaceId?: string;
+  sidebarWidth?: number;
   // Legacy fields kept for migration
   gridColumns?: number;
   gridRows?: number;
   selectedAgentIds?: string[];
+}
+
+export interface TerminalSession {
+  id: string;
+  agentId: string;
+  command: string;
+  cwd: string;
+  status: 'running' | 'stopped';
+  createdAt: number;
 }
 
 // Client -> Server messages
@@ -97,15 +91,6 @@ export type ClientMessage =
   | { type: 'create_note'; title: string; content: string; agentId?: string }
   | { type: 'update_note'; id: string; title?: string; content?: string; agentId?: string | null }
   | { type: 'delete_note'; id: string }
-  // Kanban
-  | { type: 'get_kanban' }
-  | { type: 'create_kanban_item'; title: string; description?: string; column?: KanbanItem['column']; boardId?: string }
-  | { type: 'update_kanban_item'; id: string; title?: string; description?: string; column?: KanbanItem['column']; order?: number; boardId?: string }
-  | { type: 'delete_kanban_item'; id: string }
-  // Kanban Boards
-  | { type: 'get_kanban_boards' }
-  | { type: 'create_kanban_board'; name: string; projectPath?: string }
-  | { type: 'delete_kanban_board'; id: string }
   // Documents
   | { type: 'get_documents' }
   | { type: 'create_document'; title: string; content: string; agentId?: string }
@@ -121,7 +106,11 @@ export type ClientMessage =
   | { type: 'create_workspace'; name: string }
   | { type: 'update_workspace'; id: string; name?: string; gridColumns?: number; gridRows?: number; selectedAgentIds?: string[] }
   | { type: 'delete_workspace'; id: string }
-  | { type: 'set_active_workspace'; id: string };
+  | { type: 'set_active_workspace'; id: string }
+  // Terminals
+  | { type: 'create_terminal'; agentId: string; command: string }
+  | { type: 'kill_terminal'; id: string }
+  | { type: 'get_terminals' };
 
 // Server -> Client messages
 export type ServerMessage =
@@ -142,15 +131,6 @@ export type ServerMessage =
   | { type: 'note_created'; note: ProjectNote }
   | { type: 'note_updated'; note: ProjectNote }
   | { type: 'note_deleted'; id: string }
-  // Kanban
-  | { type: 'kanban_list'; items: KanbanItem[] }
-  | { type: 'kanban_item_created'; item: KanbanItem }
-  | { type: 'kanban_item_updated'; item: KanbanItem }
-  | { type: 'kanban_item_deleted'; id: string }
-  // Kanban Boards
-  | { type: 'kanban_boards_list'; boards: KanbanBoard[] }
-  | { type: 'kanban_board_created'; board: KanbanBoard }
-  | { type: 'kanban_board_deleted'; id: string }
   // Documents
   | { type: 'documents_list'; documents: LiveDocument[] }
   | { type: 'document_created'; document: LiveDocument }
@@ -164,7 +144,12 @@ export type ServerMessage =
   | { type: 'workspaces_list'; workspaces: WorkspaceInfo[] }
   | { type: 'workspace_created'; workspace: WorkspaceInfo }
   | { type: 'workspace_updated'; workspace: WorkspaceInfo }
-  | { type: 'workspace_deleted'; id: string };
+  | { type: 'workspace_deleted'; id: string }
+  // Terminals
+  | { type: 'terminals_list'; terminals: TerminalSession[] }
+  | { type: 'terminal_created'; terminal: TerminalSession }
+  | { type: 'terminal_output'; terminalId: string; content: string }
+  | { type: 'terminal_exited'; terminalId: string; exitCode: number | null };
 
 // Persistence types
 export interface PersistedData {
@@ -172,8 +157,6 @@ export interface PersistedData {
   messages: ChatMessage[];
   sharedContext: string;
   notes: ProjectNote[];
-  kanbanItems: KanbanItem[];
-  kanbanBoards: KanbanBoard[];
   documents: LiveDocument[];
   settings: AppSettings;
   workspaces: WorkspaceInfo[];

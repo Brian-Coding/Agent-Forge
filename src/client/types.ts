@@ -6,5 +6,4 @@ export type {
   ClientMessage,
   ServerMessage,
   ProjectNote,
-  KanbanItem,
 } from '../shared/protocol';
