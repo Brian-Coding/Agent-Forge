@@ -23,7 +23,7 @@ async function listDirectories(path: string): Promise<{ name: string; path: stri
         // Skip entries we can't access
       }
     }
-    return results.sort((a, b) => a.name.localeCompare(b.name));
+    return results.sort((a, b) => a.name.localeCompare(b, undefined, { sensitivity: 'base' }));
   } catch (e) {
     return [];
   }
@@ -79,9 +79,13 @@ async function handleMessage(ws: ServerWebSocket<unknown>, message: ClientMessag
           message.name,
           message.cwd,
           message.referencePaths || [],
-          message.systemPrompt || ''
+          message.systemPrompt || '',
+          message.workspaceId
         );
         broadcast({ type: 'agent_created', agent });
+        // Broadcast updated workspace state (agent was auto-added to selectedAgentIds)
+        const workspaces = agentManager.getWorkspaces();
+        broadcast({ type: 'workspaces_list', workspaces });
       } catch (e: any) {
         ws.send(JSON.stringify({ type: 'error', message: e.message || `Failed to create agent` }));
       }
@@ -128,6 +132,9 @@ async function handleMessage(ws: ServerWebSocket<unknown>, message: ClientMessag
       const success = await agentManager.removeAgent(message.agentId);
       if (success) {
         broadcast({ type: 'agent_removed', agentId: message.agentId });
+        // Broadcast updated workspace state
+        const workspaces = agentManager.getWorkspaces();
+        broadcast({ type: 'workspaces_list', workspaces });
       } else {
         ws.send(JSON.stringify({ type: 'error', message: 'Agent not found', agentId: message.agentId }));
       }
@@ -317,6 +324,57 @@ async function handleMessage(ws: ServerWebSocket<unknown>, message: ClientMessag
       break;
     }
 
+    // --- Workspaces ---
+    case 'get_workspaces': {
+      const workspaces = agentManager.getWorkspaces();
+      ws.send(JSON.stringify({ type: 'workspaces_list', workspaces }));
+      break;
+    }
+
+    case 'create_workspace': {
+      const workspace = await agentManager.createWorkspace(message.name);
+      broadcast({ type: 'workspace_created', workspace });
+      break;
+    }
+
+    case 'update_workspace': {
+      const { id: wsId, type: _wsType, ...wsUpdates } = message;
+      const workspace = await agentManager.updateWorkspace(wsId, wsUpdates);
+      if (workspace) {
+        broadcast({ type: 'workspace_updated', workspace });
+      } else {
+        ws.send(JSON.stringify({ type: 'error', message: 'Workspace not found' }));
+      }
+      break;
+    }
+
+    case 'delete_workspace': {
+      const deleted = await agentManager.deleteWorkspace(message.id);
+      if (deleted) {
+        broadcast({ type: 'workspace_deleted', id: message.id });
+        // Send updated settings (activeWorkspaceId may have changed)
+        const settings = agentManager.getSettings();
+        broadcast({ type: 'settings', settings });
+        // Send updated agents (workspaceId may have changed for reassigned agents)
+        const agents = agentManager.getAgents();
+        broadcast({ type: 'agents_list', agents });
+      } else {
+        ws.send(JSON.stringify({ type: 'error', message: 'Cannot delete workspace (last one or not found)' }));
+      }
+      break;
+    }
+
+    case 'set_active_workspace': {
+      const success = await agentManager.setActiveWorkspace(message.id);
+      if (success) {
+        const settings = agentManager.getSettings();
+        broadcast({ type: 'settings', settings });
+      } else {
+        ws.send(JSON.stringify({ type: 'error', message: 'Workspace not found' }));
+      }
+      break;
+    }
+
     default:
       ws.send(JSON.stringify({ type: 'error', message: 'Unknown message type' }));
   }
@@ -459,6 +517,9 @@ const server = Bun.serve({
       ws.send(JSON.stringify({ type: 'documents_list', documents }));
       const settings = agentManager.getSettings();
       ws.send(JSON.stringify({ type: 'settings', settings }));
+      // Send workspaces
+      const workspaces = agentManager.getWorkspaces();
+      ws.send(JSON.stringify({ type: 'workspaces_list', workspaces }));
       // Send token usage for each agent
       for (const agent of agents) {
         const usage = agentManager.getTokenUsage(agent.id);

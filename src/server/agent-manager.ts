@@ -3,7 +3,7 @@ import { watch, type FSWatcher } from 'fs';
 import { existsSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import type { AgentInfo, AgentStatus, ChatMessage, PersistedData, ProjectNote, KanbanItem, KanbanBoard, LiveDocument, AppSettings } from '../shared/protocol';
+import type { AgentInfo, AgentStatus, ChatMessage, PersistedData, ProjectNote, KanbanItem, KanbanBoard, LiveDocument, AppSettings, WorkspaceInfo } from '../shared/protocol';
 
 const DATA_FILE = './data.json';
 const PROCESS_TIMEOUT_MS = 10 * 60 * 1000; // 10 minute timeout (agents do real work now)
@@ -48,6 +48,7 @@ export class AgentManager {
   private kanbanBoards: Map<string, KanbanBoard> = new Map();
   private documents: Map<string, LiveDocument> = new Map();
   private settings: AppSettings = {};
+  private workspaces: Map<string, WorkspaceInfo> = new Map();
   private onOutput: OutputCallback | null = null;
   private onStatusChange: StatusCallback | null = null;
   private onMessage: MessageCallback | null = null;
@@ -80,6 +81,7 @@ export class AgentManager {
               status: 'stopped',
               referencePaths: agent.referencePaths || [],
               systemPrompt: agent.systemPrompt || '',
+              workspaceId: agent.workspaceId || '',
             },
             process: null,
             sessionId: (agent as any).sessionId || null,
@@ -130,7 +132,39 @@ export class AgentManager {
         if (data.settings) {
           this.settings = data.settings;
         }
-        console.log(`Loaded ${data.agents.length} agents, ${data.messages.length} messages, ${this.notes.size} notes, ${this.kanbanItems.size} kanban items, ${this.kanbanBoards.size} boards, ${this.documents.size} documents from disk`);
+        // Load workspaces
+        if (data.workspaces && data.workspaces.length > 0) {
+          for (const ws of data.workspaces) {
+            this.workspaces.set(ws.id, ws);
+          }
+        }
+
+        // --- Migration: create "Default" workspace if none exist ---
+        if (this.workspaces.size === 0) {
+          const defaultId = this.generateId();
+          const agentIds = Array.from(this.agents.keys());
+          const defaultWorkspace: WorkspaceInfo = {
+            id: defaultId,
+            name: 'Default',
+            gridColumns: this.settings.gridColumns || 2,
+            gridRows: this.settings.gridRows || 2,
+            selectedAgentIds: this.settings.selectedAgentIds || agentIds,
+            createdAt: Date.now(),
+          };
+          this.workspaces.set(defaultId, defaultWorkspace);
+          // Assign all agents to the default workspace
+          for (const managed of this.agents.values()) {
+            if (!managed.info.workspaceId) {
+              managed.info.workspaceId = defaultId;
+            }
+          }
+          // Set active workspace
+          this.settings.activeWorkspaceId = defaultId;
+          console.log(`Migration: created "Default" workspace (${defaultId}) with ${agentIds.length} agents`);
+          await this.persistData();
+        }
+
+        console.log(`Loaded ${data.agents.length} agents, ${data.messages.length} messages, ${this.notes.size} notes, ${this.kanbanItems.size} kanban items, ${this.kanbanBoards.size} boards, ${this.documents.size} documents, ${this.workspaces.size} workspaces from disk`);
       }
     } catch (e) {
       console.error('Failed to load persisted data:', e);
@@ -150,6 +184,7 @@ export class AgentManager {
       kanbanBoards: Array.from(this.kanbanBoards.values()),
       documents: Array.from(this.documents.values()),
       settings: this.settings,
+      workspaces: Array.from(this.workspaces.values()),
     };
     await Bun.write(DATA_FILE, JSON.stringify(data, null, 2));
   }
@@ -187,6 +222,75 @@ export class AgentManager {
       totalCostUsd: agent.totalCostUsd,
       numTurns: agent.numTurns,
     };
+  }
+
+  // --- Workspace CRUD ---
+
+  getWorkspaces(): WorkspaceInfo[] {
+    return Array.from(this.workspaces.values()).sort((a, b) => a.createdAt - b.createdAt);
+  }
+
+  async createWorkspace(name: string): Promise<WorkspaceInfo> {
+    const ws: WorkspaceInfo = {
+      id: this.generateId(),
+      name,
+      gridColumns: 3,
+      gridRows: 2,
+      selectedAgentIds: [],
+      createdAt: Date.now(),
+    };
+    this.workspaces.set(ws.id, ws);
+    // Set as active if it's the only one or no active set
+    if (!this.settings.activeWorkspaceId || this.workspaces.size === 1) {
+      this.settings.activeWorkspaceId = ws.id;
+    }
+    await this.persistData();
+    return ws;
+  }
+
+  async updateWorkspace(id: string, updates: { name?: string; gridColumns?: number; gridRows?: number; selectedAgentIds?: string[] }): Promise<WorkspaceInfo | null> {
+    const ws = this.workspaces.get(id);
+    if (!ws) return null;
+    if (updates.name !== undefined) ws.name = updates.name;
+    if (updates.gridColumns !== undefined) ws.gridColumns = updates.gridColumns;
+    if (updates.gridRows !== undefined) ws.gridRows = updates.gridRows;
+    if (updates.selectedAgentIds !== undefined) ws.selectedAgentIds = updates.selectedAgentIds;
+    await this.persistData();
+    return ws;
+  }
+
+  async deleteWorkspace(id: string): Promise<boolean> {
+    if (this.workspaces.size <= 1) return false; // Can't delete last workspace
+    const ws = this.workspaces.get(id);
+    if (!ws) return false;
+
+    // Find first remaining workspace to reassign agents
+    const remainingId = Array.from(this.workspaces.keys()).find(k => k !== id)!;
+    const remaining = this.workspaces.get(remainingId)!;
+
+    // Reassign agents from deleted workspace to remaining
+    for (const managed of this.agents.values()) {
+      if (managed.info.workspaceId === id) {
+        managed.info.workspaceId = remainingId;
+      }
+    }
+
+    this.workspaces.delete(id);
+
+    // If active workspace was deleted, switch to remaining
+    if (this.settings.activeWorkspaceId === id) {
+      this.settings.activeWorkspaceId = remainingId;
+    }
+
+    await this.persistData();
+    return true;
+  }
+
+  async setActiveWorkspace(id: string): Promise<boolean> {
+    if (!this.workspaces.has(id)) return false;
+    this.settings.activeWorkspaceId = id;
+    await this.persistData();
+    return true;
   }
 
   // --- Notes CRUD ---
@@ -670,10 +774,24 @@ export class AgentManager {
 
   // --- Agent CRUD ---
 
-  async createAgent(name: string, cwd: string, referencePaths: string[] = [], systemPrompt: string = ''): Promise<AgentInfo> {
+  async createAgent(name: string, cwd: string, referencePaths: string[] = [], systemPrompt: string = '', workspaceId?: string): Promise<AgentInfo> {
     // Validate cwd exists
     if (!existsSync(cwd)) {
       throw new Error(`Working directory does not exist: ${cwd}`);
+    }
+
+    // Determine workspace — use provided, or active, or first available
+    let wsId = workspaceId;
+    if (!wsId) {
+      wsId = this.settings.activeWorkspaceId;
+    }
+    if (!wsId || !this.workspaces.has(wsId)) {
+      wsId = Array.from(this.workspaces.keys())[0];
+    }
+    // If still no workspace, create a default
+    if (!wsId) {
+      const ws = await this.createWorkspace('Default');
+      wsId = ws.id;
     }
 
     const id = this.generateId();
@@ -685,6 +803,7 @@ export class AgentManager {
       systemPrompt,
       status: 'idle',
       createdAt: Date.now(),
+      workspaceId: wsId,
     };
 
     this.agents.set(id, {
@@ -701,6 +820,15 @@ export class AgentManager {
       numTurns: 0,
     });
 
+    // Auto-add agent to workspace's selectedAgentIds if there are available slots
+    const ws = this.workspaces.get(wsId);
+    if (ws) {
+      const totalSlots = ws.gridColumns * ws.gridRows;
+      if (ws.selectedAgentIds.length < totalSlots) {
+        ws.selectedAgentIds.push(id);
+      }
+    }
+
     this.startFileWatcher(id);
     await this.persistData();
     return this.agents.get(id)!.info;
@@ -715,6 +843,11 @@ export class AgentManager {
       agent.process.kill();
     }
     this.stopFileWatcher(agentId);
+
+    // Remove agent from all workspace selectedAgentIds
+    for (const ws of this.workspaces.values()) {
+      ws.selectedAgentIds = ws.selectedAgentIds.filter(id => id !== agentId);
+    }
 
     this.agents.delete(agentId);
     this.messages.delete(agentId);

@@ -2,6 +2,15 @@
 
 export type AgentStatus = 'idle' | 'working' | 'thinking' | 'error' | 'stopped';
 
+export interface WorkspaceInfo {
+  id: string;
+  name: string;
+  gridColumns: number;
+  gridRows: number;
+  selectedAgentIds: string[];
+  createdAt: number;
+}
+
 export interface AgentInfo {
   id: string;
   name: string;
@@ -10,6 +19,7 @@ export interface AgentInfo {
   systemPrompt: string;       // Per-agent system prompt / persona
   status: AgentStatus;
   createdAt: number;
+  workspaceId: string;        // Workspace this agent belongs to
 }
 
 export interface ChatMessage {
@@ -61,6 +71,8 @@ export interface LiveDocument {
 export interface AppSettings {
   defaultSimulatorUdid?: string;
   defaultSimulatorName?: string;
+  activeWorkspaceId?: string;
+  // Legacy fields kept for migration
   gridColumns?: number;
   gridRows?: number;
   selectedAgentIds?: string[];
@@ -68,7 +80,7 @@ export interface AppSettings {
 
 // Client -> Server messages
 export type ClientMessage =
-  | { type: 'create_agent'; name: string; cwd: string; referencePaths?: string[]; systemPrompt?: string }
+  | { type: 'create_agent'; name: string; cwd: string; referencePaths?: string[]; systemPrompt?: string; workspaceId?: string }
   | { type: 'update_agent'; id: string; name?: string; cwd?: string; referencePaths?: string[]; systemPrompt?: string }
   | { type: 'send_message'; agentId: string; content: string }
   | { type: 'kill_agent'; agentId: string }
@@ -103,7 +115,13 @@ export type ClientMessage =
   | { type: 'get_settings' }
   | { type: 'update_settings'; settings: Partial<AppSettings> }
   // Image
-  | { type: 'send_image'; agentId: string; imageData: string; mimeType: string; prompt?: string };
+  | { type: 'send_image'; agentId: string; imageData: string; mimeType: string; prompt?: string }
+  // Workspaces
+  | { type: 'get_workspaces' }
+  | { type: 'create_workspace'; name: string }
+  | { type: 'update_workspace'; id: string; name?: string; gridColumns?: number; gridRows?: number; selectedAgentIds?: string[] }
+  | { type: 'delete_workspace'; id: string }
+  | { type: 'set_active_workspace'; id: string };
 
 // Server -> Client messages
 export type ServerMessage =
@@ -141,7 +159,12 @@ export type ServerMessage =
   // Settings
   | { type: 'settings'; settings: AppSettings }
   // Token usage
-  | { type: 'token_usage'; agentId: string; contextTokens: number; contextLimit: number; totalInputTokens: number; totalOutputTokens: number; totalCostUsd: number; numTurns: number };
+  | { type: 'token_usage'; agentId: string; contextTokens: number; contextLimit: number; totalInputTokens: number; totalOutputTokens: number; totalCostUsd: number; numTurns: number }
+  // Workspaces
+  | { type: 'workspaces_list'; workspaces: WorkspaceInfo[] }
+  | { type: 'workspace_created'; workspace: WorkspaceInfo }
+  | { type: 'workspace_updated'; workspace: WorkspaceInfo }
+  | { type: 'workspace_deleted'; id: string };
 
 // Persistence types
 export interface PersistedData {
@@ -153,4 +176,5 @@ export interface PersistedData {
   kanbanBoards: KanbanBoard[];
   documents: LiveDocument[];
   settings: AppSettings;
+  workspaces: WorkspaceInfo[];
 }
