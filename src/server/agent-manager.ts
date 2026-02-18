@@ -3,7 +3,7 @@ import { watch, type FSWatcher } from 'fs';
 import { existsSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import type { AgentInfo, AgentStatus, ChatMessage, PersistedData, ProjectNote, KanbanItem, KanbanBoard, LiveDocument, AppSettings, WorkspaceInfo } from '../shared/protocol';
+import type { AgentInfo, AgentStatus, ChatMessage, PersistedData, ProjectNote, LiveDocument, AppSettings, WorkspaceInfo, TerminalSession } from '../shared/protocol';
 
 const DATA_FILE = './data.json';
 const PROCESS_TIMEOUT_MS = 10 * 60 * 1000; // 10 minute timeout (agents do real work now)
@@ -38,14 +38,20 @@ type MessageCallback = (message: ChatMessage) => void;
 type FileChangeCallback = (agentId: string, files: string[]) => void;
 type ThinkingCallback = (agentId: string, content: string) => void;
 type TokenUsageCallback = (agentId: string, contextTokens: number, contextLimit: number, totalInputTokens: number, totalOutputTokens: number, totalCostUsd: number, numTurns: number) => void;
+type TerminalOutputCallback = (terminalId: string, content: string) => void;
+type TerminalExitCallback = (terminalId: string, exitCode: number | null) => void;
+
+interface ManagedTerminal {
+  info: TerminalSession;
+  process: Subprocess<'ignore', 'pipe', 'pipe'>;
+  outputBuffer: string;
+}
 
 export class AgentManager {
   private agents: Map<string, ManagedAgent> = new Map();
   private messages: Map<string, ChatMessage[]> = new Map();
   private sharedContext: string = '';
   private notes: Map<string, ProjectNote> = new Map();
-  private kanbanItems: Map<string, KanbanItem> = new Map();
-  private kanbanBoards: Map<string, KanbanBoard> = new Map();
   private documents: Map<string, LiveDocument> = new Map();
   private settings: AppSettings = {};
   private workspaces: Map<string, WorkspaceInfo> = new Map();
@@ -55,6 +61,9 @@ export class AgentManager {
   private onFileChange: FileChangeCallback | null = null;
   private onThinking: ThinkingCallback | null = null;
   private onTokenUsage: TokenUsageCallback | null = null;
+  private terminals: Map<string, ManagedTerminal> = new Map();
+  private onTerminalOutput: TerminalOutputCallback | null = null;
+  private onTerminalExit: TerminalExitCallback | null = null;
 
   constructor() {
     this.loadPersistedData();
@@ -66,6 +75,8 @@ export class AgentManager {
   setFileChangeCallback(cb: FileChangeCallback) { this.onFileChange = cb; }
   setThinkingCallback(cb: ThinkingCallback) { this.onThinking = cb; }
   setTokenUsageCallback(cb: TokenUsageCallback) { this.onTokenUsage = cb; }
+  setTerminalOutputCallback(cb: TerminalOutputCallback) { this.onTerminalOutput = cb; }
+  setTerminalExitCallback(cb: TerminalExitCallback) { this.onTerminalExit = cb; }
 
   // --- Persistence ---
 
@@ -88,11 +99,11 @@ export class AgentManager {
             outputBuffer: '',
             watcher: null,
             lastFileChange: [],
-            contextTokens: 0,
-            totalInputTokens: 0,
-            totalOutputTokens: 0,
-            totalCostUsd: 0,
-            numTurns: 0,
+            contextTokens: (agent as any).contextTokens || 0,
+            totalInputTokens: (agent as any).totalInputTokens || 0,
+            totalOutputTokens: (agent as any).totalOutputTokens || 0,
+            totalCostUsd: (agent as any).totalCostUsd || 0,
+            numTurns: (agent as any).numTurns || 0,
           };
           this.agents.set(agent.id, managed);
           this.startFileWatcher(agent.id);
@@ -108,18 +119,6 @@ export class AgentManager {
         if (data.notes) {
           for (const note of data.notes) {
             this.notes.set(note.id, note);
-          }
-        }
-        // Load kanban items
-        if (data.kanbanItems) {
-          for (const item of data.kanbanItems) {
-            this.kanbanItems.set(item.id, item);
-          }
-        }
-        // Load kanban boards
-        if (data.kanbanBoards) {
-          for (const board of data.kanbanBoards) {
-            this.kanbanBoards.set(board.id, board);
           }
         }
         // Load documents
@@ -164,7 +163,7 @@ export class AgentManager {
           await this.persistData();
         }
 
-        console.log(`Loaded ${data.agents.length} agents, ${data.messages.length} messages, ${this.notes.size} notes, ${this.kanbanItems.size} kanban items, ${this.kanbanBoards.size} boards, ${this.documents.size} documents, ${this.workspaces.size} workspaces from disk`);
+        console.log(`Loaded ${data.agents.length} agents, ${data.messages.length} messages, ${this.notes.size} notes, ${this.documents.size} documents, ${this.workspaces.size} workspaces from disk`);
       }
     } catch (e) {
       console.error('Failed to load persisted data:', e);
@@ -176,12 +175,15 @@ export class AgentManager {
       agents: Array.from(this.agents.values()).map(a => ({
         ...a.info,
         sessionId: a.sessionId, // Persist session ID for resume across restarts
+        contextTokens: a.contextTokens,
+        totalInputTokens: a.totalInputTokens,
+        totalOutputTokens: a.totalOutputTokens,
+        totalCostUsd: a.totalCostUsd,
+        numTurns: a.numTurns,
       })) as any,
       messages: Array.from(this.messages.values()).flat(),
       sharedContext: this.sharedContext,
       notes: Array.from(this.notes.values()),
-      kanbanItems: Array.from(this.kanbanItems.values()),
-      kanbanBoards: Array.from(this.kanbanBoards.values()),
       documents: Array.from(this.documents.values()),
       settings: this.settings,
       workspaces: Array.from(this.workspaces.values()),
@@ -328,79 +330,6 @@ export class AgentManager {
   async deleteNote(id: string): Promise<boolean> {
     const deleted = this.notes.delete(id);
     if (deleted) await this.persistData();
-    return deleted;
-  }
-
-  // --- Kanban CRUD ---
-
-  getKanbanItems(): KanbanItem[] {
-    return Array.from(this.kanbanItems.values()).sort((a, b) => a.order - b.order);
-  }
-
-  async createKanbanItem(title: string, description: string = '', column: KanbanItem['column'] = 'backlog', boardId?: string): Promise<KanbanItem> {
-    const itemsInColumn = Array.from(this.kanbanItems.values()).filter(i => i.column === column);
-    const maxOrder = itemsInColumn.length > 0 ? Math.max(...itemsInColumn.map(i => i.order)) : -1;
-    const item: KanbanItem = {
-      id: this.generateId(),
-      title,
-      description,
-      column,
-      order: maxOrder + 1,
-      createdAt: Date.now(),
-      boardId,
-    };
-    this.kanbanItems.set(item.id, item);
-    await this.persistData();
-    return item;
-  }
-
-  async updateKanbanItem(id: string, updates: { title?: string; description?: string; column?: KanbanItem['column']; order?: number; boardId?: string }): Promise<KanbanItem | null> {
-    const item = this.kanbanItems.get(id);
-    if (!item) return null;
-    if (updates.title !== undefined) item.title = updates.title;
-    if (updates.description !== undefined) item.description = updates.description;
-    if (updates.column !== undefined) item.column = updates.column;
-    if (updates.order !== undefined) item.order = updates.order;
-    if (updates.boardId !== undefined) item.boardId = updates.boardId;
-    await this.persistData();
-    return item;
-  }
-
-  async deleteKanbanItem(id: string): Promise<boolean> {
-    const deleted = this.kanbanItems.delete(id);
-    if (deleted) await this.persistData();
-    return deleted;
-  }
-
-  // --- Kanban Boards CRUD ---
-
-  getKanbanBoards(): KanbanBoard[] {
-    return Array.from(this.kanbanBoards.values()).sort((a, b) => a.createdAt - b.createdAt);
-  }
-
-  async createKanbanBoard(name: string, projectPath?: string): Promise<KanbanBoard> {
-    const board: KanbanBoard = {
-      id: this.generateId(),
-      name,
-      projectPath,
-      createdAt: Date.now(),
-    };
-    this.kanbanBoards.set(board.id, board);
-    await this.persistData();
-    return board;
-  }
-
-  async deleteKanbanBoard(id: string): Promise<boolean> {
-    const deleted = this.kanbanBoards.delete(id);
-    if (deleted) {
-      // Move items from this board to unassigned
-      for (const item of this.kanbanItems.values()) {
-        if (item.boardId === id) {
-          item.boardId = undefined;
-        }
-      }
-      await this.persistData();
-    }
     return deleted;
   }
 
@@ -599,14 +528,23 @@ export class AgentManager {
           appendParts.push(`Default iOS Simulator: ${this.settings.defaultSimulatorName || 'Unknown'} (UDID: ${this.settings.defaultSimulatorUdid})`);
         }
       }
-      args.push('--append-system-prompt', appendParts.join('\n\n'));
-
       // Reference directories (multi-folder support)
+      const validRefPaths: string[] = [];
       for (const dir of agent.info.referencePaths) {
         if (existsSync(dir)) {
+          validRefPaths.push(dir);
           args.push('--add-dir', dir);
         }
       }
+      if (validRefPaths.length > 0) {
+        const refNames = validRefPaths.map(p => {
+          const name = p.split('/').pop() || p;
+          return `- ${name}: ${p}`;
+        }).join('\n');
+        appendParts.push(`Reference Directories (read-only context — you have full access to browse these):\n${refNames}\n\nIMPORTANT: These reference directories were explicitly added by the user as additional context for your work. You should be aware of them and use them when relevant. Your primary working directory is: ${agent.info.cwd}`);
+      }
+
+      args.push('--append-system-prompt', appendParts.join('\n\n'));
 
       // Session resumption — continue conversation if we have a session ID
       if (agent.sessionId) {
@@ -1009,6 +947,81 @@ export class AgentManager {
     }
   }
 
+  // --- Terminal Management ---
+
+  getTerminals(): TerminalSession[] {
+    return Array.from(this.terminals.values()).map(t => t.info);
+  }
+
+  async createTerminal(agentId: string, command: string): Promise<TerminalSession> {
+    const agent = this.agents.get(agentId);
+    if (!agent) throw new Error('Agent not found');
+
+    const id = this.generateId();
+    const info: TerminalSession = {
+      id,
+      agentId,
+      command,
+      cwd: agent.info.cwd,
+      status: 'running',
+      createdAt: Date.now(),
+    };
+
+    try {
+      const proc = Bun.spawn(['sh', '-c', command], {
+        cwd: agent.info.cwd,
+        stdin: 'ignore',
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
+
+      const managed: ManagedTerminal = { info, process: proc, outputBuffer: '' };
+      this.terminals.set(id, managed);
+
+      // Stream stdout
+      const readStream = async (stream: ReadableStream<Uint8Array>) => {
+        const reader = stream.getReader();
+        const decoder = new TextDecoder();
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            const text = decoder.decode(value, { stream: true });
+            managed.outputBuffer += text;
+            if (managed.outputBuffer.length > MAX_OUTPUT_BUFFER) {
+              managed.outputBuffer = managed.outputBuffer.slice(-MAX_OUTPUT_BUFFER);
+            }
+            this.onTerminalOutput?.(id, text);
+          }
+        } catch {}
+      };
+
+      readStream(proc.stdout);
+      readStream(proc.stderr);
+
+      // Handle exit
+      proc.exited.then((exitCode) => {
+        managed.info.status = 'stopped';
+        this.onTerminalExit?.(id, exitCode);
+      });
+
+      return info;
+    } catch (e: any) {
+      throw new Error('Failed to spawn terminal: ' + (e.message || 'unknown error'));
+    }
+  }
+
+  async killTerminal(id: string): Promise<boolean> {
+    const terminal = this.terminals.get(id);
+    if (!terminal) return false;
+    try {
+      terminal.process.kill();
+    } catch {}
+    terminal.info.status = 'stopped';
+    this.terminals.delete(id);
+    return true;
+  }
+
   // --- Image handling ---
 
   async sendImage(agentId: string, imageData: string, mimeType: string, prompt?: string): Promise<void> {
@@ -1018,9 +1031,9 @@ export class AgentManager {
     // Determine file extension from mime type
     const ext = mimeType === 'image/png' ? '.png' : mimeType === 'image/jpeg' ? '.jpg' : mimeType === 'image/gif' ? '.gif' : mimeType === 'image/webp' ? '.webp' : '.png';
 
-    // Save image to a temp file in agent's cwd
+    // Save image to system temp dir so it doesn't pollute the git working tree
     const filename = `screenshot_${Date.now()}${ext}`;
-    const filepath = join(agent.info.cwd, filename);
+    const filepath = join(tmpdir(), filename);
 
     try {
       const buffer = Buffer.from(imageData, 'base64');
@@ -1030,10 +1043,10 @@ export class AgentManager {
       const imgMsg = this.addMessage(agentId, 'user', `[Image uploaded: ${filename}]` + (prompt ? '\n' + prompt : ''), imageData, mimeType);
       this.onMessage?.(imgMsg);
 
-      // Send a message to the agent referencing the image file
+      // Send a message to the agent referencing the image file via absolute path (outside repo)
       const content = prompt
-        ? `I've uploaded a screenshot/image to your working directory: ${filename}\n\n${prompt}`
-        : `I've uploaded a screenshot/image to your working directory: ${filename}\nPlease examine this image file at ./${filename} and describe what you see or act on it as appropriate.`;
+        ? `I've uploaded a screenshot/image for you to examine: ${filepath}\n\n${prompt}`
+        : `I've uploaded a screenshot/image for you to examine: ${filepath}\nPlease examine this image file and describe what you see or act on it as appropriate.`;
       await this.sendMessage(agentId, content);
     } catch (e) {
       console.error(`Failed to save image for agent ${agentId}:`, e);
