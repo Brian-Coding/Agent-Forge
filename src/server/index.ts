@@ -420,12 +420,18 @@ const server = Bun.serve({
           const stdout = await new Response(proc.stdout).text();
           if (exitCode !== 0) return jsonResponse({ ports: [] });
           const lines = stdout.trim().split('\n').slice(1); // Skip header
+          // macOS system processes that aren't dev-relevant
+          const SYSTEM_PROCESSES = new Set([
+            'ControlCe', 'rapportd', 'AirPlayXPC', 'sharingd',
+            'remoted', 'identitys', 'WiFiAgent', 'bluetoothd',
+          ]);
           const seen = new Set<string>();
           const ports: { port: number; pid: number; command: string }[] = [];
           for (const line of lines) {
             const parts = line.split(/\s+/);
             if (parts.length < 9) continue;
             const command = parts[0];
+            if (SYSTEM_PROCESSES.has(command)) continue;
             const pid = parseInt(parts[1], 10);
             const nameField = parts[8]; // e.g., *:3333
             const portMatch = nameField.match(/:(\d+)$/);
