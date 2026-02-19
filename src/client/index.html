@@ -218,9 +218,6 @@
     .note-editor textarea:focus { outline: none; border-color: var(--accent); }
     .note-actions { display: flex; gap: 4px; padding: 6px 8px; border-top: 1px solid var(--border); }
 
-    /* Ports panel */
-    .ports-panel { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
-    .ports-list { flex: 1; overflow-y: auto; padding: 4px 8px; }
     .port-item { display: flex; align-items: center; justify-content: space-between; padding: 6px 8px; background: var(--bg-primary); border: 1px solid var(--border); border-radius: 4px; margin-bottom: 3px; font-size: 12px; }
     .port-number { font-weight: 600; color: var(--accent); min-width: 50px; }
     .port-command { flex: 1; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin: 0 8px; }
@@ -418,7 +415,6 @@
       chevron: 'M6 9l6 6 6-6',
       documents: ['M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z', 'M14 2v6h6', 'M16 13H8', 'M16 17H8'],
       image: ['M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4', 'M17 8l-5-5-5 5', 'M12 3v12'],
-      ports: ['M22 12h-4l-3 9L9 3l-3 9H2'],
     };
 
     // ======================== HOOKS ========================
@@ -1485,12 +1481,22 @@
           .catch(() => setKilling(null));
       };
 
-      if (ports.length === 0) return null;
+      // Filter to only dev-relevant ports
+      const devPorts = ports.filter(p => {
+        const cmd = p.command.toLowerCase();
+        // Known dev runtimes and tools
+        if (['node', 'bun', 'deno', 'python', 'python3', 'ruby', 'java', 'go', 'cargo', 'php', 'nginx', 'docker', 'postgres', 'redis', 'mongod', 'mysqld'].some(r => cmd.includes(r))) return true;
+        // Likely dev if on common dev ports
+        if (p.port >= 3000 && p.port <= 9999) return true;
+        return false;
+      });
 
-      return e('div', { style: { borderTop: '1px solid var(--border)', flexShrink: 0 } },
+      if (devPorts.length === 0) return null;
+
+      return e('div', { style: { marginTop: 'auto', borderTop: '1px solid var(--border)', flexShrink: 0 } },
         e('div', { style: { padding: '6px 12px', fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' } }, 'Active Ports'),
         e('div', { style: { padding: '0 8px 6px' } },
-          ports.map((p, i) =>
+          devPorts.map((p, i) =>
             e('div', { key: p.port + '-' + p.pid + '-' + i, style: { display: 'flex', alignItems: 'center', gap: 6, padding: '3px 4px', borderRadius: 4, fontSize: 11 } },
               e('span', { className: 'status-dot status-idle', style: { width: 6, height: 6 } }),
               e('span', { style: { fontWeight: 600, color: 'var(--accent)', minWidth: 36 } }, ':' + p.port),
@@ -1585,8 +1591,6 @@
         e('div', { style: { padding: '8px' } },
           e('button', { className: 'btn btn-primary', style: { width: '100%' }, onClick: () => setShowNewModal(true) }, '+ New Workspace')
         ),
-        // Active ports pinned to bottom
-        e(SidebarPorts),
         e('div', { className: 'shortcuts-hint' },
           e('span', null, e(React.Fragment, null, e('kbd', null, 'Ctrl+N'), ' new agent ', e('kbd', null, 'Esc'), ' stop ', e('kbd', null, 'Ctrl+B'), ' broadcast'))
         ),
@@ -1713,48 +1717,6 @@
           creating
             ? e('button', { className: 'btn btn-primary btn-sm', onClick: handleSaveNew, disabled: !editTitle.trim() }, 'Create')
             : e('button', { className: 'btn btn-primary btn-sm', onClick: handleSaveEdit, disabled: !editTitle.trim() }, 'Save')
-        )
-      );
-    }
-
-    // Ports Panel
-    function PortsPanel() {
-      const [ports, setPorts] = useState([]);
-      const [loading, setLoading] = useState(false);
-      const activeRef = useRef(true);
-
-      const loadPorts = useCallback(() => {
-        setLoading(true);
-        fetch('/api/ports').then(r => r.json()).then(data => {
-          setPorts(data.ports || []);
-          setLoading(false);
-        }).catch(() => setLoading(false));
-      }, []);
-
-      useEffect(() => {
-        activeRef.current = true;
-        loadPorts();
-        const id = setInterval(() => { if (activeRef.current) loadPorts(); }, 10000);
-        return () => { activeRef.current = false; clearInterval(id); };
-      }, [loadPorts]);
-
-      return e('div', { className: 'ports-panel' },
-        e('div', { className: 'sidebar-header' },
-          e('span', null, 'Running Ports'),
-          e('div', { className: 'sidebar-header-actions' },
-            e('button', { className: 'sidebar-btn', onClick: loadPorts, title: 'Refresh' }, '\u21BB')
-          )
-        ),
-        e('div', { className: 'ports-list' },
-          loading && ports.length === 0 && e('div', { style: { padding: 12, color: 'var(--text-muted)', fontSize: 12, textAlign: 'center' } }, 'Loading...'),
-          !loading && ports.length === 0 && e('div', { style: { padding: 12, color: 'var(--text-muted)', fontSize: 12, textAlign: 'center' } }, 'No listening ports found.'),
-          ports.map((p, i) =>
-            e('div', { key: p.port + '-' + p.pid + '-' + i, className: 'port-item' },
-              e('span', { className: 'port-number' }, ':' + p.port),
-              e('span', { className: 'port-command' }, p.command),
-              e('span', { className: 'port-pid' }, 'PID ' + p.pid)
-            )
-          )
         )
       );
     }
@@ -2209,7 +2171,6 @@
         { id: 'agents', icon: ICONS.agents, label: 'Workspaces' },
         { id: 'notes', icon: ICONS.notes, label: 'Notes' },
         { id: 'documents', icon: ICONS.documents, label: 'Documents' },
-        { id: 'ports', icon: ICONS.ports, label: 'Ports' },
         { id: 'emulators', icon: ICONS.emulators, label: 'Emulators' },
       ];
 
@@ -2262,8 +2223,9 @@
             onUpdateDocument: ws.updateDocument,
             onDeleteDocument: ws.deleteDocument,
           }),
-          sidebarTab === 'ports' && e(PortsPanel),
           sidebarTab === 'emulators' && e(EmulatorsPanel, { settings, onUpdateSettings: ws.updateSettings }),
+          // Active ports always pinned to bottom of sidebar
+          e(SidebarPorts),
         ),
 
         // Main content
