@@ -31,7 +31,9 @@
     .activity-bar-bottom { margin-bottom: 8px; }
 
     /* Sidebar Panel */
-    .sidebar-panel { width: 240px; background: var(--bg-secondary); border-right: 1px solid var(--border); display: flex; flex-direction: column; flex-shrink: 0; overflow: hidden; }
+    .sidebar-panel { width: 240px; background: var(--bg-secondary); border-right: 1px solid var(--border); display: flex; flex-direction: column; flex-shrink: 0; overflow: hidden; position: relative; }
+    .sidebar-resize-handle { position: absolute; top: 0; right: -2px; width: 4px; height: 100%; cursor: col-resize; z-index: 10; }
+    .sidebar-resize-handle:hover, .sidebar-resize-handle.active { background: var(--accent); }
     .sidebar-header { padding: 12px 16px; border-bottom: 1px solid var(--border); font-weight: 600; display: flex; align-items: center; justify-content: space-between; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-secondary); }
     .sidebar-header-actions { display: flex; gap: 4px; }
     .sidebar-btn { background: none; border: none; color: var(--text-secondary); cursor: pointer; padding: 4px; border-radius: 4px; font-size: 14px; }
@@ -216,23 +218,10 @@
     .note-editor textarea:focus { outline: none; border-color: var(--accent); }
     .note-actions { display: flex; gap: 4px; padding: 6px 8px; border-top: 1px solid var(--border); }
 
-    /* Kanban panel */
-    .kanban-panel { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
-    .kanban-add { display: flex; gap: 4px; padding: 8px; border-bottom: 1px solid var(--border); }
-    .kanban-add input { flex: 1; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 4px; color: var(--text-primary); font-size: 12px; padding: 5px 8px; }
-    .kanban-add input:focus { outline: none; border-color: var(--accent); }
-    .kanban-columns { flex: 1; overflow-y: auto; padding: 4px 8px; }
-    .kanban-column { margin-bottom: 12px; }
-    .kanban-col-header { display: flex; align-items: center; justify-content: space-between; padding: 4px 0; cursor: pointer; user-select: none; }
-    .kanban-col-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); display: flex; align-items: center; gap: 6px; }
-    .kanban-col-count { font-size: 10px; background: var(--bg-tertiary); border-radius: 8px; padding: 0 6px; color: var(--text-secondary); }
-    .kanban-card { padding: 8px 10px; background: var(--bg-primary); border: 1px solid var(--border); border-radius: 6px; margin-bottom: 4px; font-size: 12px; }
-    .kanban-card-title { font-weight: 500; margin-bottom: 2px; }
-    .kanban-card-desc { color: var(--text-muted); font-size: 11px; }
-    .kanban-card-actions { display: flex; gap: 2px; margin-top: 4px; }
-    .kanban-card-btn { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 11px; padding: 1px 4px; border-radius: 3px; }
-    .kanban-card-btn:hover { background: var(--bg-tertiary); color: var(--text-primary); }
-    .kanban-card-btn.delete:hover { color: var(--error); }
+    .port-item { display: flex; align-items: center; justify-content: space-between; padding: 6px 8px; background: var(--bg-primary); border: 1px solid var(--border); border-radius: 4px; margin-bottom: 3px; font-size: 12px; }
+    .port-number { font-weight: 600; color: var(--accent); min-width: 50px; }
+    .port-command { flex: 1; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin: 0 8px; }
+    .port-pid { font-size: 10px; color: var(--text-muted); }
 
     /* Emulators panel */
     .emu-panel { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
@@ -272,13 +261,6 @@
     .emu-default-btn { background: none; border: none; cursor: pointer; font-size: 14px; padding: 0 4px; color: var(--text-muted); }
     .emu-default-btn:hover { color: var(--warning); }
     .emu-default-btn.is-default { color: var(--warning); }
-
-    /* Kanban board selector (Feature 6) */
-    .kanban-board-bar { display: flex; align-items: center; gap: 4px; padding: 6px 8px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
-    .kanban-board-tab { padding: 2px 8px; font-size: 11px; border-radius: 4px; border: 1px solid var(--border); background: var(--bg-tertiary); color: var(--text-secondary); cursor: pointer; }
-    .kanban-board-tab:hover { border-color: var(--accent); }
-    .kanban-board-tab.active { background: var(--accent); color: white; border-color: var(--accent); }
-    .kanban-board-tab.delete:hover { color: var(--error); }
 
     /* Documents panel (Feature 1) */
     .docs-panel { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
@@ -374,10 +356,29 @@
     .agent-item:hover .agent-edit-btn { opacity: 1; }
     .agent-edit-btn:hover { background: var(--bg-tertiary); color: var(--text-primary); }
 
+    /* Workspace sidebar */
+    .workspace-list { flex: 1; overflow-y: auto; padding: 0 8px; }
+    .workspace-item { padding: 10px 12px; border-radius: 6px; cursor: pointer; margin-bottom: 2px; display: flex; align-items: center; gap: 8px; position: relative; border: 1px solid transparent; }
+    .workspace-item:hover { background: var(--bg-tertiary); }
+    .workspace-item.active { background: rgba(47, 129, 247, 0.12); border-color: var(--accent); }
+    .workspace-name { font-weight: 500; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; }
+    .workspace-meta { font-size: 11px; color: var(--text-muted); }
+    .workspace-delete-btn { background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 2px 4px; border-radius: 3px; font-size: 12px; opacity: 0; }
+    .workspace-item:hover .workspace-delete-btn { opacity: 1; }
+    .workspace-delete-btn:hover { background: var(--error); color: white; }
+    .workspace-agents { padding: 2px 0 4px 20px; }
+    .workspace-agent-chip { display: flex; align-items: center; gap: 6px; padding: 3px 8px; font-size: 11px; color: var(--text-secondary); border-radius: 4px; }
+    .workspace-agent-chip:hover { background: var(--bg-tertiary); }
+
+    /* Empty grid slot */
+    .slot-empty { display: flex; align-items: center; justify-content: center; background: var(--bg-primary); }
+    .slot-add-btn { background: var(--bg-tertiary); border: 2px dashed var(--border); border-radius: 12px; color: var(--text-muted); cursor: pointer; padding: 16px 24px; font-size: 14px; font-weight: 500; transition: all 0.15s; }
+    .slot-add-btn:hover { border-color: var(--accent); color: var(--accent); background: rgba(47, 129, 247, 0.08); }
+
     /* Scrollbars */
-    .panel-content::-webkit-scrollbar, .notes-list::-webkit-scrollbar, .kanban-columns::-webkit-scrollbar, .emu-list::-webkit-scrollbar, .agent-list::-webkit-scrollbar, .docs-list::-webkit-scrollbar { width: 6px; }
-    .panel-content::-webkit-scrollbar-track, .notes-list::-webkit-scrollbar-track, .kanban-columns::-webkit-scrollbar-track, .emu-list::-webkit-scrollbar-track, .agent-list::-webkit-scrollbar-track, .docs-list::-webkit-scrollbar-track { background: transparent; }
-    .panel-content::-webkit-scrollbar-thumb, .notes-list::-webkit-scrollbar-thumb, .kanban-columns::-webkit-scrollbar-thumb, .emu-list::-webkit-scrollbar-thumb, .agent-list::-webkit-scrollbar-thumb, .docs-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+    .panel-content::-webkit-scrollbar, .notes-list::-webkit-scrollbar, .emu-list::-webkit-scrollbar, .agent-list::-webkit-scrollbar, .docs-list::-webkit-scrollbar { width: 6px; }
+    .panel-content::-webkit-scrollbar-track, .notes-list::-webkit-scrollbar-track, .emu-list::-webkit-scrollbar-track, .agent-list::-webkit-scrollbar-track, .docs-list::-webkit-scrollbar-track { background: transparent; }
+    .panel-content::-webkit-scrollbar-thumb, .notes-list::-webkit-scrollbar-thumb, .emu-list::-webkit-scrollbar-thumb, .agent-list::-webkit-scrollbar-thumb, .docs-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
   </style>
 </head>
 <body>
@@ -410,7 +411,6 @@
       agents: ['M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2', 'M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8', 'M23 21v-2a4 4 0 0 0-3-3.87', 'M16 3.13a4 4 0 0 1 0 7.75'],
       notes: ['M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z', 'M14 2v6h6', 'M16 13H8', 'M16 17H8', 'M10 9H8'],
       emulators: ['M12 18h.01', 'M7 21h10a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2z'],
-      kanban: ['M9 3H5a2 2 0 0 0-2 2v4m6-6h10a2 2 0 0 1 2 2v4M9 3v18m0 0h10a2 2 0 0 0 2-2V9M9 21H5a2 2 0 0 1-2-2V9m0 0h18'],
       settings: ['M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z', 'M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z'],
       chevron: 'M6 9l6 6 6-6',
       documents: ['M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z', 'M14 2v6h6', 'M16 13H8', 'M16 17H8'],
@@ -454,12 +454,13 @@
       const [fileChanges, setFileChanges] = useState({});
       const [thinkingOutput, setThinkingOutput] = useState({});
       const [notes, setNotes] = useState([]);
-      const [kanbanItems, setKanbanItems] = useState([]);
-      const [kanbanBoards, setKanbanBoards] = useState([]);
       const [documents, setDocuments] = useState([]);
       const [settings, setSettings] = useState({});
+      const [workspaces, setWorkspaces] = useState([]);
       const [statusStartTimes, setStatusStartTimes] = useState({});
       const [tokenUsage, setTokenUsage] = useState({});
+      const [terminals, setTerminals] = useState([]);
+      const [terminalOutput, setTerminalOutput] = useState({});
       const wsRef = useRef(null);
       const agentsRef = useRef([]);
       const queueRef = useRef({});
@@ -539,12 +540,17 @@
                 setLiveOutput(prev => ({ ...prev, [msg.agentId]: '' }));
                 setThinkingOutput(prev => { const n = {...prev}; delete n[msg.agentId]; return n; });
                 break;
-              case 'output':
-                setLiveOutput(prev => ({
-                  ...prev,
-                  [msg.agentId]: (prev[msg.agentId] || '') + msg.content
-                }));
+              case 'output': {
+                const MAX_LIVE_OUTPUT = 512000; // 500KB cap
+                setLiveOutput(prev => {
+                  let updated = (prev[msg.agentId] || '') + msg.content;
+                  if (updated.length > MAX_LIVE_OUTPUT) {
+                    updated = updated.slice(updated.length - MAX_LIVE_OUTPUT);
+                  }
+                  return { ...prev, [msg.agentId]: updated };
+                });
                 break;
+              }
               case 'thinking_output':
                 setThinkingOutput(prev => ({
                   ...prev,
@@ -570,29 +576,6 @@
               case 'note_deleted':
                 setNotes(prev => prev.filter(n => n.id !== msg.id));
                 break;
-              // Kanban
-              case 'kanban_list':
-                setKanbanItems(msg.items);
-                break;
-              case 'kanban_item_created':
-                setKanbanItems(prev => [...prev, msg.item]);
-                break;
-              case 'kanban_item_updated':
-                setKanbanItems(prev => prev.map(i => i.id === msg.item.id ? msg.item : i));
-                break;
-              case 'kanban_item_deleted':
-                setKanbanItems(prev => prev.filter(i => i.id !== msg.id));
-                break;
-              // Kanban Boards
-              case 'kanban_boards_list':
-                setKanbanBoards(msg.boards);
-                break;
-              case 'kanban_board_created':
-                setKanbanBoards(prev => [...prev, msg.board]);
-                break;
-              case 'kanban_board_deleted':
-                setKanbanBoards(prev => prev.filter(b => b.id !== msg.id));
-                break;
               // Documents
               case 'documents_list':
                 setDocuments(msg.documents);
@@ -614,6 +597,38 @@
               case 'token_usage':
                 setTokenUsage(prev => ({ ...prev, [msg.agentId]: { contextTokens: msg.contextTokens, contextLimit: msg.contextLimit, totalInputTokens: msg.totalInputTokens, totalOutputTokens: msg.totalOutputTokens, totalCostUsd: msg.totalCostUsd, numTurns: msg.numTurns } }));
                 break;
+              // Workspaces
+              case 'workspaces_list':
+                setWorkspaces(msg.workspaces);
+                break;
+              case 'workspace_created':
+                setWorkspaces(prev => [...prev, msg.workspace]);
+                break;
+              case 'workspace_updated':
+                setWorkspaces(prev => prev.map(w => w.id === msg.workspace.id ? msg.workspace : w));
+                break;
+              case 'workspace_deleted':
+                setWorkspaces(prev => prev.filter(w => w.id !== msg.id));
+                break;
+              // Terminals
+              case 'terminals_list':
+                setTerminals(msg.terminals);
+                break;
+              case 'terminal_created':
+                setTerminals(prev => [...prev, msg.terminal]);
+                break;
+              case 'terminal_output': {
+                const MAX_TERM_OUTPUT = 512000;
+                setTerminalOutput(prev => {
+                  let updated = (prev[msg.terminalId] || '') + msg.content;
+                  if (updated.length > MAX_TERM_OUTPUT) updated = updated.slice(updated.length - MAX_TERM_OUTPUT);
+                  return { ...prev, [msg.terminalId]: updated };
+                });
+                break;
+              }
+              case 'terminal_exited':
+                setTerminals(prev => prev.map(t => t.id === msg.terminalId ? { ...t, status: 'stopped' } : t));
+                break;
             }
           };
           wsRef.current = ws;
@@ -623,9 +638,9 @@
       }, [drainQueue, sendRaw]);
 
       return {
-        connected, agents, messages, liveOutput, queued, sharedContext, fileChanges, thinkingOutput, notes, kanbanItems, kanbanBoards, documents, settings, statusStartTimes, tokenUsage,
-        createAgent: (name, cwd, referencePaths, systemPrompt) => {
-          sendRaw({ type: 'create_agent', name, cwd, referencePaths, systemPrompt });
+        connected, agents, messages, liveOutput, queued, sharedContext, fileChanges, thinkingOutput, notes, documents, settings, workspaces, statusStartTimes, tokenUsage, terminals, terminalOutput,
+        createAgent: (name, cwd, referencePaths, systemPrompt, workspaceId) => {
+          sendRaw({ type: 'create_agent', name, cwd, referencePaths, systemPrompt, workspaceId });
         },
         sendMessage: (agentId, content) => {
           const agent = agentsRef.current.find(a => a.id === agentId);
@@ -646,13 +661,6 @@
         createNote: (title, content, agentId) => sendRaw({ type: 'create_note', title, content, agentId }),
         updateNote: (id, updates) => sendRaw({ type: 'update_note', id, ...updates }),
         deleteNote: (id) => sendRaw({ type: 'delete_note', id }),
-        // Kanban
-        createKanbanItem: (title, description, column, boardId) => sendRaw({ type: 'create_kanban_item', title, description, column, boardId }),
-        updateKanbanItem: (id, updates) => sendRaw({ type: 'update_kanban_item', id, ...updates }),
-        deleteKanbanItem: (id) => sendRaw({ type: 'delete_kanban_item', id }),
-        // Kanban Boards
-        createKanbanBoard: (name, projectPath) => sendRaw({ type: 'create_kanban_board', name, projectPath }),
-        deleteKanbanBoard: (id) => sendRaw({ type: 'delete_kanban_board', id }),
         // Documents
         createDocument: (title, content, agentId) => sendRaw({ type: 'create_document', title, content, agentId }),
         updateDocument: (id, updates) => sendRaw({ type: 'update_document', id, ...updates }),
@@ -663,6 +671,14 @@
         sendImage: (agentId, imageData, mimeType, prompt) => sendRaw({ type: 'send_image', agentId, imageData, mimeType, prompt }),
         // Update agent
         updateAgent: (id, updates) => sendRaw({ type: 'update_agent', id, ...updates }),
+        // Workspaces
+        createWorkspace: (name) => sendRaw({ type: 'create_workspace', name }),
+        updateWorkspace: (id, updates) => sendRaw({ type: 'update_workspace', id, ...updates }),
+        deleteWorkspace: (id) => sendRaw({ type: 'delete_workspace', id }),
+        setActiveWorkspace: (id) => sendRaw({ type: 'set_active_workspace', id }),
+        // Terminals
+        createTerminal: (agentId, command) => sendRaw({ type: 'create_terminal', agentId, command }),
+        killTerminal: (id) => sendRaw({ type: 'kill_terminal', id }),
       };
     }
 
@@ -689,8 +705,8 @@
       });
     }
 
-    // Markdown renderer for assistant messages
-    function MarkdownContent({ content, searchQuery }) {
+    // Markdown renderer for assistant messages (memoized)
+    const MarkdownContent = React.memo(function MarkdownContent({ content, searchQuery }) {
       const ref = useRef(null);
       useEffect(() => {
         if (ref.current) {
@@ -718,7 +734,7 @@
         } catch { return content; }
       }, [content, searchQuery]);
       return e('div', { ref, className: 'chat-turn-content', dangerouslySetInnerHTML: { __html: html } });
-    }
+    });
 
     // Thinking Block
     function ThinkingBlock({ content, isActive }) {
@@ -752,44 +768,56 @@
     }
 
     // Folder Browser
-    function FolderBrowser({ onSelect }) {
+    function FolderBrowser({ onSelect, defaultPath }) {
       const [currentPath, setCurrentPath] = useState('');
       const [directories, setDirectories] = useState([]);
       const [homePath, setHomePath] = useState('');
       const [loading, setLoading] = useState(true);
+      const [searchFilter, setSearchFilter] = useState('');
 
       const load = useCallback((path) => {
         setLoading(true);
         const url = path ? '/api/directories?path=' + encodeURIComponent(path) : '/api/directories';
         fetch(url).then(r => r.json()).then(data => {
           setCurrentPath(data.path); setDirectories(data.directories || []); setHomePath(data.home); setLoading(false);
+          if (data.home) window.__HOME_PATH = data.home;
         }).catch(() => setLoading(false));
       }, []);
 
-      useEffect(() => { load(''); }, [load]);
+      useEffect(() => { load(defaultPath || ''); }, [load, defaultPath]);
 
       const goUp = () => { const parts = currentPath.split('/').filter(Boolean); parts.pop(); load('/' + parts.join('/') || '/'); };
       const canGoUp = currentPath && currentPath !== '/' && currentPath !== homePath;
 
+      const filteredDirs = searchFilter
+        ? directories.filter(dir => dir.name.toLowerCase().includes(searchFilter.toLowerCase()))
+        : directories;
+
       return e('div', { className: 'folder-browser' },
+        e('input', {
+          style: { width: '100%', padding: '6px 10px', background: 'var(--bg-tertiary)', border: 'none', borderBottom: '1px solid var(--border)', color: 'var(--text-primary)', fontSize: 12, outline: 'none' },
+          value: searchFilter,
+          onChange: (ev) => setSearchFilter(ev.target.value),
+          placeholder: 'Search folder...',
+        }),
         e('div', { className: 'folder-path' }, currentPath || 'Loading...'),
         e('div', { className: 'folder-list' },
           loading ? e('div', { style: { padding: 8, color: 'var(--text-muted)', fontSize: 11 } }, 'Loading...') :
           e(React.Fragment, null,
             canGoUp && e('div', { className: 'folder-item', onClick: goUp }, '\u2191 ..'),
-            directories.map(dir => e('div', { key: dir.path, className: 'folder-item', onClick: () => load(dir.path) }, '\uD83D\uDCC1 ' + dir.name)),
-            directories.length === 0 && e('div', { style: { padding: 8, color: 'var(--text-muted)', fontSize: 11 } }, 'Empty')
+            filteredDirs.map(dir => e('div', { key: dir.path, className: 'folder-item', onClick: () => { load(dir.path); setSearchFilter(''); } }, '\uD83D\uDCC1 ' + dir.name)),
+            filteredDirs.length === 0 && e('div', { style: { padding: 8, color: 'var(--text-muted)', fontSize: 11 } }, 'Empty')
           )
         ),
         e('div', { className: 'folder-actions' },
-          e('button', { type: 'button', className: 'browse-btn', onClick: () => load(homePath || '') }, 'Home'),
+          e('button', { type: 'button', className: 'browse-btn', onClick: () => { load(homePath || ''); setSearchFilter(''); } }, 'Home'),
           e('button', { type: 'button', className: 'btn btn-primary', onClick: () => onSelect(currentPath), style: { marginLeft: 'auto' }, disabled: !currentPath }, 'Select')
         )
       );
     }
 
     // New Agent Modal (also used for editing)
-    function NewAgentModal({ isOpen, onClose, onCreate, editAgent, onUpdate }) {
+    function NewAgentModal({ isOpen, onClose, onCreate, editAgent, onUpdate, workspaceId }) {
       const [name, setName] = useState('');
       const [cwd, setCwd] = useState('');
       const [systemPrompt, setSystemPrompt] = useState('');
@@ -820,7 +848,7 @@
           if (isEditing && onUpdate) {
             onUpdate(editAgent.id, { name: name.trim(), cwd: cwd.trim(), referencePaths, systemPrompt: systemPrompt.trim() });
           } else {
-            onCreate(name.trim(), cwd.trim(), referencePaths, systemPrompt.trim());
+            onCreate(name.trim(), cwd.trim(), referencePaths, systemPrompt.trim(), workspaceId);
           }
           setName(''); setCwd(''); setSystemPrompt(''); setReferencePaths([]);
           setShowCwdBrowser(false); setShowRefBrowser(false); onClose();
@@ -837,7 +865,7 @@
           e('div', { className: 'form-group' },
             e('label', { className: 'form-label' }, 'Working Directory'),
             showCwdBrowser
-              ? e(FolderBrowser, { onSelect: (p) => { setCwd(p); setShowCwdBrowser(false); } })
+              ? e(FolderBrowser, { defaultPath: cwd || (window.__HOME_PATH ? window.__HOME_PATH + '/Documents/GitHub' : ''), onSelect: (p) => { setCwd(p); setShowCwdBrowser(false); } })
               : e('button', { type: 'button', className: 'browse-btn', onClick: () => setShowCwdBrowser(true), style: { width: '100%', textAlign: 'left' } }, cwd || 'Browse for folder...'),
             cwd && !showCwdBrowser && e('div', { className: 'form-hint' }, 'Selected: ' + cwd)
           ),
@@ -845,7 +873,7 @@
             e('label', { className: 'form-label' }, 'Reference Directories (optional)'),
             e('div', { className: 'form-hint', style: { marginBottom: 6 } }, 'Additional repos/folders this agent should be aware of'),
             showRefBrowser
-              ? e(FolderBrowser, { onSelect: (p) => { if (!referencePaths.includes(p)) setReferencePaths(prev => [...prev, p]); setShowRefBrowser(false); } })
+              ? e(FolderBrowser, { defaultPath: window.__HOME_PATH ? window.__HOME_PATH + '/Documents/GitHub' : '', onSelect: (p) => { if (!referencePaths.includes(p)) setReferencePaths(prev => [...prev, p]); setShowRefBrowser(false); } })
               : e('button', { type: 'button', className: 'browse-btn', onClick: () => setShowRefBrowser(true), style: { width: '100%', textAlign: 'left' } }, '+ Add reference directory'),
             referencePaths.length > 0 && e('div', { className: 'ref-paths-list' },
               referencePaths.map((p, i) => e('div', { key: i, className: 'ref-path-item' },
@@ -897,8 +925,8 @@
       );
     }
 
-    // Chat Turn
-    function ChatTurn({ role, content, isStreaming, imageData, imageMimeType, showToolMessages, searchQuery, showRetry, onRetry }) {
+    // Chat Turn (memoized for performance)
+    const ChatTurn = React.memo(function ChatTurn({ role, content, isStreaming, imageData, imageMimeType, showToolMessages, searchQuery, showRetry, onRetry }) {
       const [copied, setCopied] = useState(false);
       const roleLabels = { user: 'You', assistant: 'Claude', system: 'System' };
       const turnClass = isStreaming ? 'chat-turn chat-turn-streaming' : 'chat-turn chat-turn-' + role;
@@ -927,10 +955,12 @@
             ),
         showRetry && onRetry && e('button', { className: 'retry-btn', onClick: onRetry }, '\u21BB Retry')
       );
-    }
+    }, (prev, next) => {
+      return prev.content === next.content && prev.role === next.role && prev.isStreaming === next.isStreaming && prev.searchQuery === next.searchQuery && prev.showToolMessages === next.showToolMessages && prev.showRetry === next.showRetry && prev.imageData === next.imageData;
+    });
 
     // Terminal Panel
-    function TerminalPanel({ agent, messages, liveOutput, queuedMessages, fileChanges, thinkingOutput, statusStartTime, tokenUsage, onSendMessage, onSendImage, onStop, onClearHistory, onClearFileChanges, onMinimize, onMaximize, isMaximized, onFocus, isFocused }) {
+    function TerminalPanel({ agent, messages, liveOutput, queuedMessages, fileChanges, thinkingOutput, statusStartTime, tokenUsage, terminals, terminalOutput, onSendMessage, onSendImage, onStop, onClearHistory, onClearFileChanges, onMinimize, onMaximize, isMaximized, onFocus, isFocused, onCreateTerminal, onKillTerminal }) {
       const [input, setInput] = useState('');
       const [inputHistory, setInputHistory] = useState([]);
       const [historyIdx, setHistoryIdx] = useState(-1);
@@ -943,6 +973,12 @@
       const [searchVisible, setSearchVisible] = useState(false);
       const [searchQuery, setSearchQuery] = useState('');
       const [searchMatchIndex, setSearchMatchIndex] = useState(0);
+      const [showAllMessages, setShowAllMessages] = useState(false);
+      const MESSAGE_PAGE_SIZE = 100;
+      const [showTerminalModal, setShowTerminalModal] = useState(false);
+      const [terminalCommand, setTerminalCommand] = useState('');
+      const [showTerminals, setShowTerminals] = useState(true);
+      const [gitBranch, setGitBranch] = useState(null);
       const contentRef = useRef(null);
       const inputRef = useRef(null);
       const anchorRef = useRef(null);
@@ -952,6 +988,15 @@
 
       // Elapsed time for status (Feature 5)
       const { elapsed, isStuck } = useElapsed(agent?.status, statusStartTime);
+
+      // Fetch git branch on mount and when cwd changes
+      useEffect(() => {
+        if (!agent?.cwd) { setGitBranch(null); return; }
+        fetch('/api/git-branch?path=' + encodeURIComponent(agent.cwd))
+          .then(r => r.json())
+          .then(data => setGitBranch(data.branch || null))
+          .catch(() => setGitBranch(null));
+      }, [agent?.cwd]);
 
       // Auto-scroll: track whether user has scrolled up (Feature 4)
       useEffect(() => {
@@ -1126,7 +1171,10 @@
       const thinking = thinkingOutput || '';
 
       // Status text for header (Feature 5)
-      const statusText = isWorking && elapsed ? (agent.status === 'thinking' ? 'Thinking' : 'Working') + '... ' + elapsed + (isStuck ? ' (may be stuck)' : '') : '';
+      const statusTextMap = { idle: 'Idle', working: 'Working...', thinking: 'Thinking...', error: 'Error', stopped: 'Stopped' };
+      const statusText = isWorking && elapsed
+        ? (agent.status === 'thinking' ? 'Thinking' : 'Working') + '... ' + elapsed + (isStuck ? ' (may be stuck)' : '')
+        : statusTextMap[agent.status] || '';
 
       return e('div', {
         className: 'terminal-panel' + (isFocused ? ' focused' : ''),
@@ -1147,9 +1195,11 @@
           e('div', { className: 'panel-title' },
             e('span', { className: 'status-dot status-' + agent.status }),
             e('span', { className: 'panel-title-name' }, agent.name),
+            gitBranch && e('span', { style: { fontSize: 10, color: 'var(--text-muted)', marginLeft: 4, flexShrink: 0 } }, '[' + gitBranch + ']'),
             statusText && e('span', { className: 'status-elapsed' + (isStuck ? ' status-stuck' : '') }, statusText)
           ),
           e('div', { className: 'panel-actions' },
+            e('button', { className: 'panel-btn', onClick: () => setShowTerminalModal(true), title: 'Run command' }, '\u25B6'),
             e('button', { className: 'panel-btn', onClick: () => { setSearchVisible(prev => !prev); setTimeout(() => searchInputRef.current?.focus(), 50); }, title: 'Search (Ctrl+F)' }, '\uD83D\uDD0D'),
             e('button', { className: 'panel-btn tool-filter-btn' + (showToolMessages ? ' active' : ''), onClick: () => setShowToolMessages(prev => !prev), title: showToolMessages ? 'Hide tool calls' : 'Show tool calls' }, 'Tools'),
             isWorking && e('button', { className: 'panel-btn panel-btn-stop', onClick: () => onStop(agent.id), title: 'Stop (Esc)' }, 'Stop'),
@@ -1211,17 +1261,31 @@
                 )
               )
             : e(React.Fragment, null,
-                msgs.map((m, i) => e(ChatTurn, {
-                  key: m.id || i,
-                  role: m.role,
-                  content: m.content,
-                  imageData: m.imageData,
-                  imageMimeType: m.imageMimeType,
-                  showToolMessages,
-                  searchQuery: searchVisible ? searchQuery : '',
-                  showRetry: i === lastUserMsgIndex && m.role === 'user' && !isWorking,
-                  onRetry: i === lastUserMsgIndex ? () => onSendMessage(m.content) : undefined,
-                })),
+                (() => {
+                  const totalMsgs = msgs.length;
+                  const startIdx = showAllMessages || totalMsgs <= MESSAGE_PAGE_SIZE ? 0 : totalMsgs - MESSAGE_PAGE_SIZE;
+                  const visibleMsgs = msgs.slice(startIdx);
+                  return e(React.Fragment, null,
+                    startIdx > 0 && e('button', {
+                      style: { display: 'block', width: '100%', padding: '8px', background: 'var(--bg-tertiary)', border: 'none', borderBottom: '1px solid var(--border)', color: 'var(--accent)', cursor: 'pointer', fontSize: 12 },
+                      onClick: () => setShowAllMessages(true),
+                    }, 'Load ' + startIdx + ' earlier messages'),
+                    visibleMsgs.map((m, i) => {
+                      const realIdx = startIdx + i;
+                      return e(ChatTurn, {
+                        key: m.id || realIdx,
+                        role: m.role,
+                        content: m.content,
+                        imageData: m.imageData,
+                        imageMimeType: m.imageMimeType,
+                        showToolMessages,
+                        searchQuery: searchVisible ? searchQuery : '',
+                        showRetry: realIdx === lastUserMsgIndex && m.role === 'user' && !isWorking,
+                        onRetry: realIdx === lastUserMsgIndex ? () => onSendMessage(m.content) : undefined,
+                      });
+                    })
+                  );
+                })(),
                 thinking && e(ThinkingBlock, { key: 'thinking', content: thinking, isActive: agent.status === 'thinking' }),
                 liveOutput && e(ChatTurn, { key: 'live', role: 'assistant', content: liveOutput, isStreaming: isWorking, showToolMessages }),
                 queued.map((q, i) => e('div', { key: 'q' + i, className: 'chat-turn chat-turn-queued' },
@@ -1235,6 +1299,70 @@
             className: 'auto-scroll-btn',
             onClick: () => { setAutoScrollEnabled(true); if (contentRef.current) contentRef.current.scrollTop = contentRef.current.scrollHeight; }
           }, '\u2193 Auto-scroll')
+        ),
+        // Terminal output section
+        (() => {
+          const agentTerminals = (terminals || []).filter(t => t.agentId === agent.id);
+          if (agentTerminals.length === 0) return null;
+          return e('div', { style: { borderTop: '1px solid var(--border)', flexShrink: 0, maxHeight: showTerminals ? 200 : 24, overflow: 'hidden', transition: 'max-height 0.2s' } },
+            e('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '2px 8px', background: 'var(--bg-tertiary)', cursor: 'pointer', fontSize: 11, color: 'var(--text-secondary)' }, onClick: () => setShowTerminals(prev => !prev) },
+              e('span', null, (showTerminals ? '\u25BC' : '\u25B6') + ' Terminals (' + agentTerminals.length + ')'),
+              e('span', null, '')
+            ),
+            showTerminals && agentTerminals.map(t =>
+              e('div', { key: t.id, style: { borderTop: '1px solid var(--border)' } },
+                e('div', { style: { display: 'flex', alignItems: 'center', gap: 6, padding: '2px 8px', background: 'var(--bg-secondary)', fontSize: 11 } },
+                  e('span', { className: 'status-dot status-' + (t.status === 'running' ? 'working' : 'stopped'), style: { width: 6, height: 6 } }),
+                  e('span', { style: { flex: 1, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, t.command),
+                  t.status === 'running' && onKillTerminal && e('button', { className: 'panel-btn panel-btn-stop', style: { fontSize: 10, padding: '1px 4px' }, onClick: () => onKillTerminal(t.id) }, 'Stop')
+                ),
+                e('pre', { style: { padding: '4px 8px', fontSize: 11, fontFamily: "'SF Mono', Monaco, Consolas, monospace", color: 'var(--text-secondary)', background: 'var(--bg-primary)', maxHeight: 120, overflowY: 'auto', whiteSpace: 'pre-wrap', wordWrap: 'break-word', margin: 0 } },
+                  (terminalOutput || {})[t.id] || '(no output yet)'
+                )
+              )
+            )
+          );
+        })(),
+        // Terminal command modal
+        showTerminalModal && e('div', { className: 'modal-overlay', onClick: (ev) => { if (ev.target === ev.currentTarget) setShowTerminalModal(false); } },
+          e('div', { className: 'modal', style: { maxWidth: 420 } },
+            e('h2', { className: 'modal-title' }, 'Run Command'),
+            e('div', { className: 'form-group' },
+              e('label', { className: 'form-label' }, 'Command'),
+              e('input', {
+                className: 'form-input',
+                value: terminalCommand,
+                onChange: (ev) => setTerminalCommand(ev.target.value),
+                onKeyDown: (ev) => {
+                  if (ev.key === 'Enter' && terminalCommand.trim()) {
+                    onCreateTerminal && onCreateTerminal(agent.id, terminalCommand.trim());
+                    setTerminalCommand('');
+                    setShowTerminalModal(false);
+                  }
+                },
+                placeholder: 'e.g., npm run dev, bun run dev, python server.py',
+                autoFocus: true,
+              }),
+              e('div', { className: 'form-hint' }, 'Runs in: ' + agent.cwd)
+            ),
+            e('div', { style: { display: 'flex', gap: 4, flexWrap: 'wrap' } },
+              ['npm run dev', 'bun run dev', 'npm test', 'bun test'].map(cmd =>
+                e('button', {
+                  key: cmd,
+                  className: 'btn btn-secondary btn-sm',
+                  onClick: () => { setTerminalCommand(cmd); }
+                }, cmd)
+              )
+            ),
+            e('div', { className: 'modal-actions' },
+              e('button', { className: 'btn btn-secondary', onClick: () => setShowTerminalModal(false) }, 'Cancel'),
+              e('button', { className: 'btn btn-primary', disabled: !terminalCommand.trim(), onClick: () => {
+                onCreateTerminal && onCreateTerminal(agent.id, terminalCommand.trim());
+                setTerminalCommand('');
+                setShowTerminalModal(false);
+              } }, 'Run')
+            )
+          )
         ),
         // Input
         e('div', { className: 'panel-input-container' },
@@ -1274,11 +1402,14 @@
       const { elapsed, isStuck } = useElapsed(agent.status, statusStartTimes[agent.id]);
       if (agent.status === 'thinking') return e('span', { className: isStuck ? 'status-stuck' : '' }, 'Thinking...' + (elapsed ? ' ' + elapsed : ''));
       if (agent.status === 'working') return e('span', { className: isStuck ? 'status-stuck' : '' }, 'Working...' + (elapsed ? ' ' + elapsed : '') + (isStuck ? ' (may be stuck)' : ''));
-      if (agent.status === 'idle' && statusStartTimes[agent.id]) {
+      if (agent.status === 'error') return e('span', { style: { color: 'var(--error)' } }, 'Error');
+      if (agent.status === 'stopped') return e('span', { style: { color: 'var(--text-muted)' } }, 'Stopped');
+      // idle
+      if (statusStartTimes[agent.id]) {
         const ago = Math.floor((Date.now() - statusStartTimes[agent.id]) / 1000);
         if (ago < 300) return e('span', null, 'Idle ' + (ago < 60 ? ago + 's' : Math.floor(ago/60) + 'm') + ' ago');
       }
-      return e('span', null, agent.cwd.split('/').pop());
+      return e('span', null, 'Idle');
     }
 
     function AgentsSidebar({ agents, selectedAgents, totalPanels, onToggle, onRemove, onNewAgent, onEdit, statusStartTimes }) {
@@ -1323,6 +1454,179 @@
         ),
         e('div', { className: 'shortcuts-hint' },
           e('span', null, e(React.Fragment, null, e('kbd', null, 'Ctrl+N'), ' new ', e('kbd', null, 'Esc'), ' stop ', e('kbd', null, 'Ctrl+B'), ' broadcast'))
+        )
+      );
+    }
+
+    // Workspaces Sidebar
+    // Sidebar bottom ports widget
+    function SidebarPorts() {
+      const [ports, setPorts] = useState([]);
+      const [killing, setKilling] = useState(null);
+
+      const loadPorts = useCallback(() => {
+        fetch('/api/ports').then(r => r.json()).then(data => setPorts(data.ports || [])).catch(() => {});
+      }, []);
+
+      useEffect(() => {
+        loadPorts();
+        const id = setInterval(loadPorts, 10000);
+        return () => clearInterval(id);
+      }, [loadPorts]);
+
+      const killPort = (pid) => {
+        setKilling(pid);
+        fetch('/api/ports/kill', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pid }) })
+          .then(() => { setTimeout(loadPorts, 500); setKilling(null); })
+          .catch(() => setKilling(null));
+      };
+
+      // Filter to only dev-relevant ports
+      const devPorts = ports.filter(p => {
+        const cmd = p.command.toLowerCase();
+        // Known dev runtimes and tools
+        if (['node', 'bun', 'deno', 'python', 'python3', 'ruby', 'java', 'go', 'cargo', 'php', 'nginx', 'docker', 'postgres', 'redis', 'mongod', 'mysqld'].some(r => cmd.includes(r))) return true;
+        // Likely dev if on common dev ports
+        if (p.port >= 3000 && p.port <= 9999) return true;
+        return false;
+      });
+
+      if (devPorts.length === 0) return null;
+
+      return e('div', { style: { marginTop: 'auto', borderTop: '1px solid var(--border)', flexShrink: 0 } },
+        e('div', { style: { padding: '6px 12px', fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' } }, 'Active Ports'),
+        e('div', { style: { padding: '0 8px 6px' } },
+          devPorts.map((p, i) =>
+            e('div', { key: p.port + '-' + p.pid + '-' + i, style: { display: 'flex', alignItems: 'center', gap: 6, padding: '3px 4px', borderRadius: 4, fontSize: 11 } },
+              e('span', { className: 'status-dot status-idle', style: { width: 6, height: 6 } }),
+              e('span', { style: { fontWeight: 600, color: 'var(--accent)', minWidth: 36 } }, ':' + p.port),
+              e('span', { style: { flex: 1, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, p.command),
+              e('button', {
+                style: { background: 'none', border: 'none', color: killing === p.pid ? 'var(--text-muted)' : 'var(--error)', cursor: 'pointer', padding: '0 2px', fontSize: 11, opacity: 0.7 },
+                onClick: () => { if (confirm('Kill ' + p.command + ' on port ' + p.port + '?')) killPort(p.pid); },
+                title: 'Kill process (PID ' + p.pid + ')',
+              }, '\u00D7')
+            )
+          )
+        )
+      );
+    }
+
+    function WorkspacesSidebar({ workspaces, agents, activeWorkspaceId, onSelectWorkspace, onCreateWorkspace, onDeleteWorkspace, onRenameWorkspace, onNewAgent, onEditAgent, onRemoveAgent, statusStartTimes }) {
+      const [showNewModal, setShowNewModal] = useState(false);
+      const [renamingId, setRenamingId] = useState(null);
+      const [renameValue, setRenameValue] = useState('');
+
+      const startRename = (ws) => { setRenamingId(ws.id); setRenameValue(ws.name); };
+      const commitRename = () => {
+        if (renamingId && renameValue.trim()) {
+          onRenameWorkspace(renamingId, renameValue.trim());
+        }
+        setRenamingId(null);
+      };
+
+      return e(React.Fragment, null,
+        e('div', { className: 'sidebar-header' },
+          e('span', null, 'Workspaces'),
+          e('div', { className: 'sidebar-header-actions' },
+            e('button', { className: 'sidebar-btn', onClick: () => setShowNewModal(true), title: 'New Workspace' }, '+')
+          )
+        ),
+        e('div', { className: 'workspace-list' },
+          workspaces.length === 0
+            ? e('div', { style: { padding: 12, color: 'var(--text-muted)', fontSize: 12 } }, 'No workspaces yet.')
+            : workspaces.map(ws => {
+                const wsAgents = agents.filter(a => a.workspaceId === ws.id);
+                const isActive = ws.id === activeWorkspaceId;
+                return e(React.Fragment, { key: ws.id },
+                  e('div', {
+                    className: 'workspace-item' + (isActive ? ' active' : ''),
+                    onClick: () => onSelectWorkspace(ws.id),
+                  },
+                    e('div', { style: { flex: 1, minWidth: 0 } },
+                      renamingId === ws.id
+                        ? e('input', {
+                            className: 'workspace-name',
+                            style: { background: 'var(--bg-tertiary)', border: '1px solid var(--accent)', borderRadius: 4, color: 'var(--text-primary)', padding: '2px 6px', fontSize: 13, fontWeight: 500, width: '100%', outline: 'none' },
+                            value: renameValue,
+                            onChange: (ev) => setRenameValue(ev.target.value),
+                            onKeyDown: (ev) => { if (ev.key === 'Enter') commitRename(); if (ev.key === 'Escape') setRenamingId(null); },
+                            onBlur: commitRename,
+                            onClick: (ev) => ev.stopPropagation(),
+                            autoFocus: true,
+                          })
+                        : e('div', { className: 'workspace-name', onDoubleClick: (ev) => { ev.stopPropagation(); startRename(ws); } }, ws.name),
+                      e('div', { className: 'workspace-meta' }, wsAgents.length + ' agent' + (wsAgents.length !== 1 ? 's' : '') + ' \u00B7 ' + ws.gridColumns + '\u00D7' + ws.gridRows + ' grid')
+                    ),
+                    workspaces.length > 1 && e('button', {
+                      className: 'workspace-delete-btn',
+                      onClick: (ev) => { ev.stopPropagation(); if (confirm('Delete workspace "' + ws.name + '"? Agents will be moved to another workspace.')) onDeleteWorkspace(ws.id); },
+                      title: 'Delete workspace'
+                    }, '\u00D7')
+                  ),
+                  isActive && wsAgents.length > 0 && e('div', { className: 'workspace-agents' },
+                    wsAgents.map(agent =>
+                      e('div', { key: agent.id, className: 'workspace-agent-chip' },
+                        e('span', { className: 'status-dot status-' + agent.status }),
+                        e('span', { style: { flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, agent.name),
+                        e('span', { style: { fontSize: 10, color: 'var(--text-muted)', flexShrink: 0 } }, e(AgentStatusText, { agent, statusStartTimes })),
+                        onEditAgent && e('button', {
+                          className: 'agent-edit-btn',
+                          style: { opacity: 0.7 },
+                          onClick: (ev) => { ev.stopPropagation(); onEditAgent(agent); },
+                          title: 'Edit agent'
+                        }, '\u270E'),
+                        e('button', {
+                          className: 'agent-delete-btn',
+                          style: { opacity: 0.7 },
+                          onClick: (ev) => { ev.stopPropagation(); if (confirm('Delete agent "' + agent.name + '"?')) onRemoveAgent(agent.id); },
+                          title: 'Delete agent'
+                        }, '\u00D7')
+                      )
+                    )
+                  )
+                );
+              })
+        ),
+        e('div', { style: { padding: '8px' } },
+          e('button', { className: 'btn btn-primary', style: { width: '100%' }, onClick: () => setShowNewModal(true) }, '+ New Workspace')
+        ),
+        e('div', { className: 'shortcuts-hint' },
+          e('span', null, e(React.Fragment, null, e('kbd', null, 'Ctrl+N'), ' new agent ', e('kbd', null, 'Esc'), ' stop ', e('kbd', null, 'Ctrl+B'), ' broadcast'))
+        ),
+        showNewModal && e(NewWorkspaceModal, { isOpen: true, onClose: () => setShowNewModal(false), onCreate: onCreateWorkspace })
+      );
+    }
+
+    // New Workspace Modal
+    function NewWorkspaceModal({ isOpen, onClose, onCreate }) {
+      const [name, setName] = useState('');
+      if (!isOpen) return null;
+      const handleSubmit = () => {
+        if (name.trim()) {
+          onCreate(name.trim());
+          setName('');
+          onClose();
+        }
+      };
+      return e('div', { className: 'modal-overlay', onClick: (ev) => ev.target === ev.currentTarget && onClose() },
+        e('div', { className: 'modal', style: { maxWidth: 400 } },
+          e('h2', { className: 'modal-title' }, 'New Workspace'),
+          e('div', { className: 'form-group' },
+            e('label', { className: 'form-label' }, 'Workspace Name'),
+            e('input', {
+              className: 'form-input',
+              value: name,
+              onChange: (ev) => setName(ev.target.value),
+              onKeyDown: (ev) => { if (ev.key === 'Enter') handleSubmit(); },
+              placeholder: 'e.g., Web app, Billing service, Mobile',
+              autoFocus: true,
+            })
+          ),
+          e('div', { className: 'modal-actions' },
+            e('button', { type: 'button', className: 'btn btn-secondary', onClick: onClose }, 'Cancel'),
+            e('button', { type: 'button', className: 'btn btn-primary', disabled: !name.trim(), onClick: handleSubmit }, 'Create Workspace')
+          )
         )
       );
     }
@@ -1413,89 +1717,6 @@
           creating
             ? e('button', { className: 'btn btn-primary btn-sm', onClick: handleSaveNew, disabled: !editTitle.trim() }, 'Create')
             : e('button', { className: 'btn btn-primary btn-sm', onClick: handleSaveEdit, disabled: !editTitle.trim() }, 'Save')
-        )
-      );
-    }
-
-    // Kanban Panel — with per-project boards (Feature 6)
-    function KanbanPanel({ items, boards, onCreateItem, onUpdateItem, onDeleteItem, onCreateBoard, onDeleteBoard }) {
-      const [newTitle, setNewTitle] = useState('');
-      const [selectedBoard, setSelectedBoard] = useState(null); // null = 'All'
-      const [newBoardName, setNewBoardName] = useState('');
-      const [showNewBoard, setShowNewBoard] = useState(false);
-      const COLUMNS = [
-        { key: 'backlog', label: 'Backlog' },
-        { key: 'in_progress', label: 'In Progress' },
-        { key: 'done', label: 'Done' },
-      ];
-      const columnOrder = { backlog: 'in_progress', in_progress: 'done' };
-      const columnBack = { in_progress: 'backlog', done: 'in_progress' };
-
-      const filteredItems = selectedBoard ? items.filter(i => i.boardId === selectedBoard) : items;
-
-      const handleAdd = () => {
-        if (newTitle.trim()) {
-          onCreateItem(newTitle.trim(), '', 'backlog', selectedBoard || undefined);
-          setNewTitle('');
-        }
-      };
-
-      const handleNewBoard = () => {
-        if (newBoardName.trim()) {
-          onCreateBoard(newBoardName.trim());
-          setNewBoardName('');
-          setShowNewBoard(false);
-        }
-      };
-
-      return e('div', { className: 'kanban-panel' },
-        e('div', { className: 'sidebar-header' }, e('span', null, 'Kanban')),
-        // Board selector bar (Feature 6)
-        e('div', { className: 'kanban-board-bar' },
-          e('button', { className: 'kanban-board-tab' + (!selectedBoard ? ' active' : ''), onClick: () => setSelectedBoard(null) }, 'All'),
-          boards.map(board =>
-            e('button', { key: board.id, className: 'kanban-board-tab' + (selectedBoard === board.id ? ' active' : ''), onClick: () => setSelectedBoard(board.id), onContextMenu: (ev) => { ev.preventDefault(); if (confirm('Delete board "' + board.name + '"? Items will become unassigned.')) onDeleteBoard(board.id); } }, board.name)
-          ),
-          showNewBoard
-            ? e(React.Fragment, null,
-                e('input', { value: newBoardName, onChange: (ev) => setNewBoardName(ev.target.value), onKeyDown: (ev) => { if (ev.key === 'Enter') handleNewBoard(); if (ev.key === 'Escape') setShowNewBoard(false); }, placeholder: 'Board name...', autoFocus: true, style: { fontSize: 11, padding: '2px 6px', width: 80, background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-primary)' } }),
-                e('button', { className: 'kanban-board-tab', onClick: handleNewBoard }, '\u2713')
-              )
-            : e('button', { className: 'kanban-board-tab', onClick: () => setShowNewBoard(true) }, '+')
-        ),
-        e('div', { className: 'kanban-add' },
-          e('input', {
-            value: newTitle,
-            onChange: (ev) => setNewTitle(ev.target.value),
-            onKeyDown: (ev) => { if (ev.key === 'Enter') handleAdd(); },
-            placeholder: 'Add task...'
-          }),
-          e('button', { className: 'btn btn-primary btn-sm', onClick: handleAdd, disabled: !newTitle.trim() }, '+')
-        ),
-        e('div', { className: 'kanban-columns' },
-          COLUMNS.map(col => {
-            const colItems = filteredItems.filter(i => i.column === col.key).sort((a, b) => a.order - b.order);
-            return e('div', { key: col.key, className: 'kanban-column' },
-              e('div', { className: 'kanban-col-header' },
-                e('div', { className: 'kanban-col-title' },
-                  col.label,
-                  e('span', { className: 'kanban-col-count' }, colItems.length)
-                )
-              ),
-              colItems.map(item =>
-                e('div', { key: item.id, className: 'kanban-card' },
-                  e('div', { className: 'kanban-card-title' }, item.title),
-                  item.description && e('div', { className: 'kanban-card-desc' }, item.description),
-                  e('div', { className: 'kanban-card-actions' },
-                    columnBack[col.key] && e('button', { className: 'kanban-card-btn', onClick: () => onUpdateItem(item.id, { column: columnBack[col.key] }), title: 'Move back' }, '\u2190'),
-                    columnOrder[col.key] && e('button', { className: 'kanban-card-btn', onClick: () => onUpdateItem(item.id, { column: columnOrder[col.key] }), title: 'Move forward' }, '\u2192'),
-                    e('button', { className: 'kanban-card-btn delete', onClick: () => { if (confirm('Delete "' + item.title + '"?')) onDeleteItem(item.id); }, title: 'Delete' }, '\u00D7')
-                  )
-                )
-              ),
-              colItems.length === 0 && e('div', { style: { padding: '8px', fontSize: 11, color: 'var(--text-muted)', textAlign: 'center' } }, 'Empty')
-            );
-          })
         )
       );
     }
@@ -1745,15 +1966,15 @@
 
     function App() {
       const ws = useWebSocket();
-      const { connected, agents, messages, liveOutput, queued, sharedContext, fileChanges, thinkingOutput, notes, kanbanItems, kanbanBoards, documents, settings, statusStartTimes, tokenUsage } = ws;
-      const [columns, setColumns] = useState(2);
-      const [rows, setRows] = useState(2);
+      const { connected, agents, messages, liveOutput, queued, sharedContext, fileChanges, thinkingOutput, notes, documents, settings, workspaces, statusStartTimes, tokenUsage, terminals, terminalOutput } = ws;
       const [showModal, setShowModal] = useState(false);
       const [showSharedContext, setShowSharedContext] = useState(false);
       const [showBroadcast, setShowBroadcast] = useState(false);
       const [broadcastInput, setBroadcastInput] = useState('');
-      const [selectedAgents, setSelectedAgents] = useState([]);
       const [sidebarTab, setSidebarTab] = useState('agents');
+      const [sidebarWidth, setSidebarWidth] = useState(settings.sidebarWidth || 240);
+      const [isResizing, setIsResizing] = useState(false);
+      const sidebarResizeRef = useRef(null);
       // Feature 2: Collapsible panels
       const [minimizedAgents, setMinimizedAgents] = useState(new Set());
       const [unreadCounts, setUnreadCounts] = useState({});
@@ -1765,12 +1986,58 @@
       const [editingAgent, setEditingAgent] = useState(null);
       // Feature 8: Selective broadcast
       const [broadcastTargets, setBroadcastTargets] = useState(new Set());
-      // Feature 5: Persistent layout guard
-      const settingsLoadedRef = useRef(false);
 
+      // Derive active workspace and grid settings from server-owned workspace
+      const activeWorkspace = workspaces.find(w => w.id === settings.activeWorkspaceId) || workspaces[0];
+      const columns = activeWorkspace ? activeWorkspace.gridColumns : 2;
+      const rows = activeWorkspace ? activeWorkspace.gridRows : 2;
+      const selectedAgents = activeWorkspace ? activeWorkspace.selectedAgentIds.filter(id => agents.some(a => a.id === id)) : [];
+
+      // Agents for the active workspace
+      const workspaceAgents = activeWorkspace ? agents.filter(a => a.workspaceId === activeWorkspace.id) : [];
+
+      // Sync sidebar width from server settings on first load
+      const sidebarWidthSynced = useRef(false);
       useEffect(() => {
-        setSelectedAgents(prev => prev.filter(id => agents.some(a => a.id === id)));
-      }, [agents]);
+        if (settings.sidebarWidth && !sidebarWidthSynced.current) {
+          setSidebarWidth(settings.sidebarWidth);
+          sidebarWidthSynced.current = true;
+        }
+      }, [settings.sidebarWidth]);
+
+      // Sidebar resize handler
+      useEffect(() => {
+        if (!isResizing) return;
+        const onMouseMove = (ev) => {
+          const newWidth = Math.max(180, Math.min(500, ev.clientX - 48)); // 48 = activity bar width
+          setSidebarWidth(newWidth);
+        };
+        const onMouseUp = () => {
+          setIsResizing(false);
+          // Persist debounced
+          clearTimeout(sidebarResizeRef.current);
+          sidebarResizeRef.current = setTimeout(() => {
+            ws.updateSettings({ sidebarWidth: sidebarWidth });
+          }, 300);
+        };
+        document.addEventListener('mousemove', onMouseMove);
+        document.addEventListener('mouseup', onMouseUp);
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
+        return () => {
+          document.removeEventListener('mousemove', onMouseMove);
+          document.removeEventListener('mouseup', onMouseUp);
+          document.body.style.cursor = '';
+          document.body.style.userSelect = '';
+        };
+      }, [isResizing, sidebarWidth, ws]);
+
+      // Fetch home path for folder browser defaults
+      useEffect(() => {
+        fetch('/api/directories').then(r => r.json()).then(data => {
+          if (data.home) window.__HOME_PATH = data.home;
+        }).catch(() => {});
+      }, []);
 
       // Track unread messages for minimized agents (Feature 2)
       const prevMessagesRef = useRef({});
@@ -1784,31 +2051,6 @@
           prevMessagesRef.current[agentId] = newLen;
         }
       }, [messages, minimizedAgents]);
-
-      // Feature 5: Load persisted layout from settings on first settings load
-      useEffect(() => {
-        if (settingsLoadedRef.current) return;
-        if (settings && Object.keys(settings).length > 0) {
-          settingsLoadedRef.current = true;
-          if (settings.gridColumns) setColumns(settings.gridColumns);
-          if (settings.gridRows) setRows(settings.gridRows);
-          if (settings.selectedAgentIds) {
-            const validIds = settings.selectedAgentIds.filter(id => agents.some(a => a.id === id));
-            if (validIds.length > 0) setSelectedAgents(validIds);
-          }
-        }
-      }, [settings, agents]);
-
-      // Feature 5: Persist layout changes (debounced 500ms)
-      const layoutTimerRef = useRef(null);
-      useEffect(() => {
-        if (!settingsLoadedRef.current) return;
-        if (layoutTimerRef.current) clearTimeout(layoutTimerRef.current);
-        layoutTimerRef.current = setTimeout(() => {
-          ws.updateSettings({ gridColumns: columns, gridRows: rows, selectedAgentIds: selectedAgents });
-        }, 500);
-        return () => { if (layoutTimerRef.current) clearTimeout(layoutTimerRef.current); };
-      }, [columns, rows, selectedAgents]);
 
       // Feature 8: Auto-sync broadcast targets with agents list
       useEffect(() => {
@@ -1863,7 +2105,8 @@
 
       const totalPanels = columns * rows;
       const displayAgents = [...selectedAgents];
-      agents.forEach(agent => {
+      // Auto-fill remaining slots with workspace agents not yet selected
+      workspaceAgents.forEach(agent => {
         if (!displayAgents.includes(agent.id) && displayAgents.length < totalPanels) {
           displayAgents.push(agent.id);
         }
@@ -1910,21 +2153,25 @@
         }
       };
 
+      // Grid column/row changes go through updateWorkspace
+      const setColumns = (n) => { if (activeWorkspace) ws.updateWorkspace(activeWorkspace.id, { gridColumns: n }); };
+      const setRows = (n) => { if (activeWorkspace) ws.updateWorkspace(activeWorkspace.id, { gridRows: n }); };
+
       const toggleAgent = (agentId) => {
-        setSelectedAgents(prev =>
-          prev.includes(agentId)
-            ? prev.filter(id => id !== agentId)
-            : prev.length < totalPanels ? [...prev, agentId] : prev
-        );
+        if (!activeWorkspace) return;
+        const current = activeWorkspace.selectedAgentIds;
+        const updated = current.includes(agentId)
+          ? current.filter(id => id !== agentId)
+          : current.length < totalPanels ? [...current, agentId] : current;
+        ws.updateWorkspace(activeWorkspace.id, { selectedAgentIds: updated });
       };
 
-      // Activity bar tabs — added Documents between Notes and Emulators
+      // Activity bar tabs — Workspaces replaces Agents
       const tabs = [
-        { id: 'agents', icon: ICONS.agents, label: 'Agents' },
+        { id: 'agents', icon: ICONS.agents, label: 'Workspaces' },
         { id: 'notes', icon: ICONS.notes, label: 'Notes' },
         { id: 'documents', icon: ICONS.documents, label: 'Documents' },
         { id: 'emulators', icon: ICONS.emulators, label: 'Emulators' },
-        { id: 'kanban', icon: ICONS.kanban, label: 'Kanban' },
       ];
 
       return e('div', { className: 'app' },
@@ -1947,15 +2194,19 @@
         ),
 
         // Sidebar Panel
-        e('div', { className: 'sidebar-panel' },
-          sidebarTab === 'agents' && e(AgentsSidebar, {
+        e('div', { className: 'sidebar-panel', style: { width: sidebarWidth } },
+          e('div', { className: 'sidebar-resize-handle' + (isResizing ? ' active' : ''), onMouseDown: (ev) => { ev.preventDefault(); setIsResizing(true); } }),
+          sidebarTab === 'agents' && e(WorkspacesSidebar, {
+            workspaces,
             agents,
-            selectedAgents,
-            totalPanels,
-            onToggle: toggleAgent,
-            onRemove: ws.removeAgent,
+            activeWorkspaceId: activeWorkspace ? activeWorkspace.id : null,
+            onSelectWorkspace: (id) => ws.setActiveWorkspace(id),
+            onCreateWorkspace: ws.createWorkspace,
+            onDeleteWorkspace: ws.deleteWorkspace,
+            onRenameWorkspace: (id, name) => ws.updateWorkspace(id, { name }),
             onNewAgent: () => { setEditingAgent(null); setShowModal(true); },
-            onEdit: (agent) => { setEditingAgent(agent); setShowModal(true); },
+            onEditAgent: (agent) => { setEditingAgent(agent); setShowModal(true); },
+            onRemoveAgent: ws.removeAgent,
             statusStartTimes,
           }),
           sidebarTab === 'notes' && e(NotesPanel, {
@@ -1973,15 +2224,8 @@
             onDeleteDocument: ws.deleteDocument,
           }),
           sidebarTab === 'emulators' && e(EmulatorsPanel, { settings, onUpdateSettings: ws.updateSettings }),
-          sidebarTab === 'kanban' && e(KanbanPanel, {
-            items: kanbanItems,
-            boards: kanbanBoards,
-            onCreateItem: ws.createKanbanItem,
-            onUpdateItem: ws.updateKanbanItem,
-            onDeleteItem: ws.deleteKanbanItem,
-            onCreateBoard: ws.createKanbanBoard,
-            onDeleteBoard: ws.deleteKanbanBoard,
-          })
+          // Active ports always pinned to bottom of sidebar
+          e(SidebarPorts),
         ),
 
         // Main content
@@ -1991,6 +2235,7 @@
           // Top bar
           e('div', { className: 'top-bar' },
             e('div', { className: 'top-bar-left' },
+              activeWorkspace && e('span', { style: { fontWeight: 600, fontSize: 13, color: 'var(--text-primary)', marginRight: 8 } }, activeWorkspace.name),
               // Feature 3: Cost dashboard
               (costDashboard.totalCost > 0 || costDashboard.totalTurns > 0) && e('div', { className: 'cost-dashboard' },
                 e('span', { className: 'cost-value' }, '$' + costDashboard.totalCost.toFixed(2) + ' total'),
@@ -2083,6 +2328,8 @@
                   thinkingOutput: thinkingOutput[maximizedAgent] || '',
                   statusStartTime: statusStartTimes[maximizedAgent],
                   tokenUsage: tokenUsage[maximizedAgent],
+                  terminals,
+                  terminalOutput,
                   onSendMessage: (content) => ws.sendMessage(agent.id, content),
                   onSendImage: ws.sendImage,
                   onStop: ws.stopAgent,
@@ -2093,13 +2340,17 @@
                   isMaximized: true,
                   onFocus: setFocusedAgentId,
                   isFocused: focusedAgentId === maximizedAgent,
+                  onCreateTerminal: ws.createTerminal,
+                  onKillTerminal: ws.killTerminal,
                 });
               }
               const nonMinimized = displayAgents.filter(id => !minimizedAgents.has(id));
               return Array.from({ length: totalPanels }).map((_, i) => {
                 const agentId = nonMinimized[i];
                 const agent = agentId ? agents.find(a => a.id === agentId) : null;
-                if (!agent) return e('div', { key: 'empty-' + i, className: 'terminal-panel' }, e('div', { className: 'panel-content panel-empty' }, 'No agent assigned'));
+                if (!agent) return e('div', { key: 'empty-' + i, className: 'terminal-panel slot-empty' },
+                  e('button', { className: 'slot-add-btn', onClick: () => { setEditingAgent(null); setShowModal(true); } }, '+ Add Agent')
+                );
                 return e(TerminalPanel, {
                   key: agentId,
                   agent,
@@ -2110,6 +2361,8 @@
                   thinkingOutput: thinkingOutput[agentId] || '',
                   statusStartTime: statusStartTimes[agentId],
                   tokenUsage: tokenUsage[agentId],
+                  terminals,
+                  terminalOutput,
                   onSendMessage: (content) => ws.sendMessage(agent.id, content),
                   onSendImage: ws.sendImage,
                   onStop: ws.stopAgent,
@@ -2120,6 +2373,8 @@
                   isMaximized: false,
                   onFocus: setFocusedAgentId,
                   isFocused: focusedAgentId === agentId,
+                  onCreateTerminal: ws.createTerminal,
+                  onKillTerminal: ws.killTerminal,
                 });
               });
             })()
@@ -2133,6 +2388,7 @@
           onCreate: ws.createAgent,
           editAgent: editingAgent,
           onUpdate: ws.updateAgent,
+          workspaceId: activeWorkspace ? activeWorkspace.id : undefined,
         }),
         e(SharedContextModal, { isOpen: showSharedContext, onClose: () => setShowSharedContext(false), content: sharedContext, onSave: ws.updateSharedContext })
       );

@@ -3,7 +3,7 @@ import { watch, type FSWatcher } from 'fs';
 import { existsSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import type { AgentInfo, AgentStatus, ChatMessage, PersistedData, ProjectNote, KanbanItem, KanbanBoard, LiveDocument, AppSettings } from '../shared/protocol';
+import type { AgentInfo, AgentStatus, ChatMessage, PersistedData, ProjectNote, LiveDocument, AppSettings, WorkspaceInfo, TerminalSession } from '../shared/protocol';
 
 const DATA_FILE = './data.json';
 const PROCESS_TIMEOUT_MS = 10 * 60 * 1000; // 10 minute timeout (agents do real work now)
@@ -38,22 +38,32 @@ type MessageCallback = (message: ChatMessage) => void;
 type FileChangeCallback = (agentId: string, files: string[]) => void;
 type ThinkingCallback = (agentId: string, content: string) => void;
 type TokenUsageCallback = (agentId: string, contextTokens: number, contextLimit: number, totalInputTokens: number, totalOutputTokens: number, totalCostUsd: number, numTurns: number) => void;
+type TerminalOutputCallback = (terminalId: string, content: string) => void;
+type TerminalExitCallback = (terminalId: string, exitCode: number | null) => void;
+
+interface ManagedTerminal {
+  info: TerminalSession;
+  process: Subprocess<'ignore', 'pipe', 'pipe'>;
+  outputBuffer: string;
+}
 
 export class AgentManager {
   private agents: Map<string, ManagedAgent> = new Map();
   private messages: Map<string, ChatMessage[]> = new Map();
   private sharedContext: string = '';
   private notes: Map<string, ProjectNote> = new Map();
-  private kanbanItems: Map<string, KanbanItem> = new Map();
-  private kanbanBoards: Map<string, KanbanBoard> = new Map();
   private documents: Map<string, LiveDocument> = new Map();
   private settings: AppSettings = {};
+  private workspaces: Map<string, WorkspaceInfo> = new Map();
   private onOutput: OutputCallback | null = null;
   private onStatusChange: StatusCallback | null = null;
   private onMessage: MessageCallback | null = null;
   private onFileChange: FileChangeCallback | null = null;
   private onThinking: ThinkingCallback | null = null;
   private onTokenUsage: TokenUsageCallback | null = null;
+  private terminals: Map<string, ManagedTerminal> = new Map();
+  private onTerminalOutput: TerminalOutputCallback | null = null;
+  private onTerminalExit: TerminalExitCallback | null = null;
 
   constructor() {
     this.loadPersistedData();
@@ -65,6 +75,8 @@ export class AgentManager {
   setFileChangeCallback(cb: FileChangeCallback) { this.onFileChange = cb; }
   setThinkingCallback(cb: ThinkingCallback) { this.onThinking = cb; }
   setTokenUsageCallback(cb: TokenUsageCallback) { this.onTokenUsage = cb; }
+  setTerminalOutputCallback(cb: TerminalOutputCallback) { this.onTerminalOutput = cb; }
+  setTerminalExitCallback(cb: TerminalExitCallback) { this.onTerminalExit = cb; }
 
   // --- Persistence ---
 
@@ -80,17 +92,18 @@ export class AgentManager {
               status: 'stopped',
               referencePaths: agent.referencePaths || [],
               systemPrompt: agent.systemPrompt || '',
+              workspaceId: agent.workspaceId || '',
             },
             process: null,
             sessionId: (agent as any).sessionId || null,
             outputBuffer: '',
             watcher: null,
             lastFileChange: [],
-            contextTokens: 0,
-            totalInputTokens: 0,
-            totalOutputTokens: 0,
-            totalCostUsd: 0,
-            numTurns: 0,
+            contextTokens: (agent as any).contextTokens || 0,
+            totalInputTokens: (agent as any).totalInputTokens || 0,
+            totalOutputTokens: (agent as any).totalOutputTokens || 0,
+            totalCostUsd: (agent as any).totalCostUsd || 0,
+            numTurns: (agent as any).numTurns || 0,
           };
           this.agents.set(agent.id, managed);
           this.startFileWatcher(agent.id);
@@ -108,18 +121,6 @@ export class AgentManager {
             this.notes.set(note.id, note);
           }
         }
-        // Load kanban items
-        if (data.kanbanItems) {
-          for (const item of data.kanbanItems) {
-            this.kanbanItems.set(item.id, item);
-          }
-        }
-        // Load kanban boards
-        if (data.kanbanBoards) {
-          for (const board of data.kanbanBoards) {
-            this.kanbanBoards.set(board.id, board);
-          }
-        }
         // Load documents
         if (data.documents) {
           for (const doc of data.documents) {
@@ -130,7 +131,39 @@ export class AgentManager {
         if (data.settings) {
           this.settings = data.settings;
         }
-        console.log(`Loaded ${data.agents.length} agents, ${data.messages.length} messages, ${this.notes.size} notes, ${this.kanbanItems.size} kanban items, ${this.kanbanBoards.size} boards, ${this.documents.size} documents from disk`);
+        // Load workspaces
+        if (data.workspaces && data.workspaces.length > 0) {
+          for (const ws of data.workspaces) {
+            this.workspaces.set(ws.id, ws);
+          }
+        }
+
+        // --- Migration: create "Default" workspace if none exist ---
+        if (this.workspaces.size === 0) {
+          const defaultId = this.generateId();
+          const agentIds = Array.from(this.agents.keys());
+          const defaultWorkspace: WorkspaceInfo = {
+            id: defaultId,
+            name: 'Default',
+            gridColumns: this.settings.gridColumns || 2,
+            gridRows: this.settings.gridRows || 2,
+            selectedAgentIds: this.settings.selectedAgentIds || agentIds,
+            createdAt: Date.now(),
+          };
+          this.workspaces.set(defaultId, defaultWorkspace);
+          // Assign all agents to the default workspace
+          for (const managed of this.agents.values()) {
+            if (!managed.info.workspaceId) {
+              managed.info.workspaceId = defaultId;
+            }
+          }
+          // Set active workspace
+          this.settings.activeWorkspaceId = defaultId;
+          console.log(`Migration: created "Default" workspace (${defaultId}) with ${agentIds.length} agents`);
+          await this.persistData();
+        }
+
+        console.log(`Loaded ${data.agents.length} agents, ${data.messages.length} messages, ${this.notes.size} notes, ${this.documents.size} documents, ${this.workspaces.size} workspaces from disk`);
       }
     } catch (e) {
       console.error('Failed to load persisted data:', e);
@@ -142,14 +175,18 @@ export class AgentManager {
       agents: Array.from(this.agents.values()).map(a => ({
         ...a.info,
         sessionId: a.sessionId, // Persist session ID for resume across restarts
+        contextTokens: a.contextTokens,
+        totalInputTokens: a.totalInputTokens,
+        totalOutputTokens: a.totalOutputTokens,
+        totalCostUsd: a.totalCostUsd,
+        numTurns: a.numTurns,
       })) as any,
       messages: Array.from(this.messages.values()).flat(),
       sharedContext: this.sharedContext,
       notes: Array.from(this.notes.values()),
-      kanbanItems: Array.from(this.kanbanItems.values()),
-      kanbanBoards: Array.from(this.kanbanBoards.values()),
       documents: Array.from(this.documents.values()),
       settings: this.settings,
+      workspaces: Array.from(this.workspaces.values()),
     };
     await Bun.write(DATA_FILE, JSON.stringify(data, null, 2));
   }
@@ -189,6 +226,75 @@ export class AgentManager {
     };
   }
 
+  // --- Workspace CRUD ---
+
+  getWorkspaces(): WorkspaceInfo[] {
+    return Array.from(this.workspaces.values()).sort((a, b) => a.createdAt - b.createdAt);
+  }
+
+  async createWorkspace(name: string): Promise<WorkspaceInfo> {
+    const ws: WorkspaceInfo = {
+      id: this.generateId(),
+      name,
+      gridColumns: 3,
+      gridRows: 2,
+      selectedAgentIds: [],
+      createdAt: Date.now(),
+    };
+    this.workspaces.set(ws.id, ws);
+    // Set as active if it's the only one or no active set
+    if (!this.settings.activeWorkspaceId || this.workspaces.size === 1) {
+      this.settings.activeWorkspaceId = ws.id;
+    }
+    await this.persistData();
+    return ws;
+  }
+
+  async updateWorkspace(id: string, updates: { name?: string; gridColumns?: number; gridRows?: number; selectedAgentIds?: string[] }): Promise<WorkspaceInfo | null> {
+    const ws = this.workspaces.get(id);
+    if (!ws) return null;
+    if (updates.name !== undefined) ws.name = updates.name;
+    if (updates.gridColumns !== undefined) ws.gridColumns = updates.gridColumns;
+    if (updates.gridRows !== undefined) ws.gridRows = updates.gridRows;
+    if (updates.selectedAgentIds !== undefined) ws.selectedAgentIds = updates.selectedAgentIds;
+    await this.persistData();
+    return ws;
+  }
+
+  async deleteWorkspace(id: string): Promise<boolean> {
+    if (this.workspaces.size <= 1) return false; // Can't delete last workspace
+    const ws = this.workspaces.get(id);
+    if (!ws) return false;
+
+    // Find first remaining workspace to reassign agents
+    const remainingId = Array.from(this.workspaces.keys()).find(k => k !== id)!;
+    const remaining = this.workspaces.get(remainingId)!;
+
+    // Reassign agents from deleted workspace to remaining
+    for (const managed of this.agents.values()) {
+      if (managed.info.workspaceId === id) {
+        managed.info.workspaceId = remainingId;
+      }
+    }
+
+    this.workspaces.delete(id);
+
+    // If active workspace was deleted, switch to remaining
+    if (this.settings.activeWorkspaceId === id) {
+      this.settings.activeWorkspaceId = remainingId;
+    }
+
+    await this.persistData();
+    return true;
+  }
+
+  async setActiveWorkspace(id: string): Promise<boolean> {
+    if (!this.workspaces.has(id)) return false;
+    this.settings.activeWorkspaceId = id;
+    await this.persistData();
+    return true;
+  }
+
   // --- Notes CRUD ---
 
   getNotes(): ProjectNote[] {
@@ -224,79 +330,6 @@ export class AgentManager {
   async deleteNote(id: string): Promise<boolean> {
     const deleted = this.notes.delete(id);
     if (deleted) await this.persistData();
-    return deleted;
-  }
-
-  // --- Kanban CRUD ---
-
-  getKanbanItems(): KanbanItem[] {
-    return Array.from(this.kanbanItems.values()).sort((a, b) => a.order - b.order);
-  }
-
-  async createKanbanItem(title: string, description: string = '', column: KanbanItem['column'] = 'backlog', boardId?: string): Promise<KanbanItem> {
-    const itemsInColumn = Array.from(this.kanbanItems.values()).filter(i => i.column === column);
-    const maxOrder = itemsInColumn.length > 0 ? Math.max(...itemsInColumn.map(i => i.order)) : -1;
-    const item: KanbanItem = {
-      id: this.generateId(),
-      title,
-      description,
-      column,
-      order: maxOrder + 1,
-      createdAt: Date.now(),
-      boardId,
-    };
-    this.kanbanItems.set(item.id, item);
-    await this.persistData();
-    return item;
-  }
-
-  async updateKanbanItem(id: string, updates: { title?: string; description?: string; column?: KanbanItem['column']; order?: number; boardId?: string }): Promise<KanbanItem | null> {
-    const item = this.kanbanItems.get(id);
-    if (!item) return null;
-    if (updates.title !== undefined) item.title = updates.title;
-    if (updates.description !== undefined) item.description = updates.description;
-    if (updates.column !== undefined) item.column = updates.column;
-    if (updates.order !== undefined) item.order = updates.order;
-    if (updates.boardId !== undefined) item.boardId = updates.boardId;
-    await this.persistData();
-    return item;
-  }
-
-  async deleteKanbanItem(id: string): Promise<boolean> {
-    const deleted = this.kanbanItems.delete(id);
-    if (deleted) await this.persistData();
-    return deleted;
-  }
-
-  // --- Kanban Boards CRUD ---
-
-  getKanbanBoards(): KanbanBoard[] {
-    return Array.from(this.kanbanBoards.values()).sort((a, b) => a.createdAt - b.createdAt);
-  }
-
-  async createKanbanBoard(name: string, projectPath?: string): Promise<KanbanBoard> {
-    const board: KanbanBoard = {
-      id: this.generateId(),
-      name,
-      projectPath,
-      createdAt: Date.now(),
-    };
-    this.kanbanBoards.set(board.id, board);
-    await this.persistData();
-    return board;
-  }
-
-  async deleteKanbanBoard(id: string): Promise<boolean> {
-    const deleted = this.kanbanBoards.delete(id);
-    if (deleted) {
-      // Move items from this board to unassigned
-      for (const item of this.kanbanItems.values()) {
-        if (item.boardId === id) {
-          item.boardId = undefined;
-        }
-      }
-      await this.persistData();
-    }
     return deleted;
   }
 
@@ -495,14 +528,23 @@ export class AgentManager {
           appendParts.push(`Default iOS Simulator: ${this.settings.defaultSimulatorName || 'Unknown'} (UDID: ${this.settings.defaultSimulatorUdid})`);
         }
       }
-      args.push('--append-system-prompt', appendParts.join('\n\n'));
-
       // Reference directories (multi-folder support)
+      const validRefPaths: string[] = [];
       for (const dir of agent.info.referencePaths) {
         if (existsSync(dir)) {
+          validRefPaths.push(dir);
           args.push('--add-dir', dir);
         }
       }
+      if (validRefPaths.length > 0) {
+        const refNames = validRefPaths.map(p => {
+          const name = p.split('/').pop() || p;
+          return `- ${name}: ${p}`;
+        }).join('\n');
+        appendParts.push(`Reference Directories (read-only context — you have full access to browse these):\n${refNames}\n\nIMPORTANT: These reference directories were explicitly added by the user as additional context for your work. You should be aware of them and use them when relevant. Your primary working directory is: ${agent.info.cwd}`);
+      }
+
+      args.push('--append-system-prompt', appendParts.join('\n\n'));
 
       // Session resumption — continue conversation if we have a session ID
       if (agent.sessionId) {
@@ -670,10 +712,24 @@ export class AgentManager {
 
   // --- Agent CRUD ---
 
-  async createAgent(name: string, cwd: string, referencePaths: string[] = [], systemPrompt: string = ''): Promise<AgentInfo> {
+  async createAgent(name: string, cwd: string, referencePaths: string[] = [], systemPrompt: string = '', workspaceId?: string): Promise<AgentInfo> {
     // Validate cwd exists
     if (!existsSync(cwd)) {
       throw new Error(`Working directory does not exist: ${cwd}`);
+    }
+
+    // Determine workspace — use provided, or active, or first available
+    let wsId = workspaceId;
+    if (!wsId) {
+      wsId = this.settings.activeWorkspaceId;
+    }
+    if (!wsId || !this.workspaces.has(wsId)) {
+      wsId = Array.from(this.workspaces.keys())[0];
+    }
+    // If still no workspace, create a default
+    if (!wsId) {
+      const ws = await this.createWorkspace('Default');
+      wsId = ws.id;
     }
 
     const id = this.generateId();
@@ -685,6 +741,7 @@ export class AgentManager {
       systemPrompt,
       status: 'idle',
       createdAt: Date.now(),
+      workspaceId: wsId,
     };
 
     this.agents.set(id, {
@@ -701,6 +758,15 @@ export class AgentManager {
       numTurns: 0,
     });
 
+    // Auto-add agent to workspace's selectedAgentIds if there are available slots
+    const ws = this.workspaces.get(wsId);
+    if (ws) {
+      const totalSlots = ws.gridColumns * ws.gridRows;
+      if (ws.selectedAgentIds.length < totalSlots) {
+        ws.selectedAgentIds.push(id);
+      }
+    }
+
     this.startFileWatcher(id);
     await this.persistData();
     return this.agents.get(id)!.info;
@@ -715,6 +781,11 @@ export class AgentManager {
       agent.process.kill();
     }
     this.stopFileWatcher(agentId);
+
+    // Remove agent from all workspace selectedAgentIds
+    for (const ws of this.workspaces.values()) {
+      ws.selectedAgentIds = ws.selectedAgentIds.filter(id => id !== agentId);
+    }
 
     this.agents.delete(agentId);
     this.messages.delete(agentId);
@@ -876,6 +947,81 @@ export class AgentManager {
     }
   }
 
+  // --- Terminal Management ---
+
+  getTerminals(): TerminalSession[] {
+    return Array.from(this.terminals.values()).map(t => t.info);
+  }
+
+  async createTerminal(agentId: string, command: string): Promise<TerminalSession> {
+    const agent = this.agents.get(agentId);
+    if (!agent) throw new Error('Agent not found');
+
+    const id = this.generateId();
+    const info: TerminalSession = {
+      id,
+      agentId,
+      command,
+      cwd: agent.info.cwd,
+      status: 'running',
+      createdAt: Date.now(),
+    };
+
+    try {
+      const proc = Bun.spawn(['sh', '-c', command], {
+        cwd: agent.info.cwd,
+        stdin: 'ignore',
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
+
+      const managed: ManagedTerminal = { info, process: proc, outputBuffer: '' };
+      this.terminals.set(id, managed);
+
+      // Stream stdout
+      const readStream = async (stream: ReadableStream<Uint8Array>) => {
+        const reader = stream.getReader();
+        const decoder = new TextDecoder();
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            const text = decoder.decode(value, { stream: true });
+            managed.outputBuffer += text;
+            if (managed.outputBuffer.length > MAX_OUTPUT_BUFFER) {
+              managed.outputBuffer = managed.outputBuffer.slice(-MAX_OUTPUT_BUFFER);
+            }
+            this.onTerminalOutput?.(id, text);
+          }
+        } catch {}
+      };
+
+      readStream(proc.stdout);
+      readStream(proc.stderr);
+
+      // Handle exit
+      proc.exited.then((exitCode) => {
+        managed.info.status = 'stopped';
+        this.onTerminalExit?.(id, exitCode);
+      });
+
+      return info;
+    } catch (e: any) {
+      throw new Error('Failed to spawn terminal: ' + (e.message || 'unknown error'));
+    }
+  }
+
+  async killTerminal(id: string): Promise<boolean> {
+    const terminal = this.terminals.get(id);
+    if (!terminal) return false;
+    try {
+      terminal.process.kill();
+    } catch {}
+    terminal.info.status = 'stopped';
+    this.terminals.delete(id);
+    return true;
+  }
+
   // --- Image handling ---
 
   async sendImage(agentId: string, imageData: string, mimeType: string, prompt?: string): Promise<void> {
@@ -885,9 +1031,9 @@ export class AgentManager {
     // Determine file extension from mime type
     const ext = mimeType === 'image/png' ? '.png' : mimeType === 'image/jpeg' ? '.jpg' : mimeType === 'image/gif' ? '.gif' : mimeType === 'image/webp' ? '.webp' : '.png';
 
-    // Save image to a temp file in agent's cwd
+    // Save image to system temp dir so it doesn't pollute the git working tree
     const filename = `screenshot_${Date.now()}${ext}`;
-    const filepath = join(agent.info.cwd, filename);
+    const filepath = join(tmpdir(), filename);
 
     try {
       const buffer = Buffer.from(imageData, 'base64');
@@ -897,10 +1043,10 @@ export class AgentManager {
       const imgMsg = this.addMessage(agentId, 'user', `[Image uploaded: ${filename}]` + (prompt ? '\n' + prompt : ''), imageData, mimeType);
       this.onMessage?.(imgMsg);
 
-      // Send a message to the agent referencing the image file
+      // Send a message to the agent referencing the image file via absolute path (outside repo)
       const content = prompt
-        ? `I've uploaded a screenshot/image to your working directory: ${filename}\n\n${prompt}`
-        : `I've uploaded a screenshot/image to your working directory: ${filename}\nPlease examine this image file at ./${filename} and describe what you see or act on it as appropriate.`;
+        ? `I've uploaded a screenshot/image for you to examine: ${filepath}\n\n${prompt}`
+        : `I've uploaded a screenshot/image for you to examine: ${filepath}\nPlease examine this image file and describe what you see or act on it as appropriate.`;
       await this.sendMessage(agentId, content);
     } catch (e) {
       console.error(`Failed to save image for agent ${agentId}:`, e);

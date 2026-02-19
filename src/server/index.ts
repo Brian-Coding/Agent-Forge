@@ -23,7 +23,7 @@ async function listDirectories(path: string): Promise<{ name: string; path: stri
         // Skip entries we can't access
       }
     }
-    return results.sort((a, b) => a.name.localeCompare(b.name));
+    return results.sort((a, b) => a.name.localeCompare(b, undefined, { sensitivity: 'base' }));
   } catch (e) {
     return [];
   }
@@ -70,6 +70,14 @@ agentManager.setTokenUsageCallback((agentId, contextTokens, contextLimit, totalI
   broadcast({ type: 'token_usage', agentId, contextTokens, contextLimit, totalInputTokens, totalOutputTokens, totalCostUsd, numTurns });
 });
 
+agentManager.setTerminalOutputCallback((terminalId, content) => {
+  broadcast({ type: 'terminal_output', terminalId, content });
+});
+
+agentManager.setTerminalExitCallback((terminalId, exitCode) => {
+  broadcast({ type: 'terminal_exited', terminalId, exitCode });
+});
+
 // Handle incoming WebSocket messages
 async function handleMessage(ws: ServerWebSocket<unknown>, message: ClientMessage) {
   switch (message.type) {
@@ -79,9 +87,13 @@ async function handleMessage(ws: ServerWebSocket<unknown>, message: ClientMessag
           message.name,
           message.cwd,
           message.referencePaths || [],
-          message.systemPrompt || ''
+          message.systemPrompt || '',
+          message.workspaceId
         );
         broadcast({ type: 'agent_created', agent });
+        // Broadcast updated workspace state (agent was auto-added to selectedAgentIds)
+        const workspaces = agentManager.getWorkspaces();
+        broadcast({ type: 'workspaces_list', workspaces });
       } catch (e: any) {
         ws.send(JSON.stringify({ type: 'error', message: e.message || `Failed to create agent` }));
       }
@@ -128,6 +140,9 @@ async function handleMessage(ws: ServerWebSocket<unknown>, message: ClientMessag
       const success = await agentManager.removeAgent(message.agentId);
       if (success) {
         broadcast({ type: 'agent_removed', agentId: message.agentId });
+        // Broadcast updated workspace state
+        const workspaces = agentManager.getWorkspaces();
+        broadcast({ type: 'workspaces_list', workspaces });
       } else {
         ws.send(JSON.stringify({ type: 'error', message: 'Agent not found', agentId: message.agentId }));
       }
@@ -207,63 +222,6 @@ async function handleMessage(ws: ServerWebSocket<unknown>, message: ClientMessag
       break;
     }
 
-    // --- Kanban ---
-    case 'get_kanban': {
-      const items = agentManager.getKanbanItems();
-      ws.send(JSON.stringify({ type: 'kanban_list', items }));
-      break;
-    }
-
-    case 'create_kanban_item': {
-      const item = await agentManager.createKanbanItem(message.title, message.description, message.column, message.boardId);
-      broadcast({ type: 'kanban_item_created', item });
-      break;
-    }
-
-    case 'update_kanban_item': {
-      const { id: itemId, type: _type, ...itemUpdates } = message;
-      const item = await agentManager.updateKanbanItem(itemId, itemUpdates);
-      if (item) {
-        broadcast({ type: 'kanban_item_updated', item });
-      } else {
-        ws.send(JSON.stringify({ type: 'error', message: 'Kanban item not found' }));
-      }
-      break;
-    }
-
-    case 'delete_kanban_item': {
-      const deleted = await agentManager.deleteKanbanItem(message.id);
-      if (deleted) {
-        broadcast({ type: 'kanban_item_deleted', id: message.id });
-      } else {
-        ws.send(JSON.stringify({ type: 'error', message: 'Kanban item not found' }));
-      }
-      break;
-    }
-
-    // --- Kanban Boards ---
-    case 'get_kanban_boards': {
-      const boards = agentManager.getKanbanBoards();
-      ws.send(JSON.stringify({ type: 'kanban_boards_list', boards }));
-      break;
-    }
-
-    case 'create_kanban_board': {
-      const board = await agentManager.createKanbanBoard(message.name, message.projectPath);
-      broadcast({ type: 'kanban_board_created', board });
-      break;
-    }
-
-    case 'delete_kanban_board': {
-      const deleted = await agentManager.deleteKanbanBoard(message.id);
-      if (deleted) {
-        broadcast({ type: 'kanban_board_deleted', id: message.id });
-      } else {
-        ws.send(JSON.stringify({ type: 'error', message: 'Kanban board not found' }));
-      }
-      break;
-    }
-
     // --- Documents ---
     case 'get_documents': {
       const documents = agentManager.getDocuments();
@@ -314,6 +272,82 @@ async function handleMessage(ws: ServerWebSocket<unknown>, message: ClientMessag
     // --- Image ---
     case 'send_image': {
       agentManager.sendImage(message.agentId, message.imageData, message.mimeType, message.prompt);
+      break;
+    }
+
+    // --- Workspaces ---
+    case 'get_workspaces': {
+      const workspaces = agentManager.getWorkspaces();
+      ws.send(JSON.stringify({ type: 'workspaces_list', workspaces }));
+      break;
+    }
+
+    case 'create_workspace': {
+      const workspace = await agentManager.createWorkspace(message.name);
+      broadcast({ type: 'workspace_created', workspace });
+      break;
+    }
+
+    case 'update_workspace': {
+      const { id: wsId, type: _wsType, ...wsUpdates } = message;
+      const workspace = await agentManager.updateWorkspace(wsId, wsUpdates);
+      if (workspace) {
+        broadcast({ type: 'workspace_updated', workspace });
+      } else {
+        ws.send(JSON.stringify({ type: 'error', message: 'Workspace not found' }));
+      }
+      break;
+    }
+
+    case 'delete_workspace': {
+      const deleted = await agentManager.deleteWorkspace(message.id);
+      if (deleted) {
+        broadcast({ type: 'workspace_deleted', id: message.id });
+        // Send updated settings (activeWorkspaceId may have changed)
+        const settings = agentManager.getSettings();
+        broadcast({ type: 'settings', settings });
+        // Send updated agents (workspaceId may have changed for reassigned agents)
+        const agents = agentManager.getAgents();
+        broadcast({ type: 'agents_list', agents });
+      } else {
+        ws.send(JSON.stringify({ type: 'error', message: 'Cannot delete workspace (last one or not found)' }));
+      }
+      break;
+    }
+
+    case 'set_active_workspace': {
+      const success = await agentManager.setActiveWorkspace(message.id);
+      if (success) {
+        const settings = agentManager.getSettings();
+        broadcast({ type: 'settings', settings });
+      } else {
+        ws.send(JSON.stringify({ type: 'error', message: 'Workspace not found' }));
+      }
+      break;
+    }
+
+    // --- Terminals ---
+    case 'create_terminal': {
+      try {
+        const terminal = await agentManager.createTerminal(message.agentId, message.command);
+        broadcast({ type: 'terminal_created', terminal });
+      } catch (e: any) {
+        ws.send(JSON.stringify({ type: 'error', message: e.message || 'Failed to create terminal' }));
+      }
+      break;
+    }
+
+    case 'kill_terminal': {
+      const success = await agentManager.killTerminal(message.id);
+      if (!success) {
+        ws.send(JSON.stringify({ type: 'error', message: 'Terminal not found' }));
+      }
+      break;
+    }
+
+    case 'get_terminals': {
+      const terminals = agentManager.getTerminals();
+      ws.send(JSON.stringify({ type: 'terminals_list', terminals }));
       break;
     }
 
@@ -371,6 +405,90 @@ const server = Bun.serve({
           headers: { 'Content-Type': 'application/json' }
         })
       );
+    }
+
+    // --- Running ports ---
+
+    if (url.pathname === '/api/ports' && req.method === 'GET') {
+      return (async () => {
+        try {
+          const proc = Bun.spawn(['lsof', '-iTCP', '-sTCP:LISTEN', '-nP'], {
+            stdout: 'pipe',
+            stderr: 'pipe',
+          });
+          const exitCode = await proc.exited;
+          const stdout = await new Response(proc.stdout).text();
+          if (exitCode !== 0) return jsonResponse({ ports: [] });
+          const lines = stdout.trim().split('\n').slice(1); // Skip header
+          // macOS system processes that aren't dev-relevant
+          const SYSTEM_PROCESSES = new Set([
+            'ControlCe', 'rapportd', 'AirPlayXPC', 'sharingd',
+            'remoted', 'identitys', 'WiFiAgent', 'bluetoothd',
+          ]);
+          const seen = new Set<string>();
+          const ports: { port: number; pid: number; command: string }[] = [];
+          for (const line of lines) {
+            const parts = line.split(/\s+/);
+            if (parts.length < 9) continue;
+            const command = parts[0];
+            if (SYSTEM_PROCESSES.has(command)) continue;
+            const pid = parseInt(parts[1], 10);
+            const nameField = parts[8]; // e.g., *:3333
+            const portMatch = nameField.match(/:(\d+)$/);
+            if (!portMatch) continue;
+            const port = parseInt(portMatch[1], 10);
+            const key = port + ':' + pid;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            ports.push({ port, pid, command });
+          }
+          ports.sort((a, b) => a.port - b.port);
+          return jsonResponse({ ports });
+        } catch {
+          return jsonResponse({ ports: [] });
+        }
+      })();
+    }
+
+    // --- Kill port (by PID) ---
+
+    if (url.pathname === '/api/ports/kill' && req.method === 'POST') {
+      return (async () => {
+        try {
+          const body = await req.json() as { pid: number };
+          if (!body.pid) return jsonResponse({ error: 'Missing pid' }, 400);
+          const proc = Bun.spawn(['kill', '-9', String(body.pid)], {
+            stdout: 'pipe',
+            stderr: 'pipe',
+          });
+          const exitCode = await proc.exited;
+          return jsonResponse({ ok: exitCode === 0 });
+        } catch (e: any) {
+          return jsonResponse({ ok: false, error: e.message }, 500);
+        }
+      })();
+    }
+
+    // --- Git branch ---
+
+    if (url.pathname === '/api/git-branch' && req.method === 'GET') {
+      const path = url.searchParams.get('path');
+      if (!path) return jsonResponse({ branch: null });
+      return (async () => {
+        try {
+          const proc = Bun.spawn(['git', 'rev-parse', '--abbrev-ref', 'HEAD'], {
+            cwd: path,
+            stdout: 'pipe',
+            stderr: 'pipe',
+          });
+          const exitCode = await proc.exited;
+          if (exitCode !== 0) return jsonResponse({ branch: null });
+          const stdout = await new Response(proc.stdout).text();
+          return jsonResponse({ branch: stdout.trim() || null });
+        } catch {
+          return jsonResponse({ branch: null });
+        }
+      })();
     }
 
     // --- Xcode Simulator REST endpoints ---
@@ -451,14 +569,16 @@ const server = Bun.serve({
       ws.send(JSON.stringify({ type: 'agents_list', agents }));
       const notes = agentManager.getNotes();
       ws.send(JSON.stringify({ type: 'notes_list', notes }));
-      const items = agentManager.getKanbanItems();
-      ws.send(JSON.stringify({ type: 'kanban_list', items }));
-      const boards = agentManager.getKanbanBoards();
-      ws.send(JSON.stringify({ type: 'kanban_boards_list', boards }));
       const documents = agentManager.getDocuments();
       ws.send(JSON.stringify({ type: 'documents_list', documents }));
       const settings = agentManager.getSettings();
       ws.send(JSON.stringify({ type: 'settings', settings }));
+      // Send workspaces
+      const workspaces = agentManager.getWorkspaces();
+      ws.send(JSON.stringify({ type: 'workspaces_list', workspaces }));
+      // Send terminals
+      const terminals = agentManager.getTerminals();
+      ws.send(JSON.stringify({ type: 'terminals_list', terminals }));
       // Send token usage for each agent
       for (const agent of agents) {
         const usage = agentManager.getTokenUsage(agent.id);
