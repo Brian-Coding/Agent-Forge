@@ -1,12 +1,11 @@
 import type { Subprocess } from 'bun';
-import { watch, type FSWatcher } from 'fs';
-import { existsSync } from 'fs';
-import { join } from 'path';
+import { watch, mkdirSync, type FSWatcher } from 'fs';
+import { existsSync, readFileSync } from 'fs';
+import { join, basename } from 'path';
 import { tmpdir } from 'os';
 import type { AgentInfo, AgentStatus, ChatMessage, PersistedData, ProjectNote, LiveDocument, AppSettings, WorkspaceInfo, TerminalSession } from '../shared/protocol';
 
 const DATA_FILE = './data.json';
-const PROCESS_TIMEOUT_MS = 10 * 60 * 1000; // 10 minute timeout (agents do real work now)
 const MAX_OUTPUT_BUFFER = 2_000_000; // 2MB max output buffer per agent (agents produce more output with tools)
 
 // Default guardrails appended to every agent — keeps them safe without user having to think about it
@@ -23,9 +22,11 @@ interface ManagedAgent {
   sessionId: string | null; // Claude Code session ID for --resume
   outputBuffer: string;
   watcher: FSWatcher | null;
+  plansWatcher: FSWatcher | null;
   lastFileChange: string[];
   // Token tracking
-  contextTokens: number;      // Latest input_tokens (current context window usage)
+  contextTokens: number;      // Current context window usage (input + cached)
+  contextLimit: number;       // Context window size from model
   totalInputTokens: number;   // Cumulative input tokens across all turns
   totalOutputTokens: number;  // Cumulative output tokens across all turns
   totalCostUsd: number;       // Cumulative cost
@@ -40,6 +41,7 @@ type ThinkingCallback = (agentId: string, content: string) => void;
 type TokenUsageCallback = (agentId: string, contextTokens: number, contextLimit: number, totalInputTokens: number, totalOutputTokens: number, totalCostUsd: number, numTurns: number) => void;
 type TerminalOutputCallback = (terminalId: string, content: string) => void;
 type TerminalExitCallback = (terminalId: string, exitCode: number | null) => void;
+type DocumentUpdatedCallback = (doc: LiveDocument) => void;
 
 interface ManagedTerminal {
   info: TerminalSession;
@@ -64,6 +66,8 @@ export class AgentManager {
   private terminals: Map<string, ManagedTerminal> = new Map();
   private onTerminalOutput: TerminalOutputCallback | null = null;
   private onTerminalExit: TerminalExitCallback | null = null;
+  private onDocumentUpdated: DocumentUpdatedCallback | null = null;
+  private planWriteFromServer: Set<string> = new Set(); // tracks file paths written by updateDocument to avoid watcher feedback loop
 
   constructor() {
     this.loadPersistedData();
@@ -77,6 +81,7 @@ export class AgentManager {
   setTokenUsageCallback(cb: TokenUsageCallback) { this.onTokenUsage = cb; }
   setTerminalOutputCallback(cb: TerminalOutputCallback) { this.onTerminalOutput = cb; }
   setTerminalExitCallback(cb: TerminalExitCallback) { this.onTerminalExit = cb; }
+  setDocumentUpdatedCallback(cb: DocumentUpdatedCallback) { this.onDocumentUpdated = cb; }
 
   // --- Persistence ---
 
@@ -98,8 +103,10 @@ export class AgentManager {
             sessionId: (agent as any).sessionId || null,
             outputBuffer: '',
             watcher: null,
+            plansWatcher: null,
             lastFileChange: [],
             contextTokens: (agent as any).contextTokens || 0,
+            contextLimit: (agent as any).contextLimit || 200000,
             totalInputTokens: (agent as any).totalInputTokens || 0,
             totalOutputTokens: (agent as any).totalOutputTokens || 0,
             totalCostUsd: (agent as any).totalCostUsd || 0,
@@ -107,6 +114,7 @@ export class AgentManager {
           };
           this.agents.set(agent.id, managed);
           this.startFileWatcher(agent.id);
+          this.startPlansWatcher(agent.id);
         }
         for (const msg of data.messages) {
           if (!this.messages.has(msg.agentId)) {
@@ -121,9 +129,12 @@ export class AgentManager {
             this.notes.set(note.id, note);
           }
         }
-        // Load documents
+        // Load documents (with migration for new fields)
         if (data.documents) {
           for (const doc of data.documents) {
+            // Migration: default status to 'draft', clear stale lockedBy
+            if (!(doc as any).status) (doc as any).status = 'draft';
+            delete (doc as any).lockedBy; // Clear stale locks on startup
             this.documents.set(doc.id, doc);
           }
         }
@@ -134,6 +145,7 @@ export class AgentManager {
         // Load workspaces
         if (data.workspaces && data.workspaces.length > 0) {
           for (const ws of data.workspaces) {
+            ws.lockedAgentIds = ws.lockedAgentIds || [];
             this.workspaces.set(ws.id, ws);
           }
         }
@@ -148,6 +160,7 @@ export class AgentManager {
             gridColumns: this.settings.gridColumns || 2,
             gridRows: this.settings.gridRows || 2,
             selectedAgentIds: this.settings.selectedAgentIds || agentIds,
+            lockedAgentIds: [],
             createdAt: Date.now(),
           };
           this.workspaces.set(defaultId, defaultWorkspace);
@@ -176,6 +189,7 @@ export class AgentManager {
         ...a.info,
         sessionId: a.sessionId, // Persist session ID for resume across restarts
         contextTokens: a.contextTokens,
+        contextLimit: a.contextLimit,
         totalInputTokens: a.totalInputTokens,
         totalOutputTokens: a.totalOutputTokens,
         totalCostUsd: a.totalCostUsd,
@@ -239,6 +253,7 @@ export class AgentManager {
       gridColumns: 3,
       gridRows: 2,
       selectedAgentIds: [],
+      lockedAgentIds: [],
       createdAt: Date.now(),
     };
     this.workspaces.set(ws.id, ws);
@@ -250,13 +265,14 @@ export class AgentManager {
     return ws;
   }
 
-  async updateWorkspace(id: string, updates: { name?: string; gridColumns?: number; gridRows?: number; selectedAgentIds?: string[] }): Promise<WorkspaceInfo | null> {
+  async updateWorkspace(id: string, updates: { name?: string; gridColumns?: number; gridRows?: number; selectedAgentIds?: string[]; lockedAgentIds?: string[] }): Promise<WorkspaceInfo | null> {
     const ws = this.workspaces.get(id);
     if (!ws) return null;
     if (updates.name !== undefined) ws.name = updates.name;
     if (updates.gridColumns !== undefined) ws.gridColumns = updates.gridColumns;
     if (updates.gridRows !== undefined) ws.gridRows = updates.gridRows;
     if (updates.selectedAgentIds !== undefined) ws.selectedAgentIds = updates.selectedAgentIds;
+    if (updates.lockedAgentIds !== undefined) ws.lockedAgentIds = updates.lockedAgentIds;
     await this.persistData();
     return ws;
   }
@@ -339,14 +355,18 @@ export class AgentManager {
     return Array.from(this.documents.values()).sort((a, b) => b.updatedAt - a.updatedAt);
   }
 
-  async createDocument(title: string, content: string, agentId?: string): Promise<LiveDocument> {
+  async createDocument(title: string, content: string, agentId?: string, workspaceId?: string, extra?: { status?: LiveDocument['status']; lockedBy?: string; filePath?: string; lastEditedBy?: string }): Promise<LiveDocument> {
     const now = Date.now();
     const doc: LiveDocument = {
       id: this.generateId(),
       title,
       content,
-      lastEditedBy: 'user',
+      lastEditedBy: extra?.lastEditedBy || 'user',
       agentId,
+      workspaceId,
+      status: extra?.status || 'draft',
+      lockedBy: extra?.lockedBy,
+      filePath: extra?.filePath,
       createdAt: now,
       updatedAt: now,
     };
@@ -355,15 +375,31 @@ export class AgentManager {
     return doc;
   }
 
-  async updateDocument(id: string, updates: { title?: string; content?: string; agentId?: string | null; lastEditedBy?: string }): Promise<LiveDocument | null> {
+  async updateDocument(id: string, updates: { title?: string; content?: string; agentId?: string | null; lastEditedBy?: string; workspaceId?: string | null; status?: LiveDocument['status']; lockedBy?: string | null; filePath?: string }): Promise<LiveDocument | null> {
     const doc = this.documents.get(id);
     if (!doc) return null;
     if (updates.title !== undefined) doc.title = updates.title;
     if (updates.content !== undefined) doc.content = updates.content;
     if (updates.agentId !== undefined) doc.agentId = updates.agentId || undefined;
+    if (updates.workspaceId !== undefined) doc.workspaceId = updates.workspaceId || undefined;
     if (updates.lastEditedBy !== undefined) doc.lastEditedBy = updates.lastEditedBy;
+    if (updates.status !== undefined) doc.status = updates.status;
+    if (updates.lockedBy !== undefined) doc.lockedBy = updates.lockedBy || undefined;
+    if (updates.filePath !== undefined) doc.filePath = updates.filePath;
     doc.updatedAt = Date.now();
     await this.persistData();
+    // Sync content changes back to .plans/ file on disk so agents can read them
+    if (updates.content !== undefined && doc.filePath) {
+      try {
+        this.planWriteFromServer.add(doc.filePath);
+        await Bun.write(doc.filePath, doc.content);
+        // Clear the guard after the watcher debounce period
+        setTimeout(() => this.planWriteFromServer.delete(doc.filePath!), 500);
+      } catch (e) {
+        console.error(`Failed to sync document to ${doc.filePath}:`, e);
+        this.planWriteFromServer.delete(doc.filePath);
+      }
+    }
     return doc;
   }
 
@@ -473,13 +509,25 @@ export class AgentManager {
   // --- Build documents context for agent prompts ---
 
   private getDocumentsForAgent(agentId: string): string {
+    const agent = this.agents.get(agentId);
+    const agentWorkspaceId = agent?.info.workspaceId;
     const allDocs = Array.from(this.documents.values());
-    const globalDocs = allDocs.filter(d => !d.agentId);
-    const agentDocs = allDocs.filter(d => d.agentId === agentId);
-    const relevant = [...globalDocs, ...agentDocs];
+    // Include docs where:
+    // 1. doc is global (no workspaceId and no agentId)
+    // 2. doc.workspaceId matches the agent's workspace
+    // 3. doc.agentId matches this agent
+    const relevant = allDocs.filter(d =>
+      (!d.workspaceId && !d.agentId) ||
+      (agentWorkspaceId && d.workspaceId === agentWorkspaceId) ||
+      d.agentId === agentId
+    );
     if (relevant.length === 0) return '';
-    const docText = relevant.map(d => `--- Document: ${d.title} ---\n${d.content}\n--- End ---`).join('\n\n');
-    return `Living Documents:\n${docText}`;
+    const statusTag = (s: string) => s === 'approved' ? '[APPROVED]' : s === 'in_progress' ? '[IN PROGRESS]' : '[DRAFT]';
+    const docText = relevant.map(d => {
+      const fileHint = d.filePath ? ` (file: ${d.filePath})` : '';
+      return `--- Plan: ${d.title} ${statusTag(d.status)}${fileHint} ---\n${d.content}\n--- End ---`;
+    }).join('\n\n');
+    return `Plans (note: the user may edit plans in the sidebar — re-read the file path for the latest version if referenced):\n${docText}`;
   }
 
   // --- Process Management ---
@@ -520,6 +568,17 @@ export class AgentManager {
       if (docsContext) {
         appendParts.push(docsContext);
       }
+      // Plan management instructions
+      appendParts.push(`Plan Management:
+When asked to create or update a plan, use the Write tool to write a markdown file to the .plans/ directory in your working directory.
+- To create a new plan: Write to .plans/<plan-name>.md
+- To update an existing plan: Write the complete updated content to the same file path
+- Plans will automatically appear in the user's Plans sidebar for review
+- Plans marked [APPROVED] should be followed as-is
+- Plans marked [DRAFT] are pending user review`);
+      // Ensure .plans/ directory exists
+      const plansDir = join(agent.info.cwd, '.plans');
+      try { mkdirSync(plansDir, { recursive: true }); } catch {}
       // Inject default simulator if set and agent cwd looks iOS-related
       if (this.settings.defaultSimulatorUdid) {
         const cwdLower = agent.info.cwd.toLowerCase();
@@ -610,14 +669,16 @@ export class AgentManager {
               // Extract token usage from assistant message
               const usage = msg.message?.usage;
               if (usage) {
-                if (usage.input_tokens) {
-                  agent.contextTokens = usage.input_tokens;
-                  agent.totalInputTokens += usage.input_tokens;
+                // Context window usage = input_tokens + cached tokens (both read and created)
+                const contextUsed = (usage.input_tokens || 0) + (usage.cache_creation_input_tokens || 0) + (usage.cache_read_input_tokens || 0);
+                if (contextUsed > 0) {
+                  agent.contextTokens = contextUsed;
+                  agent.totalInputTokens += contextUsed;
                 }
                 if (usage.output_tokens) {
                   agent.totalOutputTokens += usage.output_tokens;
                 }
-                this.onTokenUsage?.(agentId, agent.contextTokens, 200000, agent.totalInputTokens, agent.totalOutputTokens, agent.totalCostUsd, agent.numTurns);
+                this.onTokenUsage?.(agentId, agent.contextTokens, agent.contextLimit || 200000, agent.totalInputTokens, agent.totalOutputTokens, agent.totalCostUsd, agent.numTurns);
               }
               // Extract content from assistant message
               const content = msg.message?.content;
@@ -650,6 +711,18 @@ export class AgentManager {
                     if (agent.outputBuffer.length < MAX_OUTPUT_BUFFER) {
                       agent.outputBuffer += toolInfo;
                     }
+                    // Intercept Write/Edit to .plans/ directory
+                    if (block.name === 'Write' && block.input?.file_path) {
+                      const fp: string = block.input.file_path;
+                      if (fp.includes('.plans/') || fp.includes('.plans\\')) {
+                        this.handlePlanWrite(agentId, fp, block.input.content || '');
+                      }
+                    } else if (block.name === 'Edit' && block.input?.file_path) {
+                      const fp: string = block.input.file_path;
+                      if (fp.includes('.plans/') || fp.includes('.plans\\')) {
+                        setTimeout(() => this.syncPlanFromFile(agentId, fp), 500);
+                      }
+                    }
                   }
                 }
               }
@@ -663,7 +736,7 @@ export class AgentManager {
                 }
               }
 
-              // Capture cost and turn count from result
+              // Capture cost, turn count, and context window from result
               if (msg.total_cost_usd) {
                 agent.totalCostUsd = msg.total_cost_usd;
                 console.log(`Agent ${agentId} cost: $${msg.total_cost_usd.toFixed(4)} (${msg.num_turns} turns)`);
@@ -671,8 +744,16 @@ export class AgentManager {
               if (msg.num_turns) {
                 agent.numTurns = msg.num_turns;
               }
+              // Extract context window limit from modelUsage if available
+              if (msg.modelUsage) {
+                for (const model of Object.values(msg.modelUsage) as any[]) {
+                  if (model.contextWindow) {
+                    agent.contextLimit = model.contextWindow;
+                  }
+                }
+              }
               // Emit final usage update
-              this.onTokenUsage?.(agentId, agent.contextTokens, 200000, agent.totalInputTokens, agent.totalOutputTokens, agent.totalCostUsd, agent.numTurns);
+              this.onTokenUsage?.(agentId, agent.contextTokens, agent.contextLimit || 200000, agent.totalInputTokens, agent.totalOutputTokens, agent.totalCostUsd, agent.numTurns);
 
               // Capture session ID from result too
               if (msg.session_id) {
@@ -707,6 +788,124 @@ export class AgentManager {
       }
     } catch (e) {
       // Stream closed
+    }
+  }
+
+  // --- Plan interception & sync ---
+
+  private async handlePlanWrite(agentId: string, filePath: string, content: string): Promise<void> {
+    const agent = this.agents.get(agentId);
+    if (!agent) return;
+
+    // Extract title from filename: .plans/my-plan.md → "My Plan"
+    const filename = basename(filePath, '.md');
+    const title = filename.replace(/[-_]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+
+    // Find existing doc by filePath or by agentId + title match
+    let existingDoc: LiveDocument | undefined;
+    for (const doc of this.documents.values()) {
+      if (doc.filePath === filePath) { existingDoc = doc; break; }
+    }
+    if (!existingDoc) {
+      for (const doc of this.documents.values()) {
+        if (doc.title === title && doc.agentId === agentId) { existingDoc = doc; break; }
+      }
+    }
+
+    // Only lock/set in_progress if the agent process is actually running
+    const isAgentRunning = agent.process !== null;
+
+    if (existingDoc) {
+      existingDoc.content = content;
+      existingDoc.filePath = filePath;
+      if (isAgentRunning) {
+        existingDoc.lastEditedBy = agent.info.name;
+        existingDoc.lockedBy = agentId;
+        existingDoc.status = 'in_progress';
+      }
+      existingDoc.updatedAt = Date.now();
+      await this.persistData();
+      this.onDocumentUpdated?.(existingDoc);
+    } else {
+      const doc = await this.createDocument(title, content, agentId, agent.info.workspaceId, {
+        status: isAgentRunning ? 'in_progress' : 'draft',
+        lockedBy: isAgentRunning ? agentId : undefined,
+        filePath,
+        lastEditedBy: isAgentRunning ? agent.info.name : 'user',
+      });
+      this.onDocumentUpdated?.(doc);
+    }
+  }
+
+  private async syncPlanFromFile(agentId: string, filePath: string): Promise<void> {
+    // Skip if this write came from updateDocument (user edit synced to disk)
+    if (this.planWriteFromServer.has(filePath)) return;
+    try {
+      const file = Bun.file(filePath);
+      if (await file.exists()) {
+        const content = await file.text();
+        await this.handlePlanWrite(agentId, filePath, content);
+      }
+    } catch (e) {
+      console.error(`Failed to sync plan from file ${filePath}:`, e);
+    }
+  }
+
+  private async releaseDocumentLocks(agentId: string): Promise<void> {
+    for (const doc of this.documents.values()) {
+      if (doc.lockedBy === agentId) {
+        doc.lockedBy = undefined;
+        if (doc.status === 'in_progress') doc.status = 'draft';
+        doc.updatedAt = Date.now();
+        this.onDocumentUpdated?.(doc);
+      }
+    }
+    await this.persistData();
+  }
+
+  // --- Plans file watcher ---
+
+  private startPlansWatcher(agentId: string) {
+    const agent = this.agents.get(agentId);
+    if (!agent || !existsSync(agent.info.cwd)) return;
+
+    const plansDir = join(agent.info.cwd, '.plans');
+    if (!existsSync(plansDir)) return;
+
+    // Clean up existing watcher
+    if (agent.plansWatcher) {
+      agent.plansWatcher.close();
+      agent.plansWatcher = null;
+    }
+
+    try {
+      let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+      const changedFiles = new Set<string>();
+
+      agent.plansWatcher = watch(plansDir, (eventType, filename) => {
+        if (!filename || !filename.endsWith('.md')) return;
+
+        changedFiles.add(filename);
+
+        if (debounceTimer) clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => {
+          for (const fn of changedFiles) {
+            const fp = join(plansDir, fn);
+            this.syncPlanFromFile(agentId, fp);
+          }
+          changedFiles.clear();
+        }, 300);
+      });
+    } catch (e) {
+      console.error(`Plans watcher failed for agent ${agentId}:`, e);
+    }
+  }
+
+  private stopPlansWatcher(agentId: string) {
+    const agent = this.agents.get(agentId);
+    if (agent?.plansWatcher) {
+      agent.plansWatcher.close();
+      agent.plansWatcher = null;
     }
   }
 
@@ -750,8 +949,10 @@ export class AgentManager {
       sessionId: null,
       outputBuffer: '',
       watcher: null,
+      plansWatcher: null,
       lastFileChange: [],
       contextTokens: 0,
+      contextLimit: 200000,
       totalInputTokens: 0,
       totalOutputTokens: 0,
       totalCostUsd: 0,
@@ -768,6 +969,7 @@ export class AgentManager {
     }
 
     this.startFileWatcher(id);
+    this.startPlansWatcher(id);
     await this.persistData();
     return this.agents.get(id)!.info;
   }
@@ -776,15 +978,18 @@ export class AgentManager {
     const agent = this.agents.get(agentId);
     if (!agent) return false;
 
-    // Kill process and stop watcher
+    // Kill process and stop watchers
     if (agent.process) {
       agent.process.kill();
     }
     this.stopFileWatcher(agentId);
+    this.stopPlansWatcher(agentId);
+    await this.releaseDocumentLocks(agentId);
 
-    // Remove agent from all workspace selectedAgentIds
+    // Remove agent from all workspace selectedAgentIds and lockedAgentIds
     for (const ws of this.workspaces.values()) {
       ws.selectedAgentIds = ws.selectedAgentIds.filter(id => id !== agentId);
+      ws.lockedAgentIds = ws.lockedAgentIds.filter(id => id !== agentId);
     }
 
     this.agents.delete(agentId);
@@ -848,6 +1053,7 @@ export class AgentManager {
       agent.outputBuffer = '';
     }
 
+    await this.releaseDocumentLocks(agentId);
     agent.info.status = 'idle';
     this.onStatusChange?.(agent.info);
     return true;
@@ -862,6 +1068,7 @@ export class AgentManager {
       agent.process = null;
     }
 
+    await this.releaseDocumentLocks(agentId);
     agent.info.status = 'stopped';
     this.onStatusChange?.(agent.info);
     await this.persistData();
@@ -904,27 +1111,8 @@ export class AgentManager {
       // Read stream-json output (captures session ID, streams text, parses tool use)
       const readPromise = this.readStreamJson(agentId, proc);
 
-      // Race between process exit and timeout
-      const exitCode = await Promise.race([
-        proc.exited,
-        new Promise<'timeout'>((resolve) =>
-          setTimeout(() => resolve('timeout'), PROCESS_TIMEOUT_MS)
-        ),
-      ]);
-
-      if (exitCode === 'timeout') {
-        proc.kill();
-        const timeoutMsg = this.addMessage(agentId, 'system', 'Process timed out after 10 minutes and was stopped.');
-        this.onMessage?.(timeoutMsg);
-        if (agent.outputBuffer.trim()) {
-          const partialMsg = this.addMessage(agentId, 'assistant', agent.outputBuffer.trim());
-          this.onMessage?.(partialMsg);
-        }
-        agent.process = null;
-        agent.info.status = 'error';
-        this.onStatusChange?.(agent.info);
-        return;
-      }
+      // Wait for process to complete (no timeout — user can stop manually)
+      const exitCode = await proc.exited;
 
       // Wait for stream reading to complete
       await readPromise;
@@ -935,6 +1123,7 @@ export class AgentManager {
         this.onMessage?.(assistantMsg);
       }
 
+      await this.releaseDocumentLocks(agentId);
       agent.process = null;
       agent.info.status = exitCode === 0 ? 'idle' : 'error';
       this.onStatusChange?.(agent.info);
