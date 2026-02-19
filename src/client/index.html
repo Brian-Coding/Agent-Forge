@@ -63,10 +63,10 @@
     /* Main content */
     .main-content { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 
-    /* Top bar */
-    .top-bar { height: 48px; padding: 0 16px; background: var(--bg-secondary); border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
-    .top-bar-left { display: flex; align-items: center; gap: 8px; }
-    .top-bar-right { display: flex; align-items: center; gap: 12px; }
+    /* Bottom bar */
+    .bottom-bar { height: 40px; padding: 0 16px; background: var(--bg-secondary); border-top: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; margin-bottom: 5px; }
+    .bottom-bar-left { display: flex; align-items: center; gap: 8px; }
+    .bottom-bar-right { display: flex; align-items: center; gap: 12px; }
     .grid-controls { display: flex; align-items: center; gap: 8px; }
     .grid-label { font-size: 12px; color: var(--text-secondary); }
     .grid-buttons { display: flex; gap: 2px; }
@@ -242,7 +242,7 @@
     .auto-scroll-btn:hover { background: var(--accent); color: white; border-color: var(--accent); opacity: 1; }
 
     /* Verbose status elapsed (Feature 5) */
-    .status-elapsed { font-size: 10px; color: var(--text-muted); margin-left: 2px; }
+    .status-elapsed { font-size: 13px; color: var(--text-muted); margin-left: 2px; }
     .status-stuck { color: var(--warning); font-weight: 600; }
 
     /* Tool filter toggle (Feature 7) */
@@ -262,28 +262,40 @@
     .emu-default-btn:hover { color: var(--warning); }
     .emu-default-btn.is-default { color: var(--warning); }
 
-    /* Documents panel (Feature 1) */
+    /* Plans panel (Feature 1) */
     .docs-panel { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
-    .docs-list { flex: 1; overflow-y: auto; padding: 4px 8px; }
+    .docs-list { overflow-y: auto; padding: 4px 8px; }
+    .docs-list.with-editor { max-height: 35%; flex-shrink: 0; border-bottom: 1px solid var(--border); }
     .doc-item { padding: 8px 10px; border-radius: 6px; margin-bottom: 4px; background: var(--bg-primary); border: 1px solid var(--border); cursor: pointer; }
     .doc-item:hover { border-color: var(--accent); }
     .doc-item.active { border-color: var(--accent); background: rgba(47, 129, 247, 0.08); }
-    .doc-title { font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .doc-title { font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; gap: 6px; }
     .doc-meta { font-size: 10px; color: var(--text-muted); margin-top: 2px; }
-    .doc-editor-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 100; }
-    .doc-editor { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 12px; width: 90%; max-width: 900px; height: 80vh; display: flex; flex-direction: column; overflow: hidden; }
-    .doc-editor-header { padding: 12px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; }
-    .doc-editor-header input { flex: 1; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 4px; color: var(--text-primary); font-size: 16px; font-weight: 600; padding: 6px 10px; }
-    .doc-editor-header input:focus { outline: none; border-color: var(--accent); }
-    .doc-editor-body { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
-    .doc-editor-body textarea { flex: 1; background: var(--bg-primary); border: none; border-bottom: 1px solid var(--border); color: var(--text-primary); font-family: 'SF Mono', Monaco, Consolas, monospace; font-size: 13px; padding: 12px 16px; resize: none; line-height: 1.6; }
-    .doc-editor-body textarea:focus { outline: none; }
-    .doc-editor-preview { flex: 1; overflow-y: auto; padding: 12px 16px; font-size: 13px; line-height: 1.6; }
-    .doc-editor-preview p { margin: 0 0 8px; }
-    .doc-editor-preview pre { background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 6px; padding: 12px; margin: 8px 0; overflow-x: auto; }
-    .doc-editor-preview code { font-family: 'SF Mono', Monaco, Consolas, monospace; font-size: 12px; }
-    .doc-editor-preview :not(pre) > code { background: var(--bg-tertiary); padding: 2px 5px; border-radius: 3px; }
-    .doc-editor-footer { padding: 8px 16px; border-top: 1px solid var(--border); display: flex; align-items: center; gap: 8px; }
+    /* Status badges */
+    .doc-status-badge { font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 3px; text-transform: uppercase; letter-spacing: 0.3px; flex-shrink: 0; }
+    .doc-status-draft { background: var(--bg-tertiary); color: var(--text-muted); }
+    .doc-status-in_progress { background: rgba(47, 129, 247, 0.2); color: var(--accent); }
+    .doc-status-approved { background: rgba(63, 185, 80, 0.2); color: var(--success); }
+    /* Lock indicator */
+    .doc-lock-indicator { display: flex; align-items: center; gap: 4px; font-size: 10px; color: var(--warning); padding: 2px 6px; background: rgba(210, 153, 34, 0.1); border-radius: 3px; }
+    /* Inline editor */
+    .doc-inline-editor { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
+    .doc-inline-editor-header { padding: 8px 12px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+    .doc-inline-editor-header input { flex: 1; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 4px; color: var(--text-primary); font-size: 13px; font-weight: 600; padding: 4px 8px; }
+    .doc-inline-editor-header input:focus { outline: none; border-color: var(--accent); }
+    .doc-inline-editor-body { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
+    .doc-inline-editor-body textarea { flex: 1; background: var(--bg-primary); border: none; color: var(--text-primary); font-family: 'SF Mono', Monaco, Consolas, monospace; font-size: 12px; padding: 8px 12px; resize: none; line-height: 1.5; }
+    .doc-inline-editor-body textarea:focus { outline: none; }
+    .doc-inline-preview { flex: 1; overflow-y: auto; padding: 8px 12px; font-size: 12px; line-height: 1.5; }
+    .doc-inline-preview p { margin: 0 0 6px; }
+    .doc-inline-preview pre { background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 6px; padding: 8px; margin: 6px 0; overflow-x: auto; }
+    .doc-inline-preview code { font-family: 'SF Mono', Monaco, Consolas, monospace; font-size: 11px; }
+    .doc-inline-preview :not(pre) > code { background: var(--bg-tertiary); padding: 1px 4px; border-radius: 3px; }
+    .doc-inline-preview ul, .doc-inline-preview ol { padding-left: 18px; margin: 4px 0; }
+    .doc-inline-preview h1, .doc-inline-preview h2, .doc-inline-preview h3 { margin: 8px 0 4px; }
+    .doc-inline-editor-footer { padding: 6px 12px; border-top: 1px solid var(--border); display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+    .btn-approve { background: var(--success); color: white; border: none; padding: 3px 10px; border-radius: 4px; font-size: 11px; font-weight: 600; cursor: pointer; }
+    .btn-approve:hover { opacity: 0.9; }
 
     /* Context bar & token tracker */
     .context-bar { height: 3px; background: var(--bg-tertiary); flex-shrink: 0; position: relative; overflow: hidden; }
@@ -375,6 +387,17 @@
     .slot-add-btn { background: var(--bg-tertiary); border: 2px dashed var(--border); border-radius: 12px; color: var(--text-muted); cursor: pointer; padding: 16px 24px; font-size: 14px; font-weight: 500; transition: all 0.15s; }
     .slot-add-btn:hover { border-color: var(--accent); color: var(--accent); background: rgba(47, 129, 247, 0.08); }
 
+    /* Drag-to-rearrange */
+    .terminal-panel.drag-over { outline: 2px dashed var(--accent); outline-offset: -2px; }
+    .terminal-panel.dragging { opacity: 0.5; }
+    .slot-empty.drag-over { outline: 2px dashed var(--accent); outline-offset: -2px; }
+
+    /* Lock button */
+    .lock-btn { background: none; border: none; cursor: pointer; padding: 3px 5px; border-radius: 3px; font-size: 12px; opacity: 0; transition: opacity 0.15s; color: var(--text-muted); }
+    .panel-header:hover .lock-btn { opacity: 0.6; }
+    .lock-btn.locked { opacity: 1; color: var(--accent); }
+    .terminal-panel.locked { border-left: 2px solid var(--accent); }
+
     /* Scrollbars */
     .panel-content::-webkit-scrollbar, .notes-list::-webkit-scrollbar, .emu-list::-webkit-scrollbar, .agent-list::-webkit-scrollbar, .docs-list::-webkit-scrollbar { width: 6px; }
     .panel-content::-webkit-scrollbar-track, .notes-list::-webkit-scrollbar-track, .emu-list::-webkit-scrollbar-track, .agent-list::-webkit-scrollbar-track, .docs-list::-webkit-scrollbar-track { background: transparent; }
@@ -413,7 +436,7 @@
       emulators: ['M12 18h.01', 'M7 21h10a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2z'],
       settings: ['M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z', 'M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z'],
       chevron: 'M6 9l6 6 6-6',
-      documents: ['M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z', 'M14 2v6h6', 'M16 13H8', 'M16 17H8'],
+      plans: ['M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2', 'M15 2H9a1 1 0 0 0-1 1v2a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V3a1 1 0 0 0-1-1z', 'M9 12l2 2 4-4', 'M9 17h6'],
       image: ['M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4', 'M17 8l-5-5-5 5', 'M12 3v12'],
     };
 
@@ -584,10 +607,19 @@
                 setDocuments(prev => [...prev, msg.document]);
                 break;
               case 'document_updated':
-                setDocuments(prev => prev.map(d => d.id === msg.document.id ? msg.document : d));
+                setDocuments(prev => {
+                  const exists = prev.some(d => d.id === msg.document.id);
+                  if (exists) return prev.map(d => d.id === msg.document.id ? msg.document : d);
+                  return [...prev, msg.document]; // upsert: add if new (e.g. agent-created plan)
+                });
                 break;
               case 'document_deleted':
                 setDocuments(prev => prev.filter(d => d.id !== msg.id));
+                break;
+              case 'document_content_stream':
+                setDocuments(prev => prev.map(d =>
+                  d.id === msg.documentId ? { ...d, content: msg.content, updatedAt: Date.now() } : d
+                ));
                 break;
               // Settings
               case 'settings':
@@ -662,9 +694,10 @@
         updateNote: (id, updates) => sendRaw({ type: 'update_note', id, ...updates }),
         deleteNote: (id) => sendRaw({ type: 'delete_note', id }),
         // Documents
-        createDocument: (title, content, agentId) => sendRaw({ type: 'create_document', title, content, agentId }),
+        createDocument: (title, content, agentId, workspaceId) => sendRaw({ type: 'create_document', title, content, agentId, workspaceId }),
         updateDocument: (id, updates) => sendRaw({ type: 'update_document', id, ...updates }),
         deleteDocument: (id) => sendRaw({ type: 'delete_document', id }),
+        approveDocument: (id) => sendRaw({ type: 'approve_document', id }),
         // Settings
         updateSettings: (settings) => sendRaw({ type: 'update_settings', settings }),
         // Image
@@ -960,7 +993,7 @@
     });
 
     // Terminal Panel
-    function TerminalPanel({ agent, messages, liveOutput, queuedMessages, fileChanges, thinkingOutput, statusStartTime, tokenUsage, terminals, terminalOutput, onSendMessage, onSendImage, onStop, onClearHistory, onClearFileChanges, onMinimize, onMaximize, isMaximized, onFocus, isFocused, onCreateTerminal, onKillTerminal }) {
+    function TerminalPanel({ agent, messages, liveOutput, queuedMessages, fileChanges, thinkingOutput, statusStartTime, tokenUsage, terminals, terminalOutput, onSendMessage, onSendImage, onStop, onClearHistory, onClearFileChanges, onMinimize, onMaximize, isMaximized, onFocus, isFocused, onCreateTerminal, onKillTerminal, isLocked, onToggleLock, isDragging, isDragOver, onDragStart, onDragEnd, onDragOver, onDragLeave, onDrop }) {
       const [input, setInput] = useState('');
       const [inputHistory, setInputHistory] = useState([]);
       const [historyIdx, setHistoryIdx] = useState(-1);
@@ -975,8 +1008,6 @@
       const [searchMatchIndex, setSearchMatchIndex] = useState(0);
       const [showAllMessages, setShowAllMessages] = useState(false);
       const MESSAGE_PAGE_SIZE = 100;
-      const [showTerminalModal, setShowTerminalModal] = useState(false);
-      const [terminalCommand, setTerminalCommand] = useState('');
       const [showTerminals, setShowTerminals] = useState(true);
       const [gitBranch, setGitBranch] = useState(null);
       const contentRef = useRef(null);
@@ -1177,9 +1208,12 @@
         : statusTextMap[agent.status] || '';
 
       return e('div', {
-        className: 'terminal-panel' + (isFocused ? ' focused' : ''),
+        className: 'terminal-panel' + (isFocused ? ' focused' : '') + (isDragging ? ' dragging' : '') + (isDragOver ? ' drag-over' : '') + (isLocked ? ' locked' : ''),
         style: { position: 'relative' },
         onMouseDown: () => onFocus && onFocus(agent.id),
+        onDragOver: onDragOver,
+        onDragLeave: onDragLeave,
+        onDrop: (ev) => { ev.preventDefault(); onDrop && onDrop(); },
         onKeyDown: (ev) => {
           // Ctrl+F opens search
           if ((ev.ctrlKey || ev.metaKey) && ev.key === 'f') {
@@ -1191,19 +1225,28 @@
         },
       },
         // Header
-        e('div', { className: 'panel-header', onDoubleClick: () => onMaximize && onMaximize(agent.id) },
+        e('div', {
+          className: 'panel-header',
+          draggable: !isLocked && !isMaximized,
+          onDragStart: (ev) => onDragStart && onDragStart(agent.id, ev),
+          onDragEnd: onDragEnd,
+          onDoubleClick: () => onMaximize && onMaximize(agent.id),
+          style: !isLocked && !isMaximized ? { cursor: 'grab' } : undefined,
+        },
           e('div', { className: 'panel-title' },
             e('span', { className: 'status-dot status-' + agent.status }),
             e('span', { className: 'panel-title-name' }, agent.name),
-            gitBranch && e('span', { style: { fontSize: 10, color: 'var(--text-muted)', marginLeft: 4, flexShrink: 0 } }, '[' + gitBranch + ']'),
+            gitBranch && e('span', { style: { fontSize: 13, color: 'var(--text-muted)', marginLeft: 4, flexShrink: 0 } }, '[' + gitBranch + ']'),
             statusText && e('span', { className: 'status-elapsed' + (isStuck ? ' status-stuck' : '') }, statusText)
           ),
           e('div', { className: 'panel-actions' },
-            e('button', { className: 'panel-btn', onClick: () => setShowTerminalModal(true), title: 'Run command' }, '\u25B6'),
+            !isMaximized && onToggleLock && e('button', {
+              className: 'lock-btn' + (isLocked ? ' locked' : ''),
+              onClick: (ev) => { ev.stopPropagation(); onToggleLock(agent.id); },
+              title: isLocked ? 'Unlock position' : 'Lock position',
+            }, isLocked ? '\uD83D\uDD12' : '\uD83D\uDD13'),
             e('button', { className: 'panel-btn', onClick: () => { setSearchVisible(prev => !prev); setTimeout(() => searchInputRef.current?.focus(), 50); }, title: 'Search (Ctrl+F)' }, '\uD83D\uDD0D'),
-            e('button', { className: 'panel-btn tool-filter-btn' + (showToolMessages ? ' active' : ''), onClick: () => setShowToolMessages(prev => !prev), title: showToolMessages ? 'Hide tool calls' : 'Show tool calls' }, 'Tools'),
             isWorking && e('button', { className: 'panel-btn panel-btn-stop', onClick: () => onStop(agent.id), title: 'Stop (Esc)' }, 'Stop'),
-            onMaximize && e('button', { className: 'panel-btn maximize-btn', onClick: () => onMaximize(agent.id), title: isMaximized ? 'Restore' : 'Maximize' }, isMaximized ? '\u25E7' : '\u25FB'),
             !isMaximized && onMinimize && e('button', { className: 'panel-btn panel-minimize-btn', onClick: () => onMinimize(agent.id), title: 'Minimize' }, '_'),
             e('button', { className: 'panel-btn', onClick: () => onClearHistory(agent.id), title: 'Clear chat' }, 'Clear'),
           )
@@ -1323,47 +1366,6 @@
             )
           );
         })(),
-        // Terminal command modal
-        showTerminalModal && e('div', { className: 'modal-overlay', onClick: (ev) => { if (ev.target === ev.currentTarget) setShowTerminalModal(false); } },
-          e('div', { className: 'modal', style: { maxWidth: 420 } },
-            e('h2', { className: 'modal-title' }, 'Run Command'),
-            e('div', { className: 'form-group' },
-              e('label', { className: 'form-label' }, 'Command'),
-              e('input', {
-                className: 'form-input',
-                value: terminalCommand,
-                onChange: (ev) => setTerminalCommand(ev.target.value),
-                onKeyDown: (ev) => {
-                  if (ev.key === 'Enter' && terminalCommand.trim()) {
-                    onCreateTerminal && onCreateTerminal(agent.id, terminalCommand.trim());
-                    setTerminalCommand('');
-                    setShowTerminalModal(false);
-                  }
-                },
-                placeholder: 'e.g., npm run dev, bun run dev, python server.py',
-                autoFocus: true,
-              }),
-              e('div', { className: 'form-hint' }, 'Runs in: ' + agent.cwd)
-            ),
-            e('div', { style: { display: 'flex', gap: 4, flexWrap: 'wrap' } },
-              ['npm run dev', 'bun run dev', 'npm test', 'bun test'].map(cmd =>
-                e('button', {
-                  key: cmd,
-                  className: 'btn btn-secondary btn-sm',
-                  onClick: () => { setTerminalCommand(cmd); }
-                }, cmd)
-              )
-            ),
-            e('div', { className: 'modal-actions' },
-              e('button', { className: 'btn btn-secondary', onClick: () => setShowTerminalModal(false) }, 'Cancel'),
-              e('button', { className: 'btn btn-primary', disabled: !terminalCommand.trim(), onClick: () => {
-                onCreateTerminal && onCreateTerminal(agent.id, terminalCommand.trim());
-                setTerminalCommand('');
-                setShowTerminalModal(false);
-              } }, 'Run')
-            )
-          )
-        ),
         // Input
         e('div', { className: 'panel-input-container' },
           pendingImage && e('div', { style: { display: 'flex', alignItems: 'center', gap: 8, padding: '4px 12px', fontSize: 11, color: 'var(--text-secondary)' } },
@@ -1817,25 +1819,53 @@
       );
     }
 
-    // Documents Panel (Feature 1)
-    function DocumentsPanel({ documents, agents, onCreateDocument, onUpdateDocument, onDeleteDocument }) {
+    // Plans Panel (Feature 1)
+    function PlansPanel({ documents, agents, workspaces, activeWorkspaceId, onCreateDocument, onUpdateDocument, onDeleteDocument, onApproveDocument }) {
       const [activeDocId, setActiveDocId] = useState(null);
       const [creating, setCreating] = useState(false);
       const [editTitle, setEditTitle] = useState('');
       const [editContent, setEditContent] = useState('');
       const [editAgentId, setEditAgentId] = useState('');
-      const [showEditor, setShowEditor] = useState(false);
+      const [selectedWsTab, setSelectedWsTab] = useState(activeWorkspaceId || 'all');
       const saveTimerRef = useRef(null);
+      const previewRef = useRef(null);
+
+      // Sync selected tab when active workspace changes
+      useEffect(() => {
+        if (activeWorkspaceId && selectedWsTab !== 'all') {
+          setSelectedWsTab(activeWorkspaceId);
+        }
+      }, [activeWorkspaceId]);
 
       const activeDoc = documents.find(d => d.id === activeDocId);
+      const isLocked = activeDoc && activeDoc.lockedBy;
 
+      // Filter documents by selected workspace tab
+      const filteredDocs = selectedWsTab === 'all'
+        ? documents
+        : documents.filter(d => d.workspaceId === selectedWsTab || (!d.workspaceId && !d.agentId));
+
+      // Sync edit fields when selecting a doc
       useEffect(() => {
         if (activeDoc) {
           setEditTitle(activeDoc.title);
-          setEditContent(activeDoc.content);
+          if (!isLocked) setEditContent(activeDoc.content);
           setEditAgentId(activeDoc.agentId || '');
         }
       }, [activeDocId]);
+
+      // Live content sync when locked (agent is writing)
+      useEffect(() => {
+        if (activeDoc && isLocked) {
+          setEditContent(activeDoc.content);
+          // Auto-scroll preview to bottom
+          if (previewRef.current) {
+            setTimeout(() => {
+              if (previewRef.current) previewRef.current.scrollTop = previewRef.current.scrollHeight;
+            }, 50);
+          }
+        }
+      }, [activeDoc?.content, isLocked]);
 
       const handleCreate = () => {
         setCreating(true);
@@ -1843,21 +1873,20 @@
         setEditTitle('');
         setEditContent('');
         setEditAgentId('');
-        setShowEditor(true);
       };
 
       const handleSaveNew = () => {
         if (editTitle.trim()) {
-          onCreateDocument(editTitle.trim(), editContent, editAgentId || undefined);
+          const wsId = selectedWsTab !== 'all' ? selectedWsTab : activeWorkspaceId;
+          onCreateDocument(editTitle.trim(), editContent, editAgentId || undefined, wsId || undefined);
           setCreating(false);
-          setShowEditor(false);
         }
       };
 
       // Auto-save on content change (debounced 500ms)
       const handleContentChange = (val) => {
         setEditContent(val);
-        if (!creating && activeDoc) {
+        if (!creating && activeDoc && !isLocked) {
           if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
           saveTimerRef.current = setTimeout(() => {
             onUpdateDocument(activeDoc.id, { content: val, lastEditedBy: 'user' });
@@ -1879,80 +1908,134 @@
       };
 
       const handleDelete = (id) => {
-        if (confirm('Delete this document?')) {
+        if (confirm('Delete this plan?')) {
           onDeleteDocument(id);
-          if (activeDocId === id) { setActiveDocId(null); setShowEditor(false); }
+          if (activeDocId === id) { setActiveDocId(null); setCreating(false); }
         }
       };
 
       const openDoc = (id) => {
         setActiveDocId(id);
         setCreating(false);
-        setShowEditor(true);
+      };
+
+      const closeEditor = () => {
+        setActiveDocId(null);
+        setCreating(false);
       };
 
       const previewHtml = useMemo(() => {
         try { return marked.parse(editContent || ''); } catch { return editContent; }
       }, [editContent]);
 
-      // List view in sidebar
-      const listView = e('div', { className: 'docs-panel' },
+      const statusBadge = (doc) => {
+        const status = doc.status || 'draft';
+        const label = status === 'in_progress' ? 'In Progress' : status === 'approved' ? 'Approved' : 'Draft';
+        return e('span', { className: 'doc-status-badge doc-status-' + status }, label);
+      };
+
+      const lockingAgentName = activeDoc && activeDoc.lockedBy
+        ? (agents.find(a => a.id === activeDoc.lockedBy)?.name || 'Agent')
+        : null;
+
+      // Workspace tab bar
+      const wsTabBar = workspaces.length > 1 && e('div', { style: { display: 'flex', gap: 0, borderBottom: '1px solid var(--border)', padding: '0 8px', overflowX: 'auto', flexShrink: 0 } },
+        e('button', {
+          style: { padding: '6px 12px', fontSize: 11, fontWeight: selectedWsTab === 'all' ? 600 : 400, background: 'none', border: 'none', borderBottom: selectedWsTab === 'all' ? '2px solid var(--accent)' : '2px solid transparent', color: selectedWsTab === 'all' ? 'var(--text-primary)' : 'var(--text-muted)', cursor: 'pointer', whiteSpace: 'nowrap' },
+          onClick: () => setSelectedWsTab('all')
+        }, 'All'),
+        workspaces.map(ws =>
+          e('button', {
+            key: ws.id,
+            style: { padding: '6px 12px', fontSize: 11, fontWeight: selectedWsTab === ws.id ? 600 : 400, background: 'none', border: 'none', borderBottom: selectedWsTab === ws.id ? '2px solid var(--accent)' : '2px solid transparent', color: selectedWsTab === ws.id ? 'var(--text-primary)' : 'var(--text-muted)', cursor: 'pointer', whiteSpace: 'nowrap' },
+            onClick: () => setSelectedWsTab(ws.id)
+          }, ws.name)
+        )
+      );
+
+      const showEditor = activeDocId || creating;
+
+      return e('div', { className: 'docs-panel' },
+        // Header
         e('div', { className: 'sidebar-header' },
-          e('span', null, 'Documents'),
+          e('span', null, 'Plans'),
           e('div', { className: 'sidebar-header-actions' },
-            e('button', { className: 'sidebar-btn', onClick: handleCreate, title: 'New document' }, '+')
+            e('button', { className: 'sidebar-btn', onClick: handleCreate, title: 'New plan' }, '+')
           )
         ),
-        e('div', { className: 'docs-list' },
-          documents.length === 0
-            ? e('div', { style: { padding: 12, color: 'var(--text-muted)', fontSize: 12, textAlign: 'center' } }, 'No documents yet. Documents tagged to an agent are injected into its prompt.')
-            : documents.map(doc =>
+        wsTabBar,
+        // Document list (shrinks when editor is open)
+        e('div', { className: 'docs-list' + (showEditor ? ' with-editor' : '') },
+          filteredDocs.length === 0
+            ? e('div', { style: { padding: 12, color: 'var(--text-muted)', fontSize: 12, textAlign: 'center' } }, 'No plans yet. Plans persist across chat sessions and are shared with all agents in the workspace.')
+            : filteredDocs.map(doc =>
                 e('div', { key: doc.id, className: 'doc-item' + (activeDocId === doc.id ? ' active' : ''), onClick: () => openDoc(doc.id) },
                   e('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
-                    e('div', { className: 'doc-title' }, doc.title),
+                    e('div', { className: 'doc-title' },
+                      e('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, doc.title),
+                      statusBadge(doc)
+                    ),
                     e('button', { className: 'agent-delete-btn', style: { opacity: 1, fontSize: 11 }, onClick: (ev) => { ev.stopPropagation(); handleDelete(doc.id); } }, '\u00D7')
                   ),
                   e('div', { className: 'doc-meta' },
                     'by ' + doc.lastEditedBy + ' \u2014 ' + new Date(doc.updatedAt).toLocaleDateString(),
-                    doc.agentId && ' \u2014 Agent: ' + (agents.find(a => a.id === doc.agentId)?.name || 'Unknown')
+                    doc.lockedBy && ' \u2014 \uD83D\uDD12 writing...',
+                    doc.agentId && !doc.lockedBy && ' \u2014 ' + (agents.find(a => a.id === doc.agentId)?.name || 'Agent'),
+                    doc.workspaceId && ' \u2014 ' + (workspaces.find(w => w.id === doc.workspaceId)?.name || '')
                   )
                 )
               )
-        )
-      );
-
-      // Editor modal overlay
-      const editorModal = showEditor && e('div', { className: 'doc-editor-modal', onClick: (ev) => { if (ev.target === ev.currentTarget) { setShowEditor(false); setCreating(false); } } },
-        e('div', { className: 'doc-editor' },
-          e('div', { className: 'doc-editor-header' },
-            e('input', { value: editTitle, onChange: (ev) => setEditTitle(ev.target.value), onBlur: handleTitleBlur, placeholder: 'Document title...', autoFocus: creating }),
-            e('select', { value: editAgentId, onChange: (ev) => handleAgentChange(ev.target.value), style: { background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-primary)', fontSize: 12, padding: '4px 8px' } },
-              e('option', { value: '' }, 'No agent (global)'),
+        ),
+        // Inline editor (below list when a doc is selected or creating)
+        showEditor && e('div', { className: 'doc-inline-editor' },
+          // Editor header
+          e('div', { className: 'doc-inline-editor-header' },
+            creating
+              ? e('input', { value: editTitle, onChange: (ev) => setEditTitle(ev.target.value), placeholder: 'Plan title...', autoFocus: true, style: { flex: 1 } })
+              : isLocked
+                ? e('span', { style: { flex: 1, fontSize: 13, fontWeight: 600 } }, editTitle)
+                : e('input', { value: editTitle, onChange: (ev) => setEditTitle(ev.target.value), onBlur: handleTitleBlur, style: { flex: 1 } }),
+            // Lock indicator
+            isLocked && e('span', { className: 'doc-lock-indicator' }, '\uD83D\uDD12 ', lockingAgentName, ' writing...'),
+            // Agent selector (only when not locked)
+            !isLocked && !creating && e('select', { value: editAgentId, onChange: (ev) => handleAgentChange(ev.target.value), style: { background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-primary)', fontSize: 11, padding: '2px 6px', maxWidth: 80 } },
+              e('option', { value: '' }, 'Global'),
               agents.map(a => e('option', { key: a.id, value: a.id }, a.name))
             ),
-            e('button', { className: 'btn btn-secondary btn-sm', onClick: () => { setShowEditor(false); setCreating(false); } }, 'Close')
+            e('button', { className: 'sidebar-btn', onClick: closeEditor, title: 'Close', style: { fontSize: 16 } }, '\u00D7')
           ),
-          e('div', { className: 'doc-editor-body' },
-            e('textarea', { value: editContent, onChange: (ev) => handleContentChange(ev.target.value), placeholder: 'Write markdown content...' }),
-            e('div', { className: 'doc-editor-preview', dangerouslySetInnerHTML: { __html: previewHtml } })
+          // Editor body
+          e('div', { className: 'doc-inline-editor-body' },
+            isLocked
+              // Locked: show rendered markdown preview (auto-scrolls)
+              ? e('div', { ref: previewRef, className: 'doc-inline-preview', dangerouslySetInnerHTML: { __html: previewHtml } })
+              // Unlocked: show editable textarea
+              : e('textarea', { value: editContent, onChange: (ev) => handleContentChange(ev.target.value), placeholder: 'Write markdown content...' })
           ),
-          e('div', { className: 'doc-editor-footer' },
+          // Editor footer
+          e('div', { className: 'doc-inline-editor-footer' },
             creating
               ? e(React.Fragment, null,
-                  e('button', { className: 'btn btn-secondary btn-sm', onClick: () => { setShowEditor(false); setCreating(false); } }, 'Cancel'),
+                  e('button', { className: 'btn btn-secondary btn-sm', onClick: closeEditor }, 'Cancel'),
                   e('div', { style: { flex: 1 } }),
+                  creating && e('select', { value: editAgentId, onChange: (ev) => setEditAgentId(ev.target.value), style: { background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-primary)', fontSize: 11, padding: '2px 6px' } },
+                    e('option', { value: '' }, 'Global'),
+                    agents.map(a => e('option', { key: a.id, value: a.id }, a.name))
+                  ),
                   e('button', { className: 'btn btn-primary btn-sm', onClick: handleSaveNew, disabled: !editTitle.trim() }, 'Create')
                 )
               : e(React.Fragment, null,
-                  e('span', { style: { fontSize: 11, color: 'var(--text-muted)' } }, 'Auto-saved'),
+                  e('span', { style: { fontSize: 10, color: 'var(--text-muted)' } }, isLocked ? 'Read-only while agent writes' : 'Auto-saved'),
                   e('div', { style: { flex: 1 } }),
-                  activeDoc && e('span', { style: { fontSize: 11, color: 'var(--text-muted)' } }, 'Last edited by ' + activeDoc.lastEditedBy)
+                  // Approve button: visible when draft and not locked
+                  activeDoc && activeDoc.status !== 'approved' && !isLocked && onApproveDocument &&
+                    e('button', { className: 'btn-approve', onClick: () => onApproveDocument(activeDoc.id) }, 'Approve'),
+                  activeDoc && activeDoc.status === 'approved' && !isLocked &&
+                    e('span', { style: { fontSize: 10, color: 'var(--success)', fontWeight: 600 } }, 'Approved')
                 )
           )
         )
       );
-
-      return e(React.Fragment, null, listView, editorModal);
     }
 
     // ======================== MAIN APP ========================
@@ -1986,12 +2069,16 @@
       const [editingAgent, setEditingAgent] = useState(null);
       // Feature 8: Selective broadcast
       const [broadcastTargets, setBroadcastTargets] = useState(new Set());
+      // Drag-to-rearrange
+      const [draggedAgent, setDraggedAgent] = useState(null);
+      const [dragOverSlot, setDragOverSlot] = useState(null);
 
       // Derive active workspace and grid settings from server-owned workspace
       const activeWorkspace = workspaces.find(w => w.id === settings.activeWorkspaceId) || workspaces[0];
       const columns = activeWorkspace ? activeWorkspace.gridColumns : 2;
       const rows = activeWorkspace ? activeWorkspace.gridRows : 2;
-      const selectedAgents = activeWorkspace ? activeWorkspace.selectedAgentIds.filter(id => agents.some(a => a.id === id)) : [];
+      // Preserve empty-string placeholders (intentionally empty slots) while filtering out stale agent IDs
+      const selectedAgents = activeWorkspace ? activeWorkspace.selectedAgentIds.filter(id => id === '' || agents.some(a => a.id === id)) : [];
 
       // Agents for the active workspace
       const workspaceAgents = activeWorkspace ? agents.filter(a => a.workspaceId === activeWorkspace.id) : [];
@@ -2111,9 +2198,13 @@
           displayAgents.push(agent.id);
         }
       });
+      // Trim trailing empty placeholders beyond agent count (cosmetic)
+      while (displayAgents.length > 0 && displayAgents[displayAgents.length - 1] === '' && displayAgents.length > totalPanels) {
+        displayAgents.pop();
+      }
 
-      // Split into minimized and non-minimized
-      const minimizedDisplayAgents = displayAgents.filter(id => minimizedAgents.has(id));
+      // Split into minimized and non-minimized (skip empty placeholders for minimized bar)
+      const minimizedDisplayAgents = displayAgents.filter(id => id && minimizedAgents.has(id));
 
       const handleMinimize = (agentId) => {
         setMinimizedAgents(prev => { const next = new Set(prev); next.add(agentId); return next; });
@@ -2125,6 +2216,66 @@
       // Feature 4: Toggle maximize
       const handleToggleMaximize = (agentId) => {
         setMaximizedAgent(prev => prev === agentId ? null : agentId);
+      };
+
+      // Drag-to-rearrange handlers
+      const handleDragStart = (agentId, ev) => {
+        setDraggedAgent(agentId);
+        ev.dataTransfer.effectAllowed = 'move';
+        ev.dataTransfer.setData('text/plain', agentId);
+      };
+      const handleDragEnd = () => {
+        setDraggedAgent(null);
+        setDragOverSlot(null);
+      };
+      const handleDragOver = (slotIndex, ev) => {
+        if (!draggedAgent) return;
+        const lockedIds = activeWorkspace ? activeWorkspace.lockedAgentIds || [] : [];
+        const nonMinimized = displayAgents.filter(id => id === '' || !minimizedAgents.has(id));
+        const targetAgentId = nonMinimized[slotIndex];
+        if (targetAgentId && targetAgentId !== '' && lockedIds.includes(targetAgentId)) return;
+        ev.preventDefault();
+        ev.dataTransfer.dropEffect = 'move';
+        setDragOverSlot(slotIndex);
+      };
+      const handleDragLeave = () => {
+        setDragOverSlot(null);
+      };
+      const handleDrop = (targetSlotIndex) => {
+        if (!draggedAgent || !activeWorkspace) return;
+        const lockedIds = activeWorkspace.lockedAgentIds || [];
+        const nonMinimized = displayAgents.filter(id => id === '' || !minimizedAgents.has(id));
+        // Build a full slot array (length = totalPanels), empty string for empty slots
+        const slots = Array.from({ length: totalPanels }, (_, i) => nonMinimized[i] || '');
+        const targetAgentId = slots[targetSlotIndex];
+        if (targetAgentId && lockedIds.includes(targetAgentId)) return;
+
+        const fromIndex = slots.indexOf(draggedAgent);
+        const toIndex = targetSlotIndex;
+        if (fromIndex === -1 || fromIndex === toIndex) { setDraggedAgent(null); setDragOverSlot(null); return; }
+
+        // Swap: source gets whatever was in target (agent ID or empty string)
+        slots[fromIndex] = slots[toIndex];
+        slots[toIndex] = draggedAgent;
+
+        // Re-append minimized agents so they aren't lost from selectedAgentIds
+        const minimizedIds = displayAgents.filter(id => id && minimizedAgents.has(id));
+        const newSelected = [...slots, ...minimizedIds];
+        // Trim trailing empty strings
+        while (newSelected.length > 0 && newSelected[newSelected.length - 1] === '') newSelected.pop();
+        ws.updateWorkspace(activeWorkspace.id, { selectedAgentIds: newSelected });
+        setDraggedAgent(null);
+        setDragOverSlot(null);
+      };
+
+      // Lock/unlock toggle
+      const toggleLock = (agentId) => {
+        if (!activeWorkspace) return;
+        const locked = activeWorkspace.lockedAgentIds || [];
+        const updated = locked.includes(agentId)
+          ? locked.filter(id => id !== agentId)
+          : [...locked, agentId];
+        ws.updateWorkspace(activeWorkspace.id, { lockedAgentIds: updated });
       };
 
       // Grid uses user-chosen columns/rows — override when maximized
@@ -2170,7 +2321,7 @@
       const tabs = [
         { id: 'agents', icon: ICONS.agents, label: 'Workspaces' },
         { id: 'notes', icon: ICONS.notes, label: 'Notes' },
-        { id: 'documents', icon: ICONS.documents, label: 'Documents' },
+        { id: 'plans', icon: ICONS.plans, label: 'Plans' },
         { id: 'emulators', icon: ICONS.emulators, label: 'Emulators' },
       ];
 
@@ -2216,12 +2367,15 @@
             onUpdateNote: ws.updateNote,
             onDeleteNote: ws.deleteNote,
           }),
-          sidebarTab === 'documents' && e(DocumentsPanel, {
+          sidebarTab === 'plans' && e(PlansPanel, {
             documents,
             agents,
+            workspaces,
+            activeWorkspaceId: activeWorkspace ? activeWorkspace.id : null,
             onCreateDocument: ws.createDocument,
             onUpdateDocument: ws.updateDocument,
             onDeleteDocument: ws.deleteDocument,
+            onApproveDocument: ws.approveDocument,
           }),
           sidebarTab === 'emulators' && e(EmulatorsPanel, { settings, onUpdateSettings: ws.updateSettings }),
           // Active ports always pinned to bottom of sidebar
@@ -2231,41 +2385,6 @@
         // Main content
         e('div', { className: 'main-content' },
           !connected && e('div', { className: 'connection-error' }, 'Disconnected. Reconnecting...'),
-
-          // Top bar
-          e('div', { className: 'top-bar' },
-            e('div', { className: 'top-bar-left' },
-              activeWorkspace && e('span', { style: { fontWeight: 600, fontSize: 13, color: 'var(--text-primary)', marginRight: 8 } }, activeWorkspace.name),
-              // Feature 3: Cost dashboard
-              (costDashboard.totalCost > 0 || costDashboard.totalTurns > 0) && e('div', { className: 'cost-dashboard' },
-                e('span', { className: 'cost-value' }, '$' + costDashboard.totalCost.toFixed(2) + ' total'),
-                e('span', { className: 'cost-sep' }, '\u00B7'),
-                e('span', null, formatTokens(costDashboard.totalTokens) + ' tokens'),
-                e('span', { className: 'cost-sep' }, '\u00B7'),
-                e('span', null, costDashboard.totalTurns + ' turns')
-              ),
-              // Feature 10: Broadcast toggle
-              e('button', {
-                className: 'broadcast-toggle' + (showBroadcast ? ' active' : ''),
-                onClick: () => setShowBroadcast(prev => !prev),
-                title: 'Toggle broadcast bar (Ctrl+B)'
-              }, '\uD83D\uDCE2 Broadcast', agents.length > 0 && e('span', { style: { fontSize: 10, opacity: 0.7 } }, ' (' + agents.length + ')'))
-            ),
-            e('div', { className: 'top-bar-right' },
-              e('div', { className: 'grid-controls' },
-                e('span', { className: 'grid-label' }, 'Col'),
-                e('div', { className: 'grid-buttons' },
-                  [1,2,3,4].map(n => e('button', { key: n, className: 'grid-btn' + (columns === n ? ' active' : ''), onClick: () => setColumns(n) }, n))
-                )
-              ),
-              e('div', { className: 'grid-controls' },
-                e('span', { className: 'grid-label' }, 'Row'),
-                e('div', { className: 'grid-buttons' },
-                  [1,2,3].map(n => e('button', { key: n, className: 'grid-btn' + (rows === n ? ' active' : ''), onClick: () => setRows(n) }, n))
-                )
-              ),
-            )
-          ),
 
           // Broadcast bar (enhanced — Feature 10 + Feature 8)
           showBroadcast && e('div', { className: 'broadcast-bar-enhanced' },
@@ -2344,13 +2463,22 @@
                   onKillTerminal: ws.killTerminal,
                 });
               }
-              const nonMinimized = displayAgents.filter(id => !minimizedAgents.has(id));
+              // Keep empty-string placeholders (intentional empty slots); only filter out minimized agents
+              const nonMinimized = displayAgents.filter(id => id === '' || !minimizedAgents.has(id));
+              const lockedIds = activeWorkspace ? activeWorkspace.lockedAgentIds || [] : [];
               return Array.from({ length: totalPanels }).map((_, i) => {
                 const agentId = nonMinimized[i];
                 const agent = agentId ? agents.find(a => a.id === agentId) : null;
-                if (!agent) return e('div', { key: 'empty-' + i, className: 'terminal-panel slot-empty' },
+                if (!agent) return e('div', {
+                  key: 'empty-' + i,
+                  className: 'terminal-panel slot-empty' + (dragOverSlot === i ? ' drag-over' : ''),
+                  onDragOver: (ev) => handleDragOver(i, ev),
+                  onDragLeave: handleDragLeave,
+                  onDrop: () => handleDrop(i),
+                },
                   e('button', { className: 'slot-add-btn', onClick: () => { setEditingAgent(null); setShowModal(true); } }, '+ Add Agent')
                 );
+                const isLocked = lockedIds.includes(agentId);
                 return e(TerminalPanel, {
                   key: agentId,
                   agent,
@@ -2375,9 +2503,53 @@
                   isFocused: focusedAgentId === agentId,
                   onCreateTerminal: ws.createTerminal,
                   onKillTerminal: ws.killTerminal,
+                  isLocked,
+                  onToggleLock: toggleLock,
+                  isDragging: draggedAgent === agentId,
+                  isDragOver: dragOverSlot === i,
+                  onDragStart: handleDragStart,
+                  onDragEnd: handleDragEnd,
+                  onDragOver: (ev) => handleDragOver(i, ev),
+                  onDragLeave: handleDragLeave,
+                  onDrop: () => handleDrop(i),
                 });
               });
             })()
+          ),
+
+          // Bottom bar (workspace info, cost, broadcast toggle, grid controls)
+          e('div', { className: 'bottom-bar' },
+            e('div', { className: 'bottom-bar-left' },
+              activeWorkspace && e('span', { style: { fontWeight: 600, fontSize: 13, color: 'var(--text-primary)', marginRight: 8 } }, activeWorkspace.name),
+              // Feature 3: Cost dashboard
+              (costDashboard.totalCost > 0 || costDashboard.totalTurns > 0) && e('div', { className: 'cost-dashboard' },
+                e('span', { className: 'cost-value' }, '$' + costDashboard.totalCost.toFixed(2) + ' total'),
+                e('span', { className: 'cost-sep' }, '\u00B7'),
+                e('span', null, formatTokens(costDashboard.totalTokens) + ' tokens'),
+                e('span', { className: 'cost-sep' }, '\u00B7'),
+                e('span', null, costDashboard.totalTurns + ' turns')
+              ),
+              // Feature 10: Broadcast toggle
+              e('button', {
+                className: 'broadcast-toggle' + (showBroadcast ? ' active' : ''),
+                onClick: () => setShowBroadcast(prev => !prev),
+                title: 'Toggle broadcast bar (Ctrl+B)'
+              }, '\uD83D\uDCE2 Broadcast', agents.length > 0 && e('span', { style: { fontSize: 10, opacity: 0.7 } }, ' (' + agents.length + ')'))
+            ),
+            e('div', { className: 'bottom-bar-right' },
+              e('div', { className: 'grid-controls' },
+                e('span', { className: 'grid-label' }, 'Col'),
+                e('div', { className: 'grid-buttons' },
+                  [1,2,3,4].map(n => e('button', { key: n, className: 'grid-btn' + (columns === n ? ' active' : ''), onClick: () => setColumns(n) }, n))
+                )
+              ),
+              e('div', { className: 'grid-controls' },
+                e('span', { className: 'grid-label' }, 'Row'),
+                e('div', { className: 'grid-buttons' },
+                  [1,2,3].map(n => e('button', { key: n, className: 'grid-btn' + (rows === n ? ' active' : ''), onClick: () => setRows(n) }, n))
+                )
+              ),
+            )
           )
         ),
 

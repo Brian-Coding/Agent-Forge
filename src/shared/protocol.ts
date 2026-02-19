@@ -8,6 +8,7 @@ export interface WorkspaceInfo {
   gridColumns: number;
   gridRows: number;
   selectedAgentIds: string[];
+  lockedAgentIds: string[];    // Agents locked to their current grid slot
   createdAt: number;
 }
 
@@ -48,6 +49,10 @@ export interface LiveDocument {
   content: string;
   lastEditedBy: string;   // 'user' or agent name
   agentId?: string;       // Optional: assign to a specific agent
+  workspaceId?: string;   // Workspace this plan belongs to
+  status: 'draft' | 'approved' | 'in_progress';  // plan approval status
+  lockedBy?: string;      // agent ID currently writing
+  filePath?: string;      // .plans/ file path for sync
   createdAt: number;
   updatedAt: number;
 }
@@ -93,9 +98,10 @@ export type ClientMessage =
   | { type: 'delete_note'; id: string }
   // Documents
   | { type: 'get_documents' }
-  | { type: 'create_document'; title: string; content: string; agentId?: string }
-  | { type: 'update_document'; id: string; title?: string; content?: string; agentId?: string | null; lastEditedBy?: string }
+  | { type: 'create_document'; title: string; content: string; agentId?: string; workspaceId?: string }
+  | { type: 'update_document'; id: string; title?: string; content?: string; agentId?: string | null; lastEditedBy?: string; status?: 'draft' | 'approved' | 'in_progress' }
   | { type: 'delete_document'; id: string }
+  | { type: 'approve_document'; id: string }
   // Settings
   | { type: 'get_settings' }
   | { type: 'update_settings'; settings: Partial<AppSettings> }
@@ -104,7 +110,7 @@ export type ClientMessage =
   // Workspaces
   | { type: 'get_workspaces' }
   | { type: 'create_workspace'; name: string }
-  | { type: 'update_workspace'; id: string; name?: string; gridColumns?: number; gridRows?: number; selectedAgentIds?: string[] }
+  | { type: 'update_workspace'; id: string; name?: string; gridColumns?: number; gridRows?: number; selectedAgentIds?: string[]; lockedAgentIds?: string[] }
   | { type: 'delete_workspace'; id: string }
   | { type: 'set_active_workspace'; id: string }
   // Terminals
@@ -136,6 +142,7 @@ export type ServerMessage =
   | { type: 'document_created'; document: LiveDocument }
   | { type: 'document_updated'; document: LiveDocument }
   | { type: 'document_deleted'; id: string }
+  | { type: 'document_content_stream'; documentId: string; content: string }
   // Settings
   | { type: 'settings'; settings: AppSettings }
   // Token usage
