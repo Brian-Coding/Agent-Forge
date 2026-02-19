@@ -78,6 +78,10 @@ agentManager.setTerminalExitCallback((terminalId, exitCode) => {
   broadcast({ type: 'terminal_exited', terminalId, exitCode });
 });
 
+agentManager.setDocumentUpdatedCallback((doc) => {
+  broadcast({ type: 'document_updated', document: doc });
+});
+
 // Handle incoming WebSocket messages
 async function handleMessage(ws: ServerWebSocket<unknown>, message: ClientMessage) {
   switch (message.type) {
@@ -230,7 +234,7 @@ async function handleMessage(ws: ServerWebSocket<unknown>, message: ClientMessag
     }
 
     case 'create_document': {
-      const doc = await agentManager.createDocument(message.title, message.content, message.agentId);
+      const doc = await agentManager.createDocument(message.title, message.content, message.agentId, message.workspaceId);
       broadcast({ type: 'document_created', document: doc });
       break;
     }
@@ -250,6 +254,16 @@ async function handleMessage(ws: ServerWebSocket<unknown>, message: ClientMessag
       const deleted = await agentManager.deleteDocument(message.id);
       if (deleted) {
         broadcast({ type: 'document_deleted', id: message.id });
+      } else {
+        ws.send(JSON.stringify({ type: 'error', message: 'Document not found' }));
+      }
+      break;
+    }
+
+    case 'approve_document': {
+      const doc = await agentManager.updateDocument(message.id, { status: 'approved', lastEditedBy: 'user' });
+      if (doc) {
+        broadcast({ type: 'document_updated', document: doc });
       } else {
         ws.send(JSON.stringify({ type: 'error', message: 'Document not found' }));
       }
