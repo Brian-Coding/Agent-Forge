@@ -524,10 +524,18 @@ export class AgentManager {
     if (relevant.length === 0) return '';
     const statusTag = (s: string) => s === 'approved' ? '[APPROVED]' : s === 'in_progress' ? '[IN PROGRESS]' : '[DRAFT]';
     const docText = relevant.map(d => {
-      const fileHint = d.filePath ? ` (file: ${d.filePath})` : '';
-      return `--- Plan: ${d.title} ${statusTag(d.status)}${fileHint} ---\n${d.content}\n--- End ---`;
-    }).join('\n\n');
-    return `Plans (note: the user may edit plans in the sidebar — re-read the file path for the latest version if referenced):\n${docText}`;
+      if (d.filePath) {
+        // Reference by file path only — avoids injecting large content into CLI args
+        return `- ${d.title} ${statusTag(d.status)} → file: ${d.filePath}`;
+      }
+      // No file on disk — inline short content, truncate if too long
+      const maxInline = 2000;
+      const content = d.content.length > maxInline
+        ? d.content.slice(0, maxInline) + '\n...(truncated — full content available in Plans sidebar)'
+        : d.content;
+      return `--- Plan: ${d.title} ${statusTag(d.status)} ---\n${content}\n--- End ---`;
+    }).join('\n');
+    return `Plans (read the file path for full content when you need to reference a plan):\n${docText}`;
   }
 
   // --- Process Management ---
@@ -612,11 +620,16 @@ When asked to create or update a plan, use the Write tool to write a markdown fi
 
       console.log(`Spawning claude for agent ${agentId}:`, args.join(' '));
 
+      // Strip CLAUDECODE env var so spawned agents don't think they're nested
+      const env = { ...process.env };
+      delete env.CLAUDECODE;
+
       const proc = Bun.spawn(args, {
         cwd: agent.info.cwd,
         stdin: 'pipe',
         stdout: 'pipe',
         stderr: 'pipe',
+        env,
       });
 
       agent.process = proc;
