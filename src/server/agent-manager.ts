@@ -6,7 +6,30 @@ import { tmpdir } from 'os';
 import type { AgentInfo, AgentStatus, ChatMessage, PersistedData, ProjectNote, LiveDocument, AppSettings, WorkspaceInfo, TerminalSession } from '../shared/protocol';
 
 const DATA_FILE = './data.json';
+const PID_FILE = './pids.json';
 const MAX_OUTPUT_BUFFER = 2_000_000; // 2MB max output buffer per agent (agents produce more output with tools)
+
+// Kill an entire process tree on Windows using taskkill /T /F
+async function treeKill(pid: number): Promise<void> {
+  try {
+    const proc = Bun.spawn(['taskkill', '/T', '/F', '/PID', String(pid)], {
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    await proc.exited;
+  } catch (e) {
+    console.error(`treeKill(${pid}) failed (process may already be dead):`, e);
+  }
+}
+
+// Kill a Bun Subprocess's entire process tree, falling back to .kill() if no PID
+async function killProcessTree(proc: Subprocess<any, any, any>): Promise<void> {
+  if (proc.pid) {
+    await treeKill(proc.pid);
+  } else {
+    try { proc.kill(); } catch {}
+  }
+}
 
 // Default guardrails appended to every agent — keeps them safe without user having to think about it
 const DEFAULT_GUARDRAILS = `IMPORTANT GUARDRAILS — follow these at all times:
@@ -24,6 +47,7 @@ interface ManagedAgent {
   watcher: FSWatcher | null;
   plansWatcher: FSWatcher | null;
   lastFileChange: string[];
+  pendingTimeouts: ReturnType<typeof setTimeout>[]; // Tracked timeouts, cleared on kill/stop
   // Token tracking
   contextTokens: number;      // Current context window usage (input + cached)
   contextLimit: number;       // Context window size from model
@@ -49,6 +73,19 @@ interface ManagedTerminal {
   outputBuffer: string;
 }
 
+// Read from a stream reader with a timeout — prevents hung agents from blocking forever
+async function readWithTimeout<T>(reader: ReadableStreamDefaultReader<T>, ms: number): Promise<{ done: boolean; value?: T }> {
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`Stream read timed out after ${ms}ms`)), ms);
+  });
+  try {
+    return await Promise.race([reader.read(), timeout]);
+  } finally {
+    clearTimeout(timer!);
+  }
+}
+
 export class AgentManager {
   private agents: Map<string, ManagedAgent> = new Map();
   private messages: Map<string, ChatMessage[]> = new Map();
@@ -68,9 +105,60 @@ export class AgentManager {
   private onTerminalExit: TerminalExitCallback | null = null;
   private onDocumentUpdated: DocumentUpdatedCallback | null = null;
   private planWriteFromServer: Set<string> = new Set(); // tracks file paths written by updateDocument to avoid watcher feedback loop
+  private activePids: Set<number> = new Set(); // Track all spawned child PIDs for orphan cleanup
+  private sendLocks: Map<string, Promise<void>> = new Map(); // Per-agent concurrency lock
+  // Serialized persist with debounce
+  private persistChain: Promise<void> = Promise.resolve();
+  private persistTimer: ReturnType<typeof setTimeout> | null = null;
+  private persistDirty: boolean = false;
+  // Serialized PID save with debounce
+  private pidChain: Promise<void> = Promise.resolve();
+  private pidTimer: ReturnType<typeof setTimeout> | null = null;
+  private pidDirty: boolean = false;
 
   constructor() {
     this.loadPersistedData();
+  }
+
+  // --- PID tracking (serialized + debounced + atomic) ---
+
+  private async _writePids(): Promise<void> {
+    const tmpFile = PID_FILE + '.tmp';
+    try {
+      await Bun.write(tmpFile, JSON.stringify([...this.activePids]));
+      const { renameSync } = await import('fs');
+      renameSync(tmpFile, PID_FILE);
+    } catch (e) {
+      console.error('Failed to save PIDs:', e);
+    }
+  }
+
+  private scheduleSavePids(): void {
+    this.pidDirty = true;
+    if (this.pidTimer) return; // already scheduled
+    this.pidTimer = setTimeout(() => {
+      this.pidTimer = null;
+      if (!this.pidDirty) return;
+      this.pidDirty = false;
+      this.pidChain = this.pidChain.then(() => this._writePids()).catch(e => console.error('PID save error:', e));
+    }, 200);
+  }
+
+  async savePidsNow(): Promise<void> {
+    if (this.pidTimer) { clearTimeout(this.pidTimer); this.pidTimer = null; }
+    this.pidDirty = false;
+    this.pidChain = this.pidChain.then(() => this._writePids()).catch(e => console.error('PID save error:', e));
+    return this.pidChain;
+  }
+
+  private trackPid(pid: number): void {
+    this.activePids.add(pid);
+    this.scheduleSavePids();
+  }
+
+  private untrackPid(pid: number): void {
+    this.activePids.delete(pid);
+    this.scheduleSavePids();
   }
 
   setOutputCallback(cb: OutputCallback) { this.onOutput = cb; }
@@ -86,6 +174,21 @@ export class AgentManager {
   // --- Persistence ---
 
   private async loadPersistedData() {
+    // Kill orphaned processes from previous runs
+    try {
+      const pidFile = Bun.file(PID_FILE);
+      if (await pidFile.exists()) {
+        const pids: number[] = await pidFile.json();
+        if (pids.length > 0) {
+          console.log(`Cleaning up ${pids.length} orphaned PIDs from previous run:`, pids);
+          await Promise.all(pids.map(pid => treeKill(pid)));
+          await Bun.write(PID_FILE, '[]');
+        }
+      }
+    } catch (e) {
+      console.error('Failed to clean up orphaned PIDs:', e);
+    }
+
     try {
       const file = Bun.file(DATA_FILE);
       if (await file.exists()) {
@@ -105,6 +208,7 @@ export class AgentManager {
             watcher: null,
             plansWatcher: null,
             lastFileChange: [],
+            pendingTimeouts: [],
             contextTokens: (agent as any).contextTokens || 0,
             contextLimit: (agent as any).contextLimit || 200000,
             totalInputTokens: (agent as any).totalInputTokens || 0,
@@ -183,8 +287,8 @@ export class AgentManager {
     }
   }
 
-  private async persistData() {
-    const data: PersistedData = {
+  private _buildPersistedData(): PersistedData {
+    return {
       agents: Array.from(this.agents.values()).map(a => ({
         ...a.info,
         sessionId: a.sessionId, // Persist session ID for resume across restarts
@@ -202,7 +306,36 @@ export class AgentManager {
       settings: this.settings,
       workspaces: Array.from(this.workspaces.values()),
     };
-    await Bun.write(DATA_FILE, JSON.stringify(data, null, 2));
+  }
+
+  private async _writeData(): Promise<void> {
+    const tmpFile = DATA_FILE + '.tmp';
+    try {
+      const data = this._buildPersistedData();
+      await Bun.write(tmpFile, JSON.stringify(data, null, 2));
+      const { renameSync } = await import('fs');
+      renameSync(tmpFile, DATA_FILE);
+    } catch (e) {
+      console.error('Failed to persist data:', e);
+    }
+  }
+
+  private schedulePersist(): void {
+    this.persistDirty = true;
+    if (this.persistTimer) return;
+    this.persistTimer = setTimeout(() => {
+      this.persistTimer = null;
+      if (!this.persistDirty) return;
+      this.persistDirty = false;
+      this.persistChain = this.persistChain.then(() => this._writeData()).catch(e => console.error('Persist error:', e));
+    }, 200);
+  }
+
+  private async persistData(): Promise<void> {
+    if (this.persistTimer) { clearTimeout(this.persistTimer); this.persistTimer = null; }
+    this.persistDirty = false;
+    this.persistChain = this.persistChain.then(() => this._writeData()).catch(e => console.error('Persist error:', e));
+    return this.persistChain;
   }
 
   private generateId(): string {
@@ -437,7 +570,7 @@ export class AgentManager {
       this.messages.set(agentId, []);
     }
     this.messages.get(agentId)!.push(msg);
-    this.persistData();
+    this.schedulePersist();
     return msg;
   }
 
@@ -524,20 +657,30 @@ export class AgentManager {
     if (relevant.length === 0) return '';
     const statusTag = (s: string) => s === 'approved' ? '[APPROVED]' : s === 'in_progress' ? '[IN PROGRESS]' : '[DRAFT]';
     const docText = relevant.map(d => {
-      const fileHint = d.filePath ? ` (file: ${d.filePath})` : '';
-      return `--- Plan: ${d.title} ${statusTag(d.status)}${fileHint} ---\n${d.content}\n--- End ---`;
-    }).join('\n\n');
-    return `Plans (note: the user may edit plans in the sidebar — re-read the file path for the latest version if referenced):\n${docText}`;
+      if (d.filePath) {
+        // Reference by file path only — avoids injecting large content into CLI args
+        return `- ${d.title} ${statusTag(d.status)} → file: ${d.filePath}`;
+      }
+      // No file on disk — inline short content, truncate if too long
+      const maxInline = 2000;
+      const content = d.content.length > maxInline
+        ? d.content.slice(0, maxInline) + '\n...(truncated — full content available in Plans sidebar)'
+        : d.content;
+      return `--- Plan: ${d.title} ${statusTag(d.status)} ---\n${content}\n--- End ---`;
+    }).join('\n');
+    return `Plans (read the file path for full content when you need to reference a plan):\n${docText}`;
   }
 
   // --- Process Management ---
 
-  private spawnProcess(agentId: string): Subprocess<'pipe', 'pipe', 'pipe'> | null {
+  private async spawnProcess(agentId: string): Promise<Subprocess<'pipe', 'pipe', 'pipe'> | null> {
     const agent = this.agents.get(agentId);
     if (!agent) return null;
 
     if (agent.process) {
-      agent.process.kill();
+      const oldPid = agent.process.pid;
+      await killProcessTree(agent.process);
+      if (oldPid) this.untrackPid(oldPid);
       agent.process = null;
     }
 
@@ -612,14 +755,20 @@ When asked to create or update a plan, use the Write tool to write a markdown fi
 
       console.log(`Spawning claude for agent ${agentId}:`, args.join(' '));
 
+      // Strip CLAUDECODE env var so spawned agents don't think they're nested
+      const env = { ...process.env };
+      delete env.CLAUDECODE;
+
       const proc = Bun.spawn(args, {
         cwd: agent.info.cwd,
         stdin: 'pipe',
         stdout: 'pipe',
         stderr: 'pipe',
+        env,
       });
 
       agent.process = proc;
+      if (proc.pid) this.trackPid(proc.pid);
       return proc;
     } catch (e) {
       console.error(`Failed to spawn claude for agent ${agentId}:`, e);
@@ -639,11 +788,11 @@ When asked to create or update a plan, use the Write tool to write a markdown fi
     let hasSeenText = false;
 
     // Also read stderr for error reporting
-    this.readStderr(agentId, proc.stderr);
+    this.readStderr(agentId, proc.stderr).catch(e => console.error(`readStderr(${agentId}) error:`, e));
 
     try {
       while (true) {
-        const { done, value } = await reader.read();
+        const { done, value } = await readWithTimeout(reader, 300_000); // 5min timeout per read
         if (done) break;
 
         buffer += decoder.decode(value, { stream: true });
@@ -651,8 +800,13 @@ When asked to create or update a plan, use the Write tool to write a markdown fi
         // Process complete JSON lines
         const lines = buffer.split('\n');
         buffer = lines.pop() || ''; // Keep incomplete line in buffer
+        // Cap buffer to prevent unbounded memory growth
+        if (buffer.length > MAX_OUTPUT_BUFFER) {
+          buffer = buffer.slice(-MAX_OUTPUT_BUFFER);
+        }
 
-        for (const line of lines) {
+        for (let line of lines) {
+          line = line.replace(/\r$/, ''); // Strip Windows CRLF
           if (!line.trim()) continue;
 
           try {
@@ -662,7 +816,7 @@ When asked to create or update a plan, use the Write tool to write a markdown fi
               // Capture session ID for future --resume
               if (msg.session_id && msg.session_id !== agent.sessionId) {
                 agent.sessionId = msg.session_id;
-                this.persistData();
+                this.schedulePersist();
                 console.log(`Agent ${agentId} session: ${msg.session_id}`);
               }
             } else if (msg.type === 'assistant') {
@@ -720,7 +874,7 @@ When asked to create or update a plan, use the Write tool to write a markdown fi
                     } else if (block.name === 'Edit' && block.input?.file_path) {
                       const fp: string = block.input.file_path;
                       if (fp.includes('.plans/') || fp.includes('.plans\\')) {
-                        setTimeout(() => this.syncPlanFromFile(agentId, fp), 500);
+                        this.agentTimeout(agentId, () => this.syncPlanFromFile(agentId, fp), 500);
                       }
                     }
                   }
@@ -770,7 +924,9 @@ When asked to create or update a plan, use the Write tool to write a markdown fi
         }
       }
     } catch (e) {
-      // Stream closed
+      // Stream closed or timed out
+    } finally {
+      reader.releaseLock();
     }
 
     return resultText;
@@ -788,6 +944,8 @@ When asked to create or update a plan, use the Write tool to write a markdown fi
       }
     } catch (e) {
       // Stream closed
+    } finally {
+      reader.releaseLock();
     }
   }
 
@@ -951,6 +1109,7 @@ When asked to create or update a plan, use the Write tool to write a markdown fi
       watcher: null,
       plansWatcher: null,
       lastFileChange: [],
+      pendingTimeouts: [],
       contextTokens: 0,
       contextLimit: 200000,
       totalInputTokens: 0,
@@ -978,9 +1137,12 @@ When asked to create or update a plan, use the Write tool to write a markdown fi
     const agent = this.agents.get(agentId);
     if (!agent) return false;
 
-    // Kill process and stop watchers
+    // Kill process tree and stop watchers
     if (agent.process) {
-      agent.process.kill();
+      const pid = agent.process.pid;
+      await killProcessTree(agent.process);
+      if (pid) this.untrackPid(pid);
+      agent.process = null;
     }
     this.stopFileWatcher(agentId);
     this.stopPlansWatcher(agentId);
@@ -1037,12 +1199,32 @@ When asked to create or update a plan, use the Write tool to write a markdown fi
 
   // --- Agent Control ---
 
-  async stopAgent(agentId: string): Promise<boolean> {
+  private agentTimeout(agentId: string, callback: () => void, ms: number): ReturnType<typeof setTimeout> {
+    const agent = this.agents.get(agentId);
+    const timer = setTimeout(() => {
+      if (agent) agent.pendingTimeouts = agent.pendingTimeouts.filter(t => t !== timer);
+      callback();
+    }, ms);
+    if (agent) agent.pendingTimeouts.push(timer);
+    return timer;
+  }
+
+  private clearAgentTimeouts(agentId: string): void {
+    const agent = this.agents.get(agentId);
+    if (agent) {
+      for (const timer of agent.pendingTimeouts) clearTimeout(timer);
+      agent.pendingTimeouts = [];
+    }
+  }
+
+  private async _stopAgentImpl(agentId: string): Promise<boolean> {
     const agent = this.agents.get(agentId);
     if (!agent) return false;
 
     if (agent.process) {
-      agent.process.kill();
+      const pid = agent.process.pid;
+      await killProcessTree(agent.process);
+      if (pid) this.untrackPid(pid);
       agent.process = null;
     }
 
@@ -1053,21 +1235,35 @@ When asked to create or update a plan, use the Write tool to write a markdown fi
       agent.outputBuffer = '';
     }
 
+    this.clearAgentTimeouts(agentId);
     await this.releaseDocumentLocks(agentId);
     agent.info.status = 'idle';
     this.onStatusChange?.(agent.info);
     return true;
   }
 
-  async killAgent(agentId: string): Promise<boolean> {
+  async stopAgent(agentId: string): Promise<boolean> {
+    const prev = this.sendLocks.get(agentId) ?? Promise.resolve();
+    const current = prev.then(
+      () => this._stopAgentImpl(agentId),
+      () => this._stopAgentImpl(agentId),
+    ).catch(e => { console.error(`stopAgent(${agentId}) error:`, e); return false; });
+    this.sendLocks.set(agentId, current.then(() => {}));
+    return current;
+  }
+
+  private async _killAgentImpl(agentId: string): Promise<boolean> {
     const agent = this.agents.get(agentId);
     if (!agent) return false;
 
     if (agent.process) {
-      agent.process.kill();
+      const pid = agent.process.pid;
+      await killProcessTree(agent.process);
+      if (pid) this.untrackPid(pid);
       agent.process = null;
     }
 
+    this.clearAgentTimeouts(agentId);
     await this.releaseDocumentLocks(agentId);
     agent.info.status = 'stopped';
     this.onStatusChange?.(agent.info);
@@ -1075,9 +1271,19 @@ When asked to create or update a plan, use the Write tool to write a markdown fi
     return true;
   }
 
+  async killAgent(agentId: string): Promise<boolean> {
+    const prev = this.sendLocks.get(agentId) ?? Promise.resolve();
+    const current = prev.then(
+      () => this._killAgentImpl(agentId),
+      () => this._killAgentImpl(agentId),
+    ).catch(e => { console.error(`killAgent(${agentId}) error:`, e); return false; });
+    this.sendLocks.set(agentId, current.then(() => {}));
+    return current;
+  }
+
   // --- Messaging ---
 
-  async sendMessage(agentId: string, content: string): Promise<void> {
+  private async _sendMessageImpl(agentId: string, content: string): Promise<void> {
     const agent = this.agents.get(agentId);
     if (!agent) return;
 
@@ -1090,7 +1296,7 @@ When asked to create or update a plan, use the Write tool to write a markdown fi
     agent.info.status = 'working';
     this.onStatusChange?.(agent.info);
 
-    const proc = this.spawnProcess(agentId);
+    const proc = await this.spawnProcess(agentId);
 
     if (!proc) {
       const errMsg = existsSync(agent.info.cwd)
@@ -1124,16 +1330,28 @@ When asked to create or update a plan, use the Write tool to write a markdown fi
       }
 
       await this.releaseDocumentLocks(agentId);
+      if (proc.pid) this.untrackPid(proc.pid);
       agent.process = null;
       agent.info.status = exitCode === 0 ? 'idle' : 'error';
       this.onStatusChange?.(agent.info);
       await this.persistData(); // Persist session ID
     } catch (e) {
       console.error(`Error sending message to agent ${agentId}:`, e);
+      if (proc.pid) this.untrackPid(proc.pid);
       agent.process = null;
       agent.info.status = 'error';
       this.onStatusChange?.(agent.info);
     }
+  }
+
+  async sendMessage(agentId: string, content: string): Promise<void> {
+    const prev = this.sendLocks.get(agentId) ?? Promise.resolve();
+    const current = prev.then(
+      () => this._sendMessageImpl(agentId, content),
+      () => this._sendMessageImpl(agentId, content),
+    ).catch(e => { console.error(`sendMessage(${agentId}) error:`, e); });
+    this.sendLocks.set(agentId, current);
+    return current;
   }
 
   // --- Terminal Management ---
@@ -1166,6 +1384,7 @@ When asked to create or update a plan, use the Write tool to write a markdown fi
 
       const managed: ManagedTerminal = { info, process: proc, outputBuffer: '' };
       this.terminals.set(id, managed);
+      if (proc.pid) this.trackPid(proc.pid);
 
       // Stream stdout
       const readStream = async (stream: ReadableStream<Uint8Array>) => {
@@ -1182,17 +1401,21 @@ When asked to create or update a plan, use the Write tool to write a markdown fi
             }
             this.onTerminalOutput?.(id, text);
           }
-        } catch {}
+        } catch {
+        } finally {
+          reader.releaseLock();
+        }
       };
 
-      readStream(proc.stdout);
-      readStream(proc.stderr);
+      readStream(proc.stdout).catch(e => console.error(`Terminal ${id} stdout error:`, e));
+      readStream(proc.stderr).catch(e => console.error(`Terminal ${id} stderr error:`, e));
 
       // Handle exit
       proc.exited.then((exitCode) => {
+        if (proc.pid) this.untrackPid(proc.pid);
         managed.info.status = 'stopped';
         this.onTerminalExit?.(id, exitCode);
-      });
+      }).catch(e => console.error(`Terminal ${id} exit error:`, e));
 
       return info;
     } catch (e: any) {
@@ -1203,12 +1426,83 @@ When asked to create or update a plan, use the Write tool to write a markdown fi
   async killTerminal(id: string): Promise<boolean> {
     const terminal = this.terminals.get(id);
     if (!terminal) return false;
-    try {
-      terminal.process.kill();
-    } catch {}
+    const pid = terminal.process.pid;
+    await killProcessTree(terminal.process);
+    if (pid) this.untrackPid(pid);
     terminal.info.status = 'stopped';
     this.terminals.delete(id);
     return true;
+  }
+
+  // --- Shutdown & Kill All ---
+
+  async shutdownAll(): Promise<void> {
+    console.log('Shutting down all agent and terminal processes...');
+    const kills: Promise<void>[] = [];
+
+    for (const [agentId, agent] of this.agents) {
+      this.clearAgentTimeouts(agentId);
+      if (agent.process) {
+        const pid = agent.process.pid;
+        kills.push(killProcessTree(agent.process).then(() => {
+          if (pid) this.activePids.delete(pid);
+        }));
+        agent.process = null;
+      }
+    }
+
+    for (const [termId, terminal] of this.terminals) {
+      const pid = terminal.process.pid;
+      kills.push(killProcessTree(terminal.process).then(() => {
+        if (pid) this.activePids.delete(pid);
+      }));
+    }
+
+    // 3s timeout — don't let hung processes block shutdown forever
+    await Promise.race([
+      Promise.all(kills),
+      new Promise<void>(resolve => setTimeout(resolve, 3000)),
+    ]);
+    this.activePids.clear();
+    await this.savePidsNow();
+    console.log('All processes killed.');
+  }
+
+  async killAllProcesses(): Promise<{ success: boolean; message: string }> {
+    console.log('KILL ALL: Killing all claude.exe processes machine-wide...');
+    try {
+      // Kill ALL claude processes on the machine
+      const proc = Bun.spawn(['taskkill', '/F', '/IM', 'claude.exe', '/T'], {
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
+      await proc.exited;
+
+      // Reset all agent statuses
+      for (const agent of this.agents.values()) {
+        agent.process = null;
+        agent.info.status = 'stopped';
+        this.onStatusChange?.(agent.info);
+        await this.releaseDocumentLocks(agent.info.id);
+      }
+
+      // Clear all terminals
+      for (const terminal of this.terminals.values()) {
+        terminal.info.status = 'stopped';
+        this.onTerminalExit?.(terminal.info.id, null);
+      }
+      this.terminals.clear();
+
+      // Clear PID tracking
+      this.activePids.clear();
+      await this.savePidsNow();
+      await this.persistData();
+
+      return { success: true, message: 'All Claude processes killed.' };
+    } catch (e: any) {
+      console.error('killAllProcesses failed:', e);
+      return { success: false, message: e.message || 'Failed to kill processes' };
+    }
   }
 
   // --- Image handling ---

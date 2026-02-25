@@ -28,6 +28,8 @@
     .activity-bar-btn.active { color: var(--text-primary); }
     .activity-bar-btn.active::before { content: ''; position: absolute; left: 0; top: 8px; bottom: 8px; width: 2px; background: var(--accent); border-radius: 0 2px 2px 0; }
     .activity-bar-spacer { flex: 1; }
+    .activity-bar-btn.kill-all { color: #e55; font-size: 16px; }
+    .activity-bar-btn.kill-all:hover { background: rgba(238, 85, 85, 0.15); color: #f66; }
     .activity-bar-bottom { margin-bottom: 8px; }
 
     /* Sidebar Panel */
@@ -184,9 +186,16 @@
     /* Connection status */
     .connection-error { padding: 8px 16px; background: var(--error); color: white; text-align: center; font-size: 12px; flex-shrink: 0; }
 
+    /* Error toasts */
+    .error-toast-container { position: fixed; top: 16px; right: 16px; z-index: 200; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
+    .error-toast { background: var(--error); color: white; padding: 10px 16px; border-radius: 8px; font-size: 13px; max-width: 400px; pointer-events: auto; box-shadow: 0 4px 12px rgba(0,0,0,0.4); animation: toast-in 0.3s ease-out; }
+    .error-toast.dismissing { animation: toast-out 0.3s ease-in forwards; }
+    @keyframes toast-in { from { opacity: 0; transform: translateX(40px); } to { opacity: 1; transform: translateX(0); } }
+    @keyframes toast-out { from { opacity: 1; transform: translateX(0); } to { opacity: 0; transform: translateX(40px); } }
+
     /* Folder browser */
     .folder-browser { background: var(--bg-primary); border: 1px solid var(--border); border-radius: 6px; max-height: 200px; overflow: hidden; display: flex; flex-direction: column; }
-    .folder-path { padding: 6px 10px; background: var(--bg-tertiary); border-bottom: 1px solid var(--border); font-size: 11px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .folder-path { padding: 6px 10px; background: var(--bg-tertiary); border-bottom: 1px solid var(--border); font-size: 12px; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .folder-list { flex: 1; overflow-y: auto; padding: 2px; }
     .folder-item { padding: 5px 10px; border-radius: 4px; cursor: pointer; display: flex; align-items: center; gap: 6px; font-size: 12px; }
     .folder-item:hover { background: var(--bg-tertiary); }
@@ -484,6 +493,7 @@
       const [tokenUsage, setTokenUsage] = useState({});
       const [terminals, setTerminals] = useState([]);
       const [terminalOutput, setTerminalOutput] = useState({});
+      const [errorToasts, setErrorToasts] = useState([]);
       const wsRef = useRef(null);
       const agentsRef = useRef([]);
       const queueRef = useRef({});
@@ -510,12 +520,19 @@
         }
       }, [sendRaw]);
 
+      const reconnectAttempt = useRef(0);
+
       useEffect(() => {
         function connect() {
           const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
           const ws = new WebSocket(protocol + '//' + location.host);
-          ws.onopen = () => setConnected(true);
-          ws.onclose = () => { setConnected(false); setTimeout(connect, 2000); };
+          ws.onopen = () => { setConnected(true); reconnectAttempt.current = 0; };
+          ws.onclose = () => {
+            setConnected(false);
+            const delay = Math.min(1000 * Math.pow(2, reconnectAttempt.current), 30000);
+            reconnectAttempt.current++;
+            setTimeout(connect, delay);
+          };
           ws.onmessage = (event) => {
             const msg = JSON.parse(event.data);
             switch (msg.type) {
@@ -661,6 +678,15 @@
               case 'terminal_exited':
                 setTerminals(prev => prev.map(t => t.id === msg.terminalId ? { ...t, status: 'stopped' } : t));
                 break;
+              case 'error': {
+                const toastId = Date.now() + Math.random();
+                setErrorToasts(prev => {
+                  const next = [...prev, { id: toastId, message: msg.message }];
+                  return next.slice(-5); // max 5 visible
+                });
+                setTimeout(() => setErrorToasts(prev => prev.filter(t => t.id !== toastId)), 5000);
+                break;
+              }
             }
           };
           wsRef.current = ws;
@@ -670,7 +696,7 @@
       }, [drainQueue, sendRaw]);
 
       return {
-        connected, agents, messages, liveOutput, queued, sharedContext, fileChanges, thinkingOutput, notes, documents, settings, workspaces, statusStartTimes, tokenUsage, terminals, terminalOutput,
+        connected, agents, messages, liveOutput, queued, sharedContext, fileChanges, thinkingOutput, notes, documents, settings, workspaces, statusStartTimes, tokenUsage, terminals, terminalOutput, errorToasts,
         createAgent: (name, cwd, referencePaths, systemPrompt, workspaceId) => {
           sendRaw({ type: 'create_agent', name, cwd, referencePaths, systemPrompt, workspaceId });
         },
@@ -712,6 +738,7 @@
         // Terminals
         createTerminal: (agentId, command) => sendRaw({ type: 'create_terminal', agentId, command }),
         killTerminal: (id) => sendRaw({ type: 'kill_terminal', id }),
+        killAll: () => sendRaw({ type: 'kill_all' }),
       };
     }
 
@@ -805,17 +832,31 @@
       const [currentPath, setCurrentPath] = useState('');
       const [directories, setDirectories] = useState([]);
       const [homePath, setHomePath] = useState('');
+      const [shortcuts, setShortcuts] = useState([]);
       const [loading, setLoading] = useState(true);
       const [searchFilter, setSearchFilter] = useState('');
+
+      const initialLoadDone = useRef(false);
 
       const load = useCallback((path) => {
         setLoading(true);
         const url = path ? '/api/directories?path=' + encodeURIComponent(path) : '/api/directories';
         fetch(url).then(r => r.json()).then(data => {
-          setCurrentPath(data.path); setDirectories(data.directories || []); setHomePath(data.home); setLoading(false);
           if (data.home) window.__HOME_PATH = data.home;
+          if (data.documentsPath) window.__DOCUMENTS_PATH = data.documentsPath;
+          if (data.shortcuts) setShortcuts(data.shortcuts);
+          setHomePath(data.home);
+
+          // On initial load with no defaultPath, redirect to Documents
+          if (!initialLoadDone.current && !defaultPath && data.documentsPath && data.path !== data.documentsPath) {
+            initialLoadDone.current = true;
+            load(data.documentsPath);
+            return;
+          }
+          initialLoadDone.current = true;
+          setCurrentPath(data.path); setDirectories(data.directories || []); setLoading(false);
         }).catch(() => setLoading(false));
-      }, []);
+      }, [defaultPath]);
 
       useEffect(() => { load(defaultPath || ''); }, [load, defaultPath]);
 
@@ -844,6 +885,7 @@
         ),
         e('div', { className: 'folder-actions' },
           e('button', { type: 'button', className: 'browse-btn', onClick: () => { load(homePath || ''); setSearchFilter(''); } }, 'Home'),
+          ...shortcuts.map(s => e('button', { key: s.path, type: 'button', className: 'browse-btn', onClick: () => { load(s.path); setSearchFilter(''); }, style: { marginLeft: 4 } }, s.name)),
           e('button', { type: 'button', className: 'btn btn-primary', onClick: () => onSelect(currentPath), style: { marginLeft: 'auto' }, disabled: !currentPath }, 'Select')
         )
       );
@@ -898,7 +940,7 @@
           e('div', { className: 'form-group' },
             e('label', { className: 'form-label' }, 'Working Directory'),
             showCwdBrowser
-              ? e(FolderBrowser, { defaultPath: cwd || (window.__HOME_PATH ? window.__HOME_PATH + '/Documents/GitHub' : ''), onSelect: (p) => { setCwd(p); setShowCwdBrowser(false); } })
+              ? e(FolderBrowser, { defaultPath: cwd || (window.__DOCUMENTS_PATH || ''), onSelect: (p) => { setCwd(p); setShowCwdBrowser(false); } })
               : e('button', { type: 'button', className: 'browse-btn', onClick: () => setShowCwdBrowser(true), style: { width: '100%', textAlign: 'left' } }, cwd || 'Browse for folder...'),
             cwd && !showCwdBrowser && e('div', { className: 'form-hint' }, 'Selected: ' + cwd)
           ),
@@ -906,7 +948,7 @@
             e('label', { className: 'form-label' }, 'Reference Directories (optional)'),
             e('div', { className: 'form-hint', style: { marginBottom: 6 } }, 'Additional repos/folders this agent should be aware of'),
             showRefBrowser
-              ? e(FolderBrowser, { defaultPath: window.__HOME_PATH ? window.__HOME_PATH + '/Documents/GitHub' : '', onSelect: (p) => { if (!referencePaths.includes(p)) setReferencePaths(prev => [...prev, p]); setShowRefBrowser(false); } })
+              ? e(FolderBrowser, { defaultPath: window.__DOCUMENTS_PATH || '', onSelect: (p) => { if (!referencePaths.includes(p)) setReferencePaths(prev => [...prev, p]); setShowRefBrowser(false); } })
               : e('button', { type: 'button', className: 'browse-btn', onClick: () => setShowRefBrowser(true), style: { width: '100%', textAlign: 'left' } }, '+ Add reference directory'),
             referencePaths.length > 0 && e('div', { className: 'ref-paths-list' },
               referencePaths.map((p, i) => e('div', { key: i, className: 'ref-path-item' },
@@ -2049,7 +2091,7 @@
 
     function App() {
       const ws = useWebSocket();
-      const { connected, agents, messages, liveOutput, queued, sharedContext, fileChanges, thinkingOutput, notes, documents, settings, workspaces, statusStartTimes, tokenUsage, terminals, terminalOutput } = ws;
+      const { connected, agents, messages, liveOutput, queued, sharedContext, fileChanges, thinkingOutput, notes, documents, settings, workspaces, statusStartTimes, tokenUsage, terminals, terminalOutput, errorToasts } = ws;
       const [showModal, setShowModal] = useState(false);
       const [showSharedContext, setShowSharedContext] = useState(false);
       const [showBroadcast, setShowBroadcast] = useState(false);
@@ -2338,6 +2380,15 @@
           ),
           e('div', { className: 'activity-bar-spacer' }),
           e('button', {
+            className: 'activity-bar-btn kill-all',
+            onClick: () => {
+              if (confirm('Kill ALL Claude processes on this machine?')) {
+                ws.killAll();
+              }
+            },
+            title: 'Kill All Claude Processes'
+          }, '\u2620'),
+          e('button', {
             className: 'activity-bar-btn activity-bar-bottom',
             onClick: () => setShowSharedContext(true),
             title: 'Settings'
@@ -2562,7 +2613,12 @@
           onUpdate: ws.updateAgent,
           workspaceId: activeWorkspace ? activeWorkspace.id : undefined,
         }),
-        e(SharedContextModal, { isOpen: showSharedContext, onClose: () => setShowSharedContext(false), content: sharedContext, onSave: ws.updateSharedContext })
+        e(SharedContextModal, { isOpen: showSharedContext, onClose: () => setShowSharedContext(false), content: sharedContext, onSave: ws.updateSharedContext }),
+
+        // Error toasts
+        errorToasts.length > 0 && e('div', { className: 'error-toast-container' },
+          errorToasts.map(t => e('div', { key: t.id, className: 'error-toast' }, t.message))
+        )
       );
     }
 
