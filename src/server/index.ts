@@ -3,6 +3,11 @@ import { readdirSync, statSync, existsSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 import { agentManager } from "./agent-manager";
+
+// Fix 7: Catch unhandled promise rejections to prevent silent crashes
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled rejection at:', promise, 'reason:', reason);
+});
 import type {
   ClientMessage,
   ServerMessage,
@@ -91,6 +96,23 @@ async function listDirectories(
 
 // Track all connected WebSocket clients
 const clients = new Set<ServerWebSocket<unknown>>();
+const clientLastPong = new Map<ServerWebSocket<unknown>, number>();
+
+// WebSocket heartbeat — ping every 30s, close stale clients after 40s
+setInterval(() => {
+  const now = Date.now();
+  for (const client of clients) {
+    const lastPong = clientLastPong.get(client) ?? now;
+    if (now - lastPong > 40_000) {
+      console.log('Closing stale WebSocket client (no pong for 40s)');
+      try { client.close(); } catch {}
+      clients.delete(client);
+      clientLastPong.delete(client);
+      continue;
+    }
+    try { client.ping(); } catch {}
+  }
+}, 30_000);
 
 // Safe broadcast — try/catch per client to prevent one dead client from breaking others
 function broadcast(message: ServerMessage) {
@@ -218,7 +240,7 @@ async function handleMessage(
     }
 
     case "send_message": {
-      agentManager.sendMessage(message.agentId, message.content);
+      await agentManager.sendMessage(message.agentId, message.content);
       break;
     }
 
@@ -278,9 +300,9 @@ async function handleMessage(
     }
 
     case "broadcast_message": {
-      for (const agentId of message.agentIds) {
-        agentManager.sendMessage(agentId, message.content);
-      }
+      await Promise.all(message.agentIds.map(
+        (agentId: string) => agentManager.sendMessage(agentId, message.content)
+      ));
       break;
     }
 
@@ -421,7 +443,7 @@ async function handleMessage(
 
     // --- Image ---
     case "send_image": {
-      agentManager.sendImage(
+      await agentManager.sendImage(
         message.agentId,
         message.imageData,
         message.mimeType,
@@ -838,6 +860,7 @@ const server = Bun.serve({
   websocket: {
     open(ws) {
       clients.add(ws);
+      clientLastPong.set(ws, Date.now());
       console.log("Client connected");
 
       // Send current state on connect
@@ -873,15 +896,22 @@ const server = Bun.serve({
     message(ws, message) {
       try {
         const data = JSON.parse(message.toString()) as ClientMessage;
-        handleMessage(ws, data);
+        handleMessage(ws, data).catch(e => {
+          console.error("handleMessage error:", e);
+        });
       } catch (e) {
         console.error("Failed to parse message:", e);
         ws.send(JSON.stringify({ type: "error", message: "Invalid JSON" }));
       }
     },
 
+    pong(ws) {
+      clientLastPong.set(ws, Date.now());
+    },
+
     close(ws) {
       clients.delete(ws);
+      clientLastPong.delete(ws);
       console.log("Client disconnected");
     },
   },
@@ -897,7 +927,15 @@ console.log(`Server running at http://localhost:${server.port}`);
 // Graceful shutdown — kill all child processes, then release port
 async function shutdown() {
   console.log("\nShutting down...");
-  await agentManager.shutdownAll();
+  // 5s hard timeout — if shutdownAll hangs, force kill and exit
+  await Promise.race([
+    agentManager.shutdownAll(),
+    new Promise<void>(resolve => setTimeout(() => {
+      console.warn('Shutdown timeout — force killing all processes...');
+      agentManager.killAllProcesses().catch(() => {});
+      resolve();
+    }, 5000)),
+  ]);
   server.stop(true);
   process.exit(0);
 }
