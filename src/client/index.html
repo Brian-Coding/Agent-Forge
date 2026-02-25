@@ -186,6 +186,13 @@
     /* Connection status */
     .connection-error { padding: 8px 16px; background: var(--error); color: white; text-align: center; font-size: 12px; flex-shrink: 0; }
 
+    /* Error toasts */
+    .error-toast-container { position: fixed; top: 16px; right: 16px; z-index: 200; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
+    .error-toast { background: var(--error); color: white; padding: 10px 16px; border-radius: 8px; font-size: 13px; max-width: 400px; pointer-events: auto; box-shadow: 0 4px 12px rgba(0,0,0,0.4); animation: toast-in 0.3s ease-out; }
+    .error-toast.dismissing { animation: toast-out 0.3s ease-in forwards; }
+    @keyframes toast-in { from { opacity: 0; transform: translateX(40px); } to { opacity: 1; transform: translateX(0); } }
+    @keyframes toast-out { from { opacity: 1; transform: translateX(0); } to { opacity: 0; transform: translateX(40px); } }
+
     /* Folder browser */
     .folder-browser { background: var(--bg-primary); border: 1px solid var(--border); border-radius: 6px; max-height: 200px; overflow: hidden; display: flex; flex-direction: column; }
     .folder-path { padding: 6px 10px; background: var(--bg-tertiary); border-bottom: 1px solid var(--border); font-size: 12px; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -486,6 +493,7 @@
       const [tokenUsage, setTokenUsage] = useState({});
       const [terminals, setTerminals] = useState([]);
       const [terminalOutput, setTerminalOutput] = useState({});
+      const [errorToasts, setErrorToasts] = useState([]);
       const wsRef = useRef(null);
       const agentsRef = useRef([]);
       const queueRef = useRef({});
@@ -512,12 +520,19 @@
         }
       }, [sendRaw]);
 
+      const reconnectAttempt = useRef(0);
+
       useEffect(() => {
         function connect() {
           const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
           const ws = new WebSocket(protocol + '//' + location.host);
-          ws.onopen = () => setConnected(true);
-          ws.onclose = () => { setConnected(false); setTimeout(connect, 2000); };
+          ws.onopen = () => { setConnected(true); reconnectAttempt.current = 0; };
+          ws.onclose = () => {
+            setConnected(false);
+            const delay = Math.min(1000 * Math.pow(2, reconnectAttempt.current), 30000);
+            reconnectAttempt.current++;
+            setTimeout(connect, delay);
+          };
           ws.onmessage = (event) => {
             const msg = JSON.parse(event.data);
             switch (msg.type) {
@@ -663,6 +678,15 @@
               case 'terminal_exited':
                 setTerminals(prev => prev.map(t => t.id === msg.terminalId ? { ...t, status: 'stopped' } : t));
                 break;
+              case 'error': {
+                const toastId = Date.now() + Math.random();
+                setErrorToasts(prev => {
+                  const next = [...prev, { id: toastId, message: msg.message }];
+                  return next.slice(-5); // max 5 visible
+                });
+                setTimeout(() => setErrorToasts(prev => prev.filter(t => t.id !== toastId)), 5000);
+                break;
+              }
             }
           };
           wsRef.current = ws;
@@ -672,7 +696,7 @@
       }, [drainQueue, sendRaw]);
 
       return {
-        connected, agents, messages, liveOutput, queued, sharedContext, fileChanges, thinkingOutput, notes, documents, settings, workspaces, statusStartTimes, tokenUsage, terminals, terminalOutput,
+        connected, agents, messages, liveOutput, queued, sharedContext, fileChanges, thinkingOutput, notes, documents, settings, workspaces, statusStartTimes, tokenUsage, terminals, terminalOutput, errorToasts,
         createAgent: (name, cwd, referencePaths, systemPrompt, workspaceId) => {
           sendRaw({ type: 'create_agent', name, cwd, referencePaths, systemPrompt, workspaceId });
         },
@@ -2067,7 +2091,7 @@
 
     function App() {
       const ws = useWebSocket();
-      const { connected, agents, messages, liveOutput, queued, sharedContext, fileChanges, thinkingOutput, notes, documents, settings, workspaces, statusStartTimes, tokenUsage, terminals, terminalOutput } = ws;
+      const { connected, agents, messages, liveOutput, queued, sharedContext, fileChanges, thinkingOutput, notes, documents, settings, workspaces, statusStartTimes, tokenUsage, terminals, terminalOutput, errorToasts } = ws;
       const [showModal, setShowModal] = useState(false);
       const [showSharedContext, setShowSharedContext] = useState(false);
       const [showBroadcast, setShowBroadcast] = useState(false);
@@ -2589,7 +2613,12 @@
           onUpdate: ws.updateAgent,
           workspaceId: activeWorkspace ? activeWorkspace.id : undefined,
         }),
-        e(SharedContextModal, { isOpen: showSharedContext, onClose: () => setShowSharedContext(false), content: sharedContext, onSave: ws.updateSharedContext })
+        e(SharedContextModal, { isOpen: showSharedContext, onClose: () => setShowSharedContext(false), content: sharedContext, onSave: ws.updateSharedContext }),
+
+        // Error toasts
+        errorToasts.length > 0 && e('div', { className: 'error-toast-container' },
+          errorToasts.map(t => e('div', { key: t.id, className: 'error-toast' }, t.message))
+        )
       );
     }
 
