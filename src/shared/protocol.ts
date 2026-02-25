@@ -116,7 +116,9 @@ export type ClientMessage =
   // Terminals
   | { type: 'create_terminal'; agentId: string; command: string }
   | { type: 'kill_terminal'; id: string }
-  | { type: 'get_terminals' };
+  | { type: 'get_terminals' }
+  // Kill all
+  | { type: 'kill_all' };
 
 // Server -> Client messages
 export type ServerMessage =

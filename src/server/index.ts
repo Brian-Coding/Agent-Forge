@@ -525,6 +525,16 @@ async function handleMessage(
       break;
     }
 
+    case "kill_all": {
+      const result = await agentManager.killAllProcesses();
+      // Broadcast updated state to all clients
+      const agents = agentManager.getAgents();
+      broadcast({ type: "agents_list", agents });
+      const terminals = agentManager.getTerminals();
+      broadcast({ type: "terminals_list", terminals });
+      break;
+    }
+
     default:
       ws.send(
         JSON.stringify({ type: "error", message: "Unknown message type" }),
@@ -884,9 +894,10 @@ const server = Bun.serve({
 
 console.log(`Server running at http://localhost:${server.port}`);
 
-// Graceful shutdown — ensures port is released on Ctrl+C (fixes Windows bun --hot issue)
-function shutdown() {
+// Graceful shutdown — kill all child processes, then release port
+async function shutdown() {
   console.log("\nShutting down...");
+  await agentManager.shutdownAll();
   server.stop(true);
   process.exit(0);
 }

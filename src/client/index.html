@@ -28,6 +28,8 @@
     .activity-bar-btn.active { color: var(--text-primary); }
     .activity-bar-btn.active::before { content: ''; position: absolute; left: 0; top: 8px; bottom: 8px; width: 2px; background: var(--accent); border-radius: 0 2px 2px 0; }
     .activity-bar-spacer { flex: 1; }
+    .activity-bar-btn.kill-all { color: #e55; font-size: 16px; }
+    .activity-bar-btn.kill-all:hover { background: rgba(238, 85, 85, 0.15); color: #f66; }
     .activity-bar-bottom { margin-bottom: 8px; }
 
     /* Sidebar Panel */
@@ -712,6 +714,7 @@
         // Terminals
         createTerminal: (agentId, command) => sendRaw({ type: 'create_terminal', agentId, command }),
         killTerminal: (id) => sendRaw({ type: 'kill_terminal', id }),
+        killAll: () => sendRaw({ type: 'kill_all' }),
       };
     }
 
@@ -2352,6 +2355,15 @@
             }, e(Icon, { d: tab.icon, size: 20 }))
           ),
           e('div', { className: 'activity-bar-spacer' }),
+          e('button', {
+            className: 'activity-bar-btn kill-all',
+            onClick: () => {
+              if (confirm('Kill ALL Claude processes on this machine?')) {
+                ws.killAll();
+              }
+            },
+            title: 'Kill All Claude Processes'
+          }, '\u2620'),
           e('button', {
             className: 'activity-bar-btn activity-bar-bottom',
             onClick: () => setShowSharedContext(true),
