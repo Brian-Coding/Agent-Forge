@@ -107,6 +107,7 @@ export type ClientMessage =
   | { type: 'update_settings'; settings: Partial<AppSettings> }
   // Image
   | { type: 'send_image'; agentId: string; imageData: string; mimeType: string; prompt?: string }
+  | { type: 'send_images'; agentId: string; images: { imageData: string; mimeType: string }[]; prompt?: string }
   // Workspaces
   | { type: 'get_workspaces' }
   | { type: 'create_workspace'; name: string }

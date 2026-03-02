@@ -92,15 +92,27 @@ export const workspaceService = {
     return true;
   },
 
-  /** Add agent to workspace's selectedAgentIds if there are available slots */
+  /** Add agent to workspace's selectedAgentIds in the first empty slot */
   addAgentToWorkspace(wsId: string, agentId: string): void {
     const ws = workspaces.get(wsId);
-    if (ws) {
-      const totalSlots = ws.gridColumns * ws.gridRows;
-      if (ws.selectedAgentIds.length < totalSlots) {
-        ws.selectedAgentIds.push(agentId);
+    if (!ws) return;
+    const totalSlots = ws.gridColumns * ws.gridRows;
+    // Pad to totalSlots with empty strings so we can find empty slots
+    while (ws.selectedAgentIds.length < totalSlots) {
+      ws.selectedAgentIds.push('');
+    }
+    // Find first empty slot within visible grid bounds
+    let emptyIdx = -1;
+    for (let i = 0; i < totalSlots; i++) {
+      if (!ws.selectedAgentIds[i] || ws.selectedAgentIds[i] === '') {
+        emptyIdx = i;
+        break;
       }
     }
+    if (emptyIdx !== -1) {
+      ws.selectedAgentIds[emptyIdx] = agentId;
+    }
+    // If no empty slot within grid, agent stays in sidebar only
   },
 
   /** Remove agent from all workspaces' selectedAgentIds and lockedAgentIds */
