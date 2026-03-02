@@ -726,6 +726,42 @@ export const agentService = {
     }
   },
 
+  // --- Multi-image handling ---
+
+  async sendImages(agentId: string, images: { imageData: string; mimeType: string }[], prompt?: string): Promise<void> {
+    const agent = agents.get(agentId);
+    if (!agent || images.length === 0) return;
+
+    try {
+      const filePaths: string[] = [];
+      for (let i = 0; i < images.length; i++) {
+        const img = images[i];
+        const ext = img.mimeType === 'image/png' ? '.png' : img.mimeType === 'image/jpeg' ? '.jpg' : img.mimeType === 'image/gif' ? '.gif' : img.mimeType === 'image/webp' ? '.webp' : '.png';
+        const filename = `screenshot_${Date.now()}_${i}${ext}`;
+        const filepath = join(tmpdir(), filename);
+        const buffer = Buffer.from(img.imageData, 'base64');
+        await Bun.write(filepath, buffer);
+        filePaths.push(filepath);
+      }
+
+      // Add chat message with first image data for preview
+      const label = `[${images.length} image${images.length > 1 ? 's' : ''} uploaded]` + (prompt ? '\n' + prompt : '');
+      const imgMsg = addMessage(agentId, 'user', label, images[0].imageData, images[0].mimeType);
+      broadcast({ type: 'message', message: imgMsg });
+
+      // Build combined prompt listing all file paths
+      const fileList = filePaths.map((fp, i) => `Image ${i + 1}: ${fp}`).join('\n');
+      const content = prompt
+        ? `I've uploaded ${images.length} screenshot(s)/image(s) for you to examine:\n${fileList}\n\n${prompt}`
+        : `I've uploaded ${images.length} screenshot(s)/image(s) for you to examine:\n${fileList}\nPlease examine these image files and describe what you see or act on them as appropriate.`;
+      await agentService.sendMessage(agentId, content);
+    } catch (e) {
+      console.error(`Failed to save images for agent ${agentId}:`, e);
+      const errMsg = addMessage(agentId, 'system', 'Failed to process uploaded images.');
+      broadcast({ type: 'message', message: errMsg });
+    }
+  },
+
   // --- Shutdown & Kill All ---
 
   async shutdownAll(): Promise<void> {
