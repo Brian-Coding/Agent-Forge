@@ -728,6 +728,7 @@
         updateSettings: (settings) => sendRaw({ type: 'update_settings', settings }),
         // Image
         sendImage: (agentId, imageData, mimeType, prompt) => sendRaw({ type: 'send_image', agentId, imageData, mimeType, prompt }),
+        sendImages: (agentId, images, prompt) => sendRaw({ type: 'send_images', agentId, images, prompt }),
         // Update agent
         updateAgent: (id, updates) => sendRaw({ type: 'update_agent', id, ...updates }),
         // Workspaces
@@ -1035,7 +1036,7 @@
     });
 
     // Terminal Panel
-    function TerminalPanel({ agent, messages, liveOutput, queuedMessages, fileChanges, thinkingOutput, statusStartTime, tokenUsage, terminals, terminalOutput, onSendMessage, onSendImage, onStop, onClearHistory, onClearFileChanges, onMinimize, onMaximize, isMaximized, onFocus, isFocused, onCreateTerminal, onKillTerminal, isLocked, onToggleLock, isDragging, isDragOver, onDragStart, onDragEnd, onDragOver, onDragLeave, onDrop }) {
+    function TerminalPanel({ agent, messages, liveOutput, queuedMessages, fileChanges, thinkingOutput, statusStartTime, tokenUsage, terminals, terminalOutput, onSendMessage, onSendImage, onSendImages, onStop, onClearHistory, onClearFileChanges, onMinimize, onMaximize, isMaximized, onFocus, isFocused, onCreateTerminal, onKillTerminal, isLocked, onToggleLock, isDragging, isDragOver, onDragStart, onDragEnd, onDragOver, onDragLeave, onDrop }) {
       const [input, setInput] = useState('');
       const [inputHistory, setInputHistory] = useState([]);
       const [historyIdx, setHistoryIdx] = useState(-1);
@@ -1043,7 +1044,7 @@
       const [autoScrollEnabled, setAutoScrollEnabled] = useState(true);
       const [showToolMessages, setShowToolMessages] = useState(false);
       const [dragging, setDragging] = useState(false);
-      const [pendingImage, setPendingImage] = useState(null);
+      const [pendingImages, setPendingImages] = useState([]);
       // Search state (Feature 1)
       const [searchVisible, setSearchVisible] = useState(false);
       const [searchQuery, setSearchQuery] = useState('');
@@ -1062,14 +1063,19 @@
       // Elapsed time for status (Feature 5)
       const { elapsed, isStuck } = useElapsed(agent?.status, statusStartTime);
 
-      // Fetch git branch on mount and when cwd changes
+      // Fetch git branch on mount, poll every 10s, and re-fetch on status change
       useEffect(() => {
         if (!agent?.cwd) { setGitBranch(null); return; }
-        fetch('/api/git-branch?path=' + encodeURIComponent(agent.cwd))
-          .then(r => r.json())
-          .then(data => setGitBranch(data.branch || null))
-          .catch(() => setGitBranch(null));
-      }, [agent?.cwd]);
+        const fetchBranch = () => {
+          fetch('/api/git-branch?path=' + encodeURIComponent(agent.cwd))
+            .then(r => r.json())
+            .then(data => setGitBranch(data.branch || null))
+            .catch(() => setGitBranch(null));
+        };
+        fetchBranch();
+        const interval = setInterval(fetchBranch, 10_000);
+        return () => clearInterval(interval);
+      }, [agent?.cwd, agent?.status]);
 
       // Auto-scroll: track whether user has scrolled up (Feature 4)
       useEffect(() => {
@@ -1118,10 +1124,14 @@
       const handleSubmit = () => {
         if (!agent) return;
         const text = input.trim();
-        // If there's a pending image, send it (with or without text)
-        if (pendingImage) {
-          onSendImage(agent.id, pendingImage.data, pendingImage.mimeType, text || undefined);
-          setPendingImage(null);
+        // If there are pending images, send them (with or without text)
+        if (pendingImages.length > 0) {
+          if (pendingImages.length === 1) {
+            onSendImage(agent.id, pendingImages[0].data, pendingImages[0].mimeType, text || undefined);
+          } else {
+            onSendImages(agent.id, pendingImages.map(img => ({ imageData: img.data, mimeType: img.mimeType })), text || undefined);
+          }
+          setPendingImages([]);
           if (text) setInputHistory(prev => [...prev, text]);
           setHistoryIdx(-1);
           setInput('');
@@ -1174,13 +1184,13 @@
         }
       }, [input]);
 
-      // Image handling (Feature 3) — stage image, send on Enter
+      // Image handling (Feature 3) — stage images, send on Enter
       const handleImageUpload = useCallback((file) => {
         if (!file || !file.type.startsWith('image/') || !agent) return;
         const reader = new FileReader();
         reader.onload = () => {
           const base64 = reader.result.split(',')[1];
-          setPendingImage({ data: base64, mimeType: file.type, name: file.name });
+          setPendingImages(prev => [...prev, { data: base64, mimeType: file.type, name: file.name }]);
           inputRef.current?.focus();
         };
         reader.readAsDataURL(file);
@@ -1190,17 +1200,21 @@
         ev.preventDefault();
         setDragging(false);
         const files = ev.dataTransfer?.files;
-        if (files && files.length > 0) handleImageUpload(files[0]);
+        if (files) {
+          for (let i = 0; i < files.length; i++) {
+            handleImageUpload(files[i]);
+          }
+        }
       }, [handleImageUpload]);
 
       const handlePaste = useCallback((ev) => {
         const items = ev.clipboardData?.items;
         if (!items) return;
+        let hasImage = false;
         for (const item of items) {
           if (item.type.startsWith('image/')) {
-            ev.preventDefault();
+            if (!hasImage) { ev.preventDefault(); hasImage = true; }
             handleImageUpload(item.getAsFile());
-            return;
           }
         }
       }, [handleImageUpload]);
@@ -1410,11 +1424,14 @@
         })(),
         // Input
         e('div', { className: 'panel-input-container' },
-          pendingImage && e('div', { style: { display: 'flex', alignItems: 'center', gap: 8, padding: '4px 12px', fontSize: 11, color: 'var(--text-secondary)' } },
-            e('img', { src: 'data:' + pendingImage.mimeType + ';base64,' + pendingImage.data, style: { width: 32, height: 32, borderRadius: 4, objectFit: 'cover', border: '1px solid var(--border)' } }),
-            e('span', null, pendingImage.name || 'Image ready'),
-            e('button', { style: { background: 'none', border: 'none', color: 'var(--error)', cursor: 'pointer', fontSize: 14 }, onClick: () => setPendingImage(null), title: 'Remove image' }, '\u00D7'),
-            e('span', { style: { color: 'var(--text-muted)', marginLeft: 'auto' } }, 'Enter to send')
+          pendingImages.length > 0 && e('div', { style: { display: 'flex', alignItems: 'center', gap: 8, padding: '4px 12px', fontSize: 11, color: 'var(--text-secondary)', flexWrap: 'wrap' } },
+            pendingImages.map((img, idx) =>
+              e('div', { key: idx, style: { position: 'relative', display: 'inline-block' } },
+                e('img', { src: 'data:' + img.mimeType + ';base64,' + img.data, style: { width: 32, height: 32, borderRadius: 4, objectFit: 'cover', border: '1px solid var(--border)' } }),
+                e('button', { style: { position: 'absolute', top: -4, right: -4, background: 'var(--error)', border: 'none', color: 'white', cursor: 'pointer', fontSize: 10, width: 14, height: 14, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0, lineHeight: 1 }, onClick: () => setPendingImages(prev => prev.filter((_, i) => i !== idx)), title: 'Remove image' }, '\u00D7')
+              )
+            ),
+            e('span', { style: { color: 'var(--text-muted)', marginLeft: 'auto' } }, pendingImages.length + ' image' + (pendingImages.length > 1 ? 's' : '') + ' \u2014 Enter to send')
           ),
           e('div', { className: 'panel-input-wrapper' },
             e('button', { className: 'image-upload-btn', onClick: () => fileInputRef.current?.click(), title: 'Upload image' }, '\uD83D\uDCCE'),
@@ -1425,15 +1442,15 @@
               onChange: (ev) => { setInput(ev.target.value); setHistoryIdx(-1); },
               onKeyDown: handleKeyDown,
               onPaste: handlePaste,
-              placeholder: pendingImage
-                ? 'Add context for the image... (Enter to send)'
+              placeholder: pendingImages.length > 0
+                ? 'Add context for the image' + (pendingImages.length > 1 ? 's' : '') + '... (Enter to send)'
                 : isWorking
                   ? (queued.length > 0 ? queued.length + ' queued \u2014 type more...' : 'Type to queue...')
                   : 'Message... (Enter to send, Shift+Enter for newline)',
               rows: 1,
               autoFocus: true,
             }),
-            e('input', { ref: fileInputRef, type: 'file', accept: 'image/*', style: { display: 'none' }, onChange: (ev) => { if (ev.target.files[0]) handleImageUpload(ev.target.files[0]); ev.target.value = ''; } })
+            e('input', { ref: fileInputRef, type: 'file', accept: 'image/*', multiple: true, style: { display: 'none' }, onChange: (ev) => { for (let i = 0; i < ev.target.files.length; i++) handleImageUpload(ev.target.files[i]); ev.target.value = ''; } })
           )
         )
       );
@@ -2233,6 +2250,42 @@
       }, [agents, ws, focusedAgentId, maximizedAgent]);
 
       const totalPanels = columns * rows;
+
+      // Fix 1: Compact/pad selectedAgentIds when grid resizes
+      useEffect(() => {
+        if (!activeWorkspace) return;
+        const current = activeWorkspace.selectedAgentIds;
+        if (current.length === totalPanels) return; // already correct size
+
+        if (totalPanels < current.length) {
+          // Grid shrank — compact: keep locked agents in-place, fill unlocked left-to-right, drop overflow
+          const lockedIds = activeWorkspace.lockedAgentIds || [];
+          const newArr = Array.from({ length: totalPanels }, () => '');
+          // Place locked agents that are within bounds
+          current.forEach((id, idx) => {
+            if (id && lockedIds.includes(id) && idx < totalPanels) {
+              newArr[idx] = id;
+            }
+          });
+          // Collect unlocked agents (non-empty, not already placed)
+          const placed = new Set(newArr.filter(id => id !== ''));
+          const unlocked = current.filter(id => id && !lockedIds.includes(id) && !placed.has(id));
+          // Fill unlocked into remaining empty slots
+          let ui = 0;
+          for (let i = 0; i < totalPanels && ui < unlocked.length; i++) {
+            if (newArr[i] === '') {
+              newArr[i] = unlocked[ui++];
+            }
+          }
+          ws.updateWorkspace(activeWorkspace.id, { selectedAgentIds: newArr });
+        } else {
+          // Grid grew — pad with empty strings
+          const padded = [...current];
+          while (padded.length < totalPanels) padded.push('');
+          ws.updateWorkspace(activeWorkspace.id, { selectedAgentIds: padded });
+        }
+      }, [columns, rows, activeWorkspace?.id]);
+
       const displayAgents = [...selectedAgents];
       // Auto-fill remaining slots with workspace agents not yet selected
       workspaceAgents.forEach(agent => {
@@ -2502,6 +2555,7 @@
                   terminalOutput,
                   onSendMessage: (content) => ws.sendMessage(agent.id, content),
                   onSendImage: ws.sendImage,
+                  onSendImages: ws.sendImages,
                   onStop: ws.stopAgent,
                   onClearHistory: ws.clearHistory,
                   onClearFileChanges: ws.clearFileChanges,
@@ -2544,6 +2598,7 @@
                   terminalOutput,
                   onSendMessage: (content) => ws.sendMessage(agent.id, content),
                   onSendImage: ws.sendImage,
+                  onSendImages: ws.sendImages,
                   onStop: ws.stopAgent,
                   onClearHistory: ws.clearHistory,
                   onClearFileChanges: ws.clearFileChanges,
