@@ -1,920 +1,97 @@
-import type { ServerWebSocket } from "bun";
-import { readdirSync, statSync, existsSync } from "fs";
-import { join } from "path";
-import { homedir } from "os";
-import { agentManager } from "./agent-manager";
+import type { PersistedData } from '../shared/protocol';
+import index from '../client/index.html';
 
-// Fix 7: Catch unhandled promise rejections to prevent silent crashes
+import { persistenceService } from './services/persistence.service';
+import { settingsService } from './services/settings.service';
+import { noteService } from './services/note.service';
+import { workspaceService } from './services/workspace.service';
+import { documentService } from './services/document.service';
+import { agentService, initAgentService } from './services/agent.service';
+import { terminalService } from './services/terminal.service';
+
+import { websocketHandlers } from './ws';
+
+import { handleDirectories } from './routes/directories.routes';
+import { handleGetPorts, handleKillPort } from './routes/ports.routes';
+import { handleGitBranch } from './routes/git.routes';
+import { handleListSimulators, handleBootSimulator, handleShutdownSimulator, handleEraseSimulator, handleCleanDerivedData } from './routes/simulator.routes';
+
+// Catch unhandled promise rejections to prevent silent crashes
 process.on('unhandledRejection', (reason, promise) => {
   console.error('Unhandled rejection at:', promise, 'reason:', reason);
 });
-import type {
-  ClientMessage,
-  ServerMessage,
-  AgentInfo,
-} from "../shared/protocol";
-import index from "../client/index.html";
 
-// Detect common shortcut directories (handles OneDrive redirection on Windows)
-function getShortcuts(): { name: string; path: string }[] {
-  const home = homedir();
-  const shortcuts: { name: string; path: string }[] = [];
+// --- Startup: load persisted data and wire up services ---
+async function init() {
+  const data = await persistenceService.load();
 
-  // OneDrive Documents (Windows with OneDrive folder sync)
-  const oneDriveDocuments = join(home, "OneDrive", "Documents");
-  const regularDocuments = join(home, "Documents");
-
-  if (existsSync(oneDriveDocuments)) {
-    shortcuts.push({ name: "Documents", path: oneDriveDocuments });
-  } else if (existsSync(regularDocuments)) {
-    shortcuts.push({ name: "Documents", path: regularDocuments });
-  }
-
-  // Desktop (also can be redirected by OneDrive)
-  const oneDriveDesktop = join(home, "OneDrive", "Desktop");
-  const regularDesktop = join(home, "Desktop");
-  if (existsSync(oneDriveDesktop)) {
-    shortcuts.push({ name: "Desktop", path: oneDriveDesktop });
-  } else if (existsSync(regularDesktop)) {
-    shortcuts.push({ name: "Desktop", path: regularDesktop });
-  }
-
-  // Projects folders (deduplicate case-insensitive on Windows)
-  const seen = new Set(shortcuts.map((s) => s.path.toLowerCase()));
-  const projectCandidates = [
-    { name: "projects", path: join(home, "projects") },
-    { name: "Projects", path: join(home, "Projects") },
-    { name: "Developer", path: join(home, "Developer") },
-    { name: "dev", path: join(home, "dev") },
-  ];
-  for (const c of projectCandidates) {
-    if (existsSync(c.path) && !seen.has(c.path.toLowerCase())) {
-      shortcuts.push(c);
-      seen.add(c.path.toLowerCase());
-    }
-  }
-
-  return shortcuts;
-}
-
-// Get the best "Documents" path for this platform
-function getDocumentsPath(): string {
-  const home = homedir();
-  const oneDriveDocuments = join(home, "OneDrive", "Documents");
-  if (existsSync(oneDriveDocuments)) return oneDriveDocuments;
-  const regularDocuments = join(home, "Documents");
-  if (existsSync(regularDocuments)) return regularDocuments;
-  return home;
-}
-
-// API to list directories
-async function listDirectories(
-  path: string,
-): Promise<{ name: string; path: string; isDirectory: boolean }[]> {
-  try {
-    const entries = readdirSync(path);
-    const results = [];
-    for (const entry of entries) {
-      if (entry.startsWith(".")) continue;
-      try {
-        const fullPath = join(path, entry);
-        const stat = statSync(fullPath);
-        if (stat.isDirectory()) {
-          results.push({ name: entry, path: fullPath, isDirectory: true });
-        }
-      } catch {
-        // Skip entries we can't access
-      }
-    }
-    return results.sort((a, b) =>
-      a.name.localeCompare(b, undefined, { sensitivity: "base" }),
+  if (data) {
+    settingsService.load(data.settings);
+    noteService.load(data.notes);
+    documentService.load(data.documents);
+    agentService.load({
+      agents: data.agents,
+      messages: data.messages,
+      sharedContext: data.sharedContext,
+    });
+    await workspaceService.loadAndMigrate(
+      data.workspaces,
+      data.settings,
+      data.agents.map(a => a.id),
+      agentService.setAgentWorkspace,
     );
-  } catch (e) {
-    return [];
+    console.log(`Loaded ${data.agents.length} agents, ${data.messages.length} messages, ${noteService.getAll().length} notes, ${documentService.getAll().length} documents, ${workspaceService.getAll().length} workspaces from disk`);
   }
+
+  // Wire up cross-service callbacks
+  initAgentService();
+
+  // Register the buildPersistedData collector
+  persistenceService.setBuildPersistedData((): PersistedData => ({
+    agents: agentService.buildPersistedAgents() as any,
+    messages: agentService.buildPersistedMessages(),
+    sharedContext: agentService.getSharedContext(),
+    notes: noteService.getAll(),
+    documents: documentService.getAll(),
+    settings: settingsService.get(),
+    workspaces: workspaceService.getAll(),
+  }));
 }
 
-// Track all connected WebSocket clients
-const clients = new Set<ServerWebSocket<unknown>>();
-const clientLastPong = new Map<ServerWebSocket<unknown>, number>();
+await init();
 
-// WebSocket heartbeat — ping every 30s, close stale clients after 40s
-setInterval(() => {
-  const now = Date.now();
-  for (const client of clients) {
-    const lastPong = clientLastPong.get(client) ?? now;
-    if (now - lastPong > 40_000) {
-      console.log('Closing stale WebSocket client (no pong for 40s)');
-      try { client.close(); } catch {}
-      clients.delete(client);
-      clientLastPong.delete(client);
-      continue;
-    }
-    try { client.ping(); } catch {}
-  }
-}, 30_000);
-
-// Safe broadcast — try/catch per client to prevent one dead client from breaking others
-function broadcast(message: ServerMessage) {
-  const data = JSON.stringify(message);
-  for (const client of clients) {
-    try {
-      client.send(data);
-    } catch (e) {
-      // Client is dead, remove it
-      clients.delete(client);
-    }
-  }
-}
-
-// Set up agent manager callbacks
-agentManager.setOutputCallback((agentId, content, stream) => {
-  broadcast({ type: "output", agentId, content, stream });
-});
-
-agentManager.setStatusCallback((agent: AgentInfo) => {
-  broadcast({ type: "agent_updated", agent });
-});
-
-agentManager.setMessageCallback((message) => {
-  broadcast({ type: "message", message });
-});
-
-agentManager.setFileChangeCallback((agentId, files) => {
-  broadcast({ type: "file_changed", agentId, files });
-});
-
-agentManager.setThinkingCallback((agentId, content) => {
-  broadcast({ type: "thinking_output", agentId, content });
-});
-
-agentManager.setTokenUsageCallback(
-  (
-    agentId,
-    contextTokens,
-    contextLimit,
-    totalInputTokens,
-    totalOutputTokens,
-    totalCostUsd,
-    numTurns,
-  ) => {
-    broadcast({
-      type: "token_usage",
-      agentId,
-      contextTokens,
-      contextLimit,
-      totalInputTokens,
-      totalOutputTokens,
-      totalCostUsd,
-      numTurns,
-    });
-  },
-);
-
-agentManager.setTerminalOutputCallback((terminalId, content) => {
-  broadcast({ type: "terminal_output", terminalId, content });
-});
-
-agentManager.setTerminalExitCallback((terminalId, exitCode) => {
-  broadcast({ type: "terminal_exited", terminalId, exitCode });
-});
-
-agentManager.setDocumentUpdatedCallback((doc) => {
-  broadcast({ type: "document_updated", document: doc });
-});
-
-// Handle incoming WebSocket messages
-async function handleMessage(
-  ws: ServerWebSocket<unknown>,
-  message: ClientMessage,
-) {
-  switch (message.type) {
-    case "create_agent": {
-      try {
-        const agent = await agentManager.createAgent(
-          message.name,
-          message.cwd,
-          message.referencePaths || [],
-          message.systemPrompt || "",
-          message.workspaceId,
-        );
-        broadcast({ type: "agent_created", agent });
-        // Broadcast updated workspace state (agent was auto-added to selectedAgentIds)
-        const workspaces = agentManager.getWorkspaces();
-        broadcast({ type: "workspaces_list", workspaces });
-      } catch (e: any) {
-        ws.send(
-          JSON.stringify({
-            type: "error",
-            message: e.message || `Failed to create agent`,
-          }),
-        );
-      }
-      break;
-    }
-
-    case "update_agent": {
-      try {
-        const { id, type: _type, ...updates } = message;
-        const agent = await agentManager.updateAgent(id, updates);
-        if (agent) {
-          broadcast({ type: "agent_updated", agent });
-        } else {
-          ws.send(
-            JSON.stringify({
-              type: "error",
-              message: "Agent not found",
-              agentId: id,
-            }),
-          );
-        }
-      } catch (e: any) {
-        ws.send(
-          JSON.stringify({
-            type: "error",
-            message: e.message || "Failed to update agent",
-          }),
-        );
-      }
-      break;
-    }
-
-    case "send_message": {
-      await agentManager.sendMessage(message.agentId, message.content);
-      break;
-    }
-
-    case "stop_agent": {
-      const success = await agentManager.stopAgent(message.agentId);
-      if (!success) {
-        ws.send(
-          JSON.stringify({
-            type: "error",
-            message: "Agent not found",
-            agentId: message.agentId,
-          }),
-        );
-      }
-      break;
-    }
-
-    case "kill_agent": {
-      const success = await agentManager.killAgent(message.agentId);
-      if (!success) {
-        ws.send(
-          JSON.stringify({
-            type: "error",
-            message: "Agent not found",
-            agentId: message.agentId,
-          }),
-        );
-      }
-      break;
-    }
-
-    case "remove_agent": {
-      const success = await agentManager.removeAgent(message.agentId);
-      if (success) {
-        broadcast({ type: "agent_removed", agentId: message.agentId });
-        // Broadcast updated workspace state
-        const workspaces = agentManager.getWorkspaces();
-        broadcast({ type: "workspaces_list", workspaces });
-      } else {
-        ws.send(
-          JSON.stringify({
-            type: "error",
-            message: "Agent not found",
-            agentId: message.agentId,
-          }),
-        );
-      }
-      break;
-    }
-
-    case "clear_history": {
-      const success = await agentManager.clearHistory(message.agentId);
-      if (success) {
-        broadcast({ type: "history_cleared", agentId: message.agentId });
-      }
-      break;
-    }
-
-    case "broadcast_message": {
-      await Promise.all(message.agentIds.map(
-        (agentId: string) => agentManager.sendMessage(agentId, message.content)
-      ));
-      break;
-    }
-
-    case "update_shared_context": {
-      await agentManager.updateSharedContext(message.content);
-      broadcast({ type: "shared_context", content: message.content });
-      break;
-    }
-
-    case "get_shared_context": {
-      const content = agentManager.getSharedContext();
-      ws.send(JSON.stringify({ type: "shared_context", content }));
-      break;
-    }
-
-    case "list_agents": {
-      const agents = agentManager.getAgents();
-      ws.send(JSON.stringify({ type: "agents_list", agents }));
-      break;
-    }
-
-    case "get_history": {
-      const messages = agentManager.getMessages(message.agentId);
-      ws.send(
-        JSON.stringify({ type: "history", agentId: message.agentId, messages }),
-      );
-      break;
-    }
-
-    // --- Notes ---
-    case "get_notes": {
-      const notes = agentManager.getNotes();
-      ws.send(JSON.stringify({ type: "notes_list", notes }));
-      break;
-    }
-
-    case "create_note": {
-      const note = await agentManager.createNote(
-        message.title,
-        message.content,
-        message.agentId,
-      );
-      broadcast({ type: "note_created", note });
-      break;
-    }
-
-    case "update_note": {
-      const { id, ...updates } = message;
-      const note = await agentManager.updateNote(id, updates);
-      if (note) {
-        broadcast({ type: "note_updated", note });
-      } else {
-        ws.send(JSON.stringify({ type: "error", message: "Note not found" }));
-      }
-      break;
-    }
-
-    case "delete_note": {
-      const deleted = await agentManager.deleteNote(message.id);
-      if (deleted) {
-        broadcast({ type: "note_deleted", id: message.id });
-      } else {
-        ws.send(JSON.stringify({ type: "error", message: "Note not found" }));
-      }
-      break;
-    }
-
-    // --- Documents ---
-    case "get_documents": {
-      const documents = agentManager.getDocuments();
-      ws.send(JSON.stringify({ type: "documents_list", documents }));
-      break;
-    }
-
-    case "create_document": {
-      const doc = await agentManager.createDocument(
-        message.title,
-        message.content,
-        message.agentId,
-        message.workspaceId,
-      );
-      broadcast({ type: "document_created", document: doc });
-      break;
-    }
-
-    case "update_document": {
-      const { id: docId, type: _docType, ...docUpdates } = message;
-      const doc = await agentManager.updateDocument(docId, docUpdates);
-      if (doc) {
-        broadcast({ type: "document_updated", document: doc });
-      } else {
-        ws.send(
-          JSON.stringify({ type: "error", message: "Document not found" }),
-        );
-      }
-      break;
-    }
-
-    case "delete_document": {
-      const deleted = await agentManager.deleteDocument(message.id);
-      if (deleted) {
-        broadcast({ type: "document_deleted", id: message.id });
-      } else {
-        ws.send(
-          JSON.stringify({ type: "error", message: "Document not found" }),
-        );
-      }
-      break;
-    }
-
-    case "approve_document": {
-      const doc = await agentManager.updateDocument(message.id, {
-        status: "approved",
-        lastEditedBy: "user",
-      });
-      if (doc) {
-        broadcast({ type: "document_updated", document: doc });
-      } else {
-        ws.send(
-          JSON.stringify({ type: "error", message: "Document not found" }),
-        );
-      }
-      break;
-    }
-
-    // --- Settings ---
-    case "get_settings": {
-      const settings = agentManager.getSettings();
-      ws.send(JSON.stringify({ type: "settings", settings }));
-      break;
-    }
-
-    case "update_settings": {
-      const settings = await agentManager.updateSettings(message.settings);
-      broadcast({ type: "settings", settings });
-      break;
-    }
-
-    // --- Image ---
-    case "send_image": {
-      await agentManager.sendImage(
-        message.agentId,
-        message.imageData,
-        message.mimeType,
-        message.prompt,
-      );
-      break;
-    }
-
-    // --- Workspaces ---
-    case "get_workspaces": {
-      const workspaces = agentManager.getWorkspaces();
-      ws.send(JSON.stringify({ type: "workspaces_list", workspaces }));
-      break;
-    }
-
-    case "create_workspace": {
-      const workspace = await agentManager.createWorkspace(message.name);
-      broadcast({ type: "workspace_created", workspace });
-      break;
-    }
-
-    case "update_workspace": {
-      const { id: wsId, type: _wsType, ...wsUpdates } = message;
-      const workspace = await agentManager.updateWorkspace(wsId, wsUpdates);
-      if (workspace) {
-        broadcast({ type: "workspace_updated", workspace });
-      } else {
-        ws.send(
-          JSON.stringify({ type: "error", message: "Workspace not found" }),
-        );
-      }
-      break;
-    }
-
-    case "delete_workspace": {
-      const deleted = await agentManager.deleteWorkspace(message.id);
-      if (deleted) {
-        broadcast({ type: "workspace_deleted", id: message.id });
-        // Send updated settings (activeWorkspaceId may have changed)
-        const settings = agentManager.getSettings();
-        broadcast({ type: "settings", settings });
-        // Send updated agents (workspaceId may have changed for reassigned agents)
-        const agents = agentManager.getAgents();
-        broadcast({ type: "agents_list", agents });
-      } else {
-        ws.send(
-          JSON.stringify({
-            type: "error",
-            message: "Cannot delete workspace (last one or not found)",
-          }),
-        );
-      }
-      break;
-    }
-
-    case "set_active_workspace": {
-      const success = await agentManager.setActiveWorkspace(message.id);
-      if (success) {
-        const settings = agentManager.getSettings();
-        broadcast({ type: "settings", settings });
-      } else {
-        ws.send(
-          JSON.stringify({ type: "error", message: "Workspace not found" }),
-        );
-      }
-      break;
-    }
-
-    // --- Terminals ---
-    case "create_terminal": {
-      try {
-        const terminal = await agentManager.createTerminal(
-          message.agentId,
-          message.command,
-        );
-        broadcast({ type: "terminal_created", terminal });
-      } catch (e: any) {
-        ws.send(
-          JSON.stringify({
-            type: "error",
-            message: e.message || "Failed to create terminal",
-          }),
-        );
-      }
-      break;
-    }
-
-    case "kill_terminal": {
-      const success = await agentManager.killTerminal(message.id);
-      if (!success) {
-        ws.send(
-          JSON.stringify({ type: "error", message: "Terminal not found" }),
-        );
-      }
-      break;
-    }
-
-    case "get_terminals": {
-      const terminals = agentManager.getTerminals();
-      ws.send(JSON.stringify({ type: "terminals_list", terminals }));
-      break;
-    }
-
-    case "kill_all": {
-      const result = await agentManager.killAllProcesses();
-      // Broadcast updated state to all clients
-      const agents = agentManager.getAgents();
-      broadcast({ type: "agents_list", agents });
-      const terminals = agentManager.getTerminals();
-      broadcast({ type: "terminals_list", terminals });
-      break;
-    }
-
-    default:
-      ws.send(
-        JSON.stringify({ type: "error", message: "Unknown message type" }),
-      );
-  }
-}
-
-// --- Xcode Simulator REST helpers ---
-
-async function runSimctl(
-  ...args: string[]
-): Promise<{ ok: boolean; output: string }> {
-  try {
-    const proc = Bun.spawn(["xcrun", "simctl", ...args], {
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-    const exitCode = await proc.exited;
-    const stdout = await new Response(proc.stdout).text();
-    const stderr = await new Response(proc.stderr).text();
-    return { ok: exitCode === 0, output: stdout || stderr };
-  } catch (e: any) {
-    return {
-      ok: false,
-      output: e.message || "xcrun not found. Is Xcode installed?",
-    };
-  }
-}
-
-function jsonResponse(data: any, status = 200) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: { "Content-Type": "application/json" },
-  });
-}
-
+// --- Server ---
 const server = Bun.serve({
-  port: parseInt(process.env.PORT || "3333"),
+  port: parseInt(process.env.PORT || '3333'),
 
   routes: {
-    "/": index,
+    '/': index,
   },
 
   fetch(req, server) {
     const url = new URL(req.url);
 
-    // Handle WebSocket upgrade
-    if (req.headers.get("upgrade") === "websocket") {
-      const success = server.upgrade(req);
+    if (req.headers.get('upgrade') === 'websocket') {
+      const success = server.upgrade(req, { data: {} });
       if (success) return undefined;
-      return new Response("WebSocket upgrade failed", { status: 500 });
+      return new Response('WebSocket upgrade failed', { status: 500 });
     }
 
-    // API: List directories
-    if (url.pathname === "/api/directories") {
-      const path = url.searchParams.get("path") || homedir();
-      return listDirectories(path).then(
-        (dirs) =>
-          new Response(
-            JSON.stringify({
-              path,
-              directories: dirs,
-              home: homedir(),
-              shortcuts: getShortcuts(),
-              documentsPath: getDocumentsPath(),
-            }),
-            {
-              headers: { "Content-Type": "application/json" },
-            },
-          ),
-      );
-    }
+    // REST routes
+    if (url.pathname === '/api/directories') return handleDirectories(req);
+    if (url.pathname === '/api/ports' && req.method === 'GET') return handleGetPorts(req);
+    if (url.pathname === '/api/ports/kill' && req.method === 'POST') return handleKillPort(req);
+    if (url.pathname === '/api/git-branch' && req.method === 'GET') return handleGitBranch(req);
+    if (url.pathname === '/api/simulators' && req.method === 'GET') return handleListSimulators(req);
+    if (url.pathname === '/api/simulators/boot' && req.method === 'POST') return handleBootSimulator(req);
+    if (url.pathname === '/api/simulators/shutdown' && req.method === 'POST') return handleShutdownSimulator(req);
+    if (url.pathname === '/api/simulators/erase' && req.method === 'POST') return handleEraseSimulator(req);
+    if (url.pathname === '/api/simulators/clean-derived-data' && req.method === 'POST') return handleCleanDerivedData(req);
 
-    // --- Running ports ---
-
-    if (url.pathname === "/api/ports" && req.method === "GET") {
-      return (async () => {
-        try {
-          const isWindows = process.platform === "win32";
-          const seen = new Set<string>();
-          const ports: { port: number; pid: number; command: string }[] = [];
-
-          if (isWindows) {
-            // Windows: use netstat
-            const proc = Bun.spawn(["netstat", "-ano"], {
-              stdout: "pipe",
-              stderr: "pipe",
-            });
-            const exitCode = await proc.exited;
-            const stdout = await new Response(proc.stdout).text();
-            if (exitCode !== 0) return jsonResponse({ ports: [] });
-            const lines = stdout.trim().split("\n");
-            for (const line of lines) {
-              const parts = line.trim().split(/\s+/);
-              if (parts.length < 5 || parts[3] !== "LISTENING") continue;
-              const addrMatch = parts[1].match(/:(\d+)$/);
-              if (!addrMatch) continue;
-              const port = parseInt(addrMatch[1], 10);
-              const pid = parseInt(parts[4], 10);
-              if (isNaN(pid) || pid === 0) continue;
-              const key = port + ":" + pid;
-              if (seen.has(key)) continue;
-              seen.add(key);
-              // Get process name
-              let command = "unknown";
-              try {
-                const nameProc = Bun.spawn(
-                  [
-                    "powershell",
-                    "-Command",
-                    `(Get-Process -Id ${pid}).ProcessName`,
-                  ],
-                  { stdout: "pipe", stderr: "pipe" },
-                );
-                await nameProc.exited;
-                command =
-                  (await new Response(nameProc.stdout).text()).trim() ||
-                  "unknown";
-              } catch {}
-              ports.push({ port, pid, command });
-            }
-          } else {
-            // macOS/Linux: use lsof
-            const proc = Bun.spawn(["lsof", "-iTCP", "-sTCP:LISTEN", "-nP"], {
-              stdout: "pipe",
-              stderr: "pipe",
-            });
-            const exitCode = await proc.exited;
-            const stdout = await new Response(proc.stdout).text();
-            if (exitCode !== 0) return jsonResponse({ ports: [] });
-            const lines = stdout.trim().split("\n").slice(1);
-            const SYSTEM_PROCESSES = new Set([
-              "ControlCe",
-              "rapportd",
-              "AirPlayXPC",
-              "sharingd",
-              "remoted",
-              "identitys",
-              "WiFiAgent",
-              "bluetoothd",
-            ]);
-            for (const line of lines) {
-              const parts = line.split(/\s+/);
-              if (parts.length < 9) continue;
-              const command = parts[0];
-              if (SYSTEM_PROCESSES.has(command)) continue;
-              const pid = parseInt(parts[1], 10);
-              const nameField = parts[8];
-              const portMatch = nameField.match(/:(\d+)$/);
-              if (!portMatch) continue;
-              const port = parseInt(portMatch[1], 10);
-              const key = port + ":" + pid;
-              if (seen.has(key)) continue;
-              seen.add(key);
-              ports.push({ port, pid, command });
-            }
-          }
-
-          ports.sort((a, b) => a.port - b.port);
-          return jsonResponse({ ports });
-        } catch {
-          return jsonResponse({ ports: [] });
-        }
-      })();
-    }
-
-    // --- Kill port (by PID) ---
-
-    if (url.pathname === "/api/ports/kill" && req.method === "POST") {
-      return (async () => {
-        try {
-          const body = (await req.json()) as { pid: number };
-          if (!body.pid) return jsonResponse({ error: "Missing pid" }, 400);
-          const isWindows = process.platform === "win32";
-          const proc = isWindows
-            ? Bun.spawn(
-                [
-                  "powershell",
-                  "-Command",
-                  `Stop-Process -Id ${body.pid} -Force`,
-                ],
-                { stdout: "pipe", stderr: "pipe" },
-              )
-            : Bun.spawn(["kill", "-9", String(body.pid)], {
-                stdout: "pipe",
-                stderr: "pipe",
-              });
-          const exitCode = await proc.exited;
-          return jsonResponse({ ok: exitCode === 0 });
-        } catch (e: any) {
-          return jsonResponse({ ok: false, error: e.message }, 500);
-        }
-      })();
-    }
-
-    // --- Git branch ---
-
-    if (url.pathname === "/api/git-branch" && req.method === "GET") {
-      const path = url.searchParams.get("path");
-      if (!path) return jsonResponse({ branch: null });
-      return (async () => {
-        try {
-          const proc = Bun.spawn(["git", "rev-parse", "--abbrev-ref", "HEAD"], {
-            cwd: path,
-            stdout: "pipe",
-            stderr: "pipe",
-          });
-          const exitCode = await proc.exited;
-          if (exitCode !== 0) return jsonResponse({ branch: null });
-          const stdout = await new Response(proc.stdout).text();
-          return jsonResponse({ branch: stdout.trim() || null });
-        } catch {
-          return jsonResponse({ branch: null });
-        }
-      })();
-    }
-
-    // --- Xcode Simulator REST endpoints ---
-
-    if (url.pathname === "/api/simulators" && req.method === "GET") {
-      return (async () => {
-        const result = await runSimctl("list", "devices", "--json");
-        if (!result.ok) {
-          return jsonResponse({ error: result.output, devices: {} }, 500);
-        }
-        try {
-          const parsed = JSON.parse(result.output);
-          return jsonResponse(parsed);
-        } catch {
-          return jsonResponse(
-            { error: "Failed to parse simctl output", raw: result.output },
-            500,
-          );
-        }
-      })();
-    }
-
-    if (url.pathname === "/api/simulators/boot" && req.method === "POST") {
-      return (async () => {
-        const body = (await req.json()) as { udid: string };
-        if (!body.udid) return jsonResponse({ error: "Missing udid" }, 400);
-        const result = await runSimctl("boot", body.udid);
-        return jsonResponse({ ok: result.ok, message: result.output });
-      })();
-    }
-
-    if (url.pathname === "/api/simulators/shutdown" && req.method === "POST") {
-      return (async () => {
-        const body = (await req.json()) as { udid: string };
-        if (!body.udid) return jsonResponse({ error: "Missing udid" }, 400);
-        const result = await runSimctl("shutdown", body.udid);
-        return jsonResponse({ ok: result.ok, message: result.output });
-      })();
-    }
-
-    if (url.pathname === "/api/simulators/erase" && req.method === "POST") {
-      return (async () => {
-        const body = (await req.json()) as { udid: string };
-        if (!body.udid) return jsonResponse({ error: "Missing udid" }, 400);
-        const result = await runSimctl("erase", body.udid);
-        return jsonResponse({ ok: result.ok, message: result.output });
-      })();
-    }
-
-    if (
-      url.pathname === "/api/simulators/clean-derived-data" &&
-      req.method === "POST"
-    ) {
-      return (async () => {
-        const derivedDataPath = join(
-          homedir(),
-          "Library",
-          "Developer",
-          "Xcode",
-          "DerivedData",
-        );
-        try {
-          const proc = Bun.spawn(["rm", "-rf", derivedDataPath], {
-            stdout: "pipe",
-            stderr: "pipe",
-          });
-          const exitCode = await proc.exited;
-          const stderr = await new Response(proc.stderr).text();
-          if (exitCode === 0) {
-            return jsonResponse({ ok: true, message: "Derived data cleaned" });
-          }
-          return jsonResponse(
-            { ok: false, message: stderr || "Failed to clean derived data" },
-            500,
-          );
-        } catch (e: any) {
-          return jsonResponse({ ok: false, message: e.message }, 500);
-        }
-      })();
-    }
-
-    // 404 for other routes
-    return new Response("Not Found", { status: 404 });
+    return new Response('Not Found', { status: 404 });
   },
 
-  websocket: {
-    open(ws) {
-      clients.add(ws);
-      clientLastPong.set(ws, Date.now());
-      console.log("Client connected");
-
-      // Send current state on connect
-      const agents = agentManager.getAgents();
-      ws.send(JSON.stringify({ type: "agents_list", agents }));
-      const notes = agentManager.getNotes();
-      ws.send(JSON.stringify({ type: "notes_list", notes }));
-      const documents = agentManager.getDocuments();
-      ws.send(JSON.stringify({ type: "documents_list", documents }));
-      const settings = agentManager.getSettings();
-      ws.send(JSON.stringify({ type: "settings", settings }));
-      // Send workspaces
-      const workspaces = agentManager.getWorkspaces();
-      ws.send(JSON.stringify({ type: "workspaces_list", workspaces }));
-      // Send terminals
-      const terminals = agentManager.getTerminals();
-      ws.send(JSON.stringify({ type: "terminals_list", terminals }));
-      // Send token usage for each agent
-      for (const agent of agents) {
-        const usage = agentManager.getTokenUsage(agent.id);
-        if (usage) {
-          ws.send(
-            JSON.stringify({
-              type: "token_usage",
-              agentId: agent.id,
-              ...usage,
-            }),
-          );
-        }
-      }
-    },
-
-    message(ws, message) {
-      try {
-        const data = JSON.parse(message.toString()) as ClientMessage;
-        handleMessage(ws, data).catch(e => {
-          console.error("handleMessage error:", e);
-        });
-      } catch (e) {
-        console.error("Failed to parse message:", e);
-        ws.send(JSON.stringify({ type: "error", message: "Invalid JSON" }));
-      }
-    },
-
-    pong(ws) {
-      clientLastPong.set(ws, Date.now());
-    },
-
-    close(ws) {
-      clients.delete(ws);
-      clientLastPong.delete(ws);
-      console.log("Client disconnected");
-    },
-  },
+  websocket: websocketHandlers,
 
   development: {
     hmr: true,
@@ -924,20 +101,24 @@ const server = Bun.serve({
 
 console.log(`Server running at http://localhost:${server.port}`);
 
-// Graceful shutdown — kill all child processes, then release port
+// --- Graceful shutdown ---
 async function shutdown() {
-  console.log("\nShutting down...");
-  // 5s hard timeout — if shutdownAll hangs, force kill and exit
+  console.log('\nShutting down...');
   await Promise.race([
-    agentManager.shutdownAll(),
+    (async () => {
+      await agentService.shutdownAll();
+      await terminalService.killAll();
+    })(),
     new Promise<void>(resolve => setTimeout(() => {
       console.warn('Shutdown timeout — force killing all processes...');
-      agentManager.killAllProcesses().catch(() => {});
+      agentService.killAllProcesses().catch(() => {});
       resolve();
     }, 5000)),
   ]);
+  persistenceService.clearAllPids();
+  await persistenceService.savePidsNow();
   server.stop(true);
   process.exit(0);
 }
-process.on("SIGINT", shutdown);
-process.on("SIGTERM", shutdown);
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);
