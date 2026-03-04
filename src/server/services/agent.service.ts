@@ -671,23 +671,17 @@ export const agentService = {
   },
 
   async stopAgent(agentId: string): Promise<boolean> {
-    const prev = sendLocks.get(agentId) ?? Promise.resolve();
-    const current = prev.then(
-      () => _stopAgentImpl(agentId),
-      () => _stopAgentImpl(agentId),
-    ).catch(e => { console.error(`stopAgent(${agentId}) error:`, e); return false; });
-    sendLocks.set(agentId, current.then(() => {}));
-    return current;
+    // Execute immediately — don't queue behind sendLocks.
+    // Killing the process causes the in-flight sendMessage to resolve naturally.
+    // Reset the lock chain so queued sends after stop don't run stale.
+    sendLocks.delete(agentId);
+    return _stopAgentImpl(agentId);
   },
 
   async killAgent(agentId: string): Promise<boolean> {
-    const prev = sendLocks.get(agentId) ?? Promise.resolve();
-    const current = prev.then(
-      () => _killAgentImpl(agentId),
-      () => _killAgentImpl(agentId),
-    ).catch(e => { console.error(`killAgent(${agentId}) error:`, e); return false; });
-    sendLocks.set(agentId, current.then(() => {}));
-    return current;
+    // Execute immediately — same reasoning as stopAgent.
+    sendLocks.delete(agentId);
+    return _killAgentImpl(agentId);
   },
 
   // --- Shared Context ---
