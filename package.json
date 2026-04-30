@@ -1,5 +1,5 @@
 {
-  "name": "claudecode-gui",
+  "name": "agent-forge",
   "module": "src/server/index.ts",
   "type": "module",
   "private": true,
@@ -16,7 +16,6 @@
     "typescript": "^5"
   },
   "dependencies": {
-    "@anthropic-ai/claude-code": "2.1.39",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "react-markdown": "^10.1.0"
