@@ -1,4 +1,4 @@
-# claudecode-gui
+# agent-forge
 
 To install dependencies:
 
