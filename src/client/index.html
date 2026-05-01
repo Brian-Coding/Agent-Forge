@@ -392,27 +392,28 @@
     .workspace-agent-chip:hover { background: var(--bg-tertiary); }
 
     /* Workspace testing config */
-    .workspace-testing { padding: 2px 12px 4px; }
-    .workspace-test-url-input { width: 100%; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 3px; color: var(--text-secondary); padding: 2px 6px; font-size: 10px; outline: none; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; box-sizing: border-box; }
+    .workspace-testing { padding: 2px 12px 4px; display: flex; align-items: center; gap: 6px; }
+    .workspace-testing-label { font-size: 10px; color: var(--text-muted); flex-shrink: 0; }
+    .workspace-test-url-input { flex: 1; min-width: 0; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 3px; color: var(--text-secondary); padding: 2px 6px; font-size: 10px; outline: none; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; box-sizing: border-box; }
     .workspace-test-url-input::placeholder { color: var(--text-muted); }
     .workspace-test-url-input:focus { border-color: var(--accent); color: var(--text-primary); }
 
-    /* QA testing controls in agent input bar */
-    .qa-panel-btn { background: none; border: none; cursor: pointer; padding: 4px 6px; font-size: 14px; color: var(--text-muted); border-radius: 4px; flex-shrink: 0; transition: all 0.15s; }
-    .qa-panel-btn:hover { background: var(--bg-secondary); color: var(--text-primary); }
-    .qa-panel-btn.active { background: rgba(47, 129, 247, 0.15); color: var(--accent); }
-    .qa-toggle { display: flex; align-items: center; gap: 4px; padding: 0 6px; font-size: 10px; color: var(--text-muted); cursor: pointer; user-select: none; flex-shrink: 0; border-right: 1px solid var(--border); margin-right: 4px; }
-    .qa-toggle input[type="checkbox"] { margin: 0; cursor: pointer; width: 12px; height: 12px; }
-    .qa-toggle.disabled { opacity: 0.4; cursor: not-allowed; }
-    .qa-toggle.disabled input[type="checkbox"] { cursor: not-allowed; }
-    .qa-toggle.active { color: var(--accent); }
+    /* QA testing button in panel header */
+    .qa-header-btn.active { background: rgba(47, 129, 247, 0.15); color: var(--accent); }
 
     /* QA sub-panel (embedded QA agent chat within a coding agent panel) */
-    .qa-subpanel { border-top: 1px dashed var(--accent); background: rgba(47, 129, 247, 0.04); padding: 8px 12px; display: flex; flex-direction: column; gap: 4px; max-height: 220px; overflow-y: auto; }
-    .qa-subpanel-header { display: flex; align-items: center; justify-content: space-between; font-size: 11px; color: var(--accent); font-weight: 500; }
-    .qa-subpanel-close { background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 0 4px; font-size: 14px; }
+    .qa-subpanel { border-top: 1px solid var(--accent); background: var(--bg-primary); display: flex; flex-direction: column; flex-shrink: 0; max-height: 45%; min-height: 180px; }
+    .qa-subpanel-header { display: flex; align-items: center; justify-content: space-between; padding: 6px 12px; background: rgba(47, 129, 247, 0.08); border-bottom: 1px solid var(--border); font-size: 12px; color: var(--accent); font-weight: 500; flex-shrink: 0; }
+    .qa-subpanel-status { display: flex; align-items: center; gap: 6px; }
+    .qa-subpanel-close { background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 0 4px; font-size: 14px; line-height: 1; }
     .qa-subpanel-close:hover { color: var(--text-primary); }
-    .qa-subpanel-body { font-size: 11px; color: var(--text-secondary); padding: 8px 0; font-style: italic; }
+    .qa-subpanel-content { flex: 1; overflow-y: auto; padding: 8px 12px; min-height: 0; }
+    .qa-subpanel-empty { color: var(--text-muted); font-size: 11px; text-align: center; padding: 16px 8px; font-style: italic; }
+    .qa-subpanel-input-wrapper { display: flex; align-items: flex-end; padding: 6px 8px; border-top: 1px solid var(--border); background: var(--bg-secondary); gap: 6px; flex-shrink: 0; }
+    .qa-subpanel-input { flex: 1; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 4px; color: var(--text-primary); padding: 4px 8px; font-size: 12px; outline: none; resize: none; font-family: inherit; line-height: 1.4; max-height: 80px; }
+    .qa-subpanel-input:focus { border-color: var(--accent); }
+    .qa-subpanel-send { background: var(--accent); border: none; color: white; cursor: pointer; padding: 4px 10px; border-radius: 4px; font-size: 11px; font-weight: 500; flex-shrink: 0; }
+    .qa-subpanel-send:disabled { opacity: 0.4; cursor: not-allowed; }
 
     /* Empty grid slot */
     .slot-empty { display: flex; align-items: center; justify-content: center; background: var(--bg-primary); }
@@ -1059,7 +1060,7 @@
     });
 
     // Terminal Panel
-    function TerminalPanel({ agent, messages, liveOutput, queuedMessages, fileChanges, thinkingOutput, statusStartTime, tokenUsage, terminals, terminalOutput, workspace, onUpdateWorkspaceTesting, onSendMessage, onSendImage, onSendImages, onStop, onClearHistory, onClearFileChanges, onMinimize, onMaximize, isMaximized, onFocus, isFocused, onCreateTerminal, onKillTerminal, isLocked, onToggleLock, isDragging, isDragOver, onDragStart, onDragEnd, onDragOver, onDragLeave, onDrop }) {
+    function TerminalPanel({ agent, messages, liveOutput, queuedMessages, fileChanges, thinkingOutput, statusStartTime, tokenUsage, terminals, terminalOutput, workspace, onSendMessage, onSendImage, onSendImages, onStop, onClearHistory, onClearFileChanges, onMinimize, onMaximize, isMaximized, onFocus, isFocused, onCreateTerminal, onKillTerminal, isLocked, onToggleLock, isDragging, isDragOver, onDragStart, onDragEnd, onDragOver, onDragLeave, onDrop }) {
       const [input, setInput] = useState('');
       const [inputHistory, setInputHistory] = useState([]);
       const [historyIdx, setHistoryIdx] = useState(-1);
@@ -1069,6 +1070,7 @@
       const [dragging, setDragging] = useState(false);
       const [pendingImages, setPendingImages] = useState([]);
       const [qaPanelOpen, setQaPanelOpen] = useState(false);
+      const [qaInput, setQaInput] = useState('');
       // Search state (Feature 1)
       const [searchVisible, setSearchVisible] = useState(false);
       const [searchQuery, setSearchQuery] = useState('');
@@ -1325,6 +1327,11 @@
               onClick: (ev) => { ev.stopPropagation(); onToggleLock(agent.id); },
               title: isLocked ? 'Unlock position' : 'Lock position',
             }, isLocked ? '\uD83D\uDD12' : '\uD83D\uDD13'),
+            workspace && workspace.testUrl && e('button', {
+              className: 'panel-btn qa-header-btn' + (qaPanelOpen ? ' active' : ''),
+              onClick: () => setQaPanelOpen(o => !o),
+              title: qaPanelOpen ? 'Close QA testing panel' : 'Open QA testing panel for this agent',
+            }, '\uD83E\uDDEA'),
             e('button', { className: 'panel-btn', onClick: () => { setSearchVisible(prev => !prev); setTimeout(() => searchInputRef.current?.focus(), 50); }, title: 'Search (Ctrl+F)' }, '\uD83D\uDD0D'),
             isWorking && e('button', { className: 'panel-btn panel-btn-stop', onClick: () => onStop(agent.id), title: 'Stop (Esc)' }, 'Stop'),
             !isMaximized && onMinimize && e('button', { className: 'panel-btn panel-minimize-btn', onClick: () => onMinimize(agent.id), title: 'Minimize' }, '_'),
@@ -1446,16 +1453,42 @@
             )
           );
         })(),
-        // QA sub-panel (placeholder \u2014 wired to actual QA agent in next step)
+        // QA sub-panel \u2014 embedded QA testing agent chat (backend wiring pending)
         qaPanelOpen && e('div', { className: 'qa-subpanel' },
           e('div', { className: 'qa-subpanel-header' },
-            e('span', null, '\uD83E\uDDEA QA Testing Agent'),
+            e('div', { className: 'qa-subpanel-status' },
+              e('span', { className: 'status-dot status-idle' }),
+              e('span', null, '\uD83E\uDDEA QA Testing Agent'),
+              workspace && workspace.testUrl && e('span', { style: { fontSize: 10, color: 'var(--text-muted)', fontWeight: 400, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' } }, '\u00B7 ' + workspace.testUrl)
+            ),
             e('button', { className: 'qa-subpanel-close', onClick: () => setQaPanelOpen(false), title: 'Close QA panel' }, '\u00D7')
           ),
-          e('div', { className: 'qa-subpanel-body' },
-            (workspace && workspace.testingEnabled)
-              ? 'QA agent chat will live here. (Backend wiring coming next.)'
-              : 'Enable QA testing on this workspace to chat with the QA agent.'
+          e('div', { className: 'qa-subpanel-content' },
+            e('div', { className: 'qa-subpanel-empty' }, 'No messages yet. Tell the QA agent what to test, or click \uD83E\uDDEA in this panel\u2019s header again to close.')
+          ),
+          e('div', { className: 'qa-subpanel-input-wrapper' },
+            e('textarea', {
+              className: 'qa-subpanel-input',
+              value: qaInput,
+              onChange: (ev) => setQaInput(ev.target.value),
+              onKeyDown: (ev) => {
+                if (ev.key === 'Enter' && !ev.shiftKey) {
+                  ev.preventDefault();
+                  if (qaInput.trim()) {
+                    // Backend wiring pending; clear input for now
+                    setQaInput('');
+                  }
+                }
+              },
+              placeholder: 'Message the QA agent... (Enter to send, Shift+Enter for newline)',
+              rows: 1,
+            }),
+            e('button', {
+              className: 'qa-subpanel-send',
+              disabled: !qaInput.trim(),
+              onClick: () => { if (qaInput.trim()) setQaInput(''); },
+              title: 'Send message to QA agent',
+            }, 'Send')
           )
         ),
         // Input
@@ -1470,25 +1503,6 @@
             e('span', { style: { color: 'var(--text-muted)', marginLeft: 'auto' } }, pendingImages.length + ' image' + (pendingImages.length > 1 ? 's' : '') + ' \u2014 Enter to send')
           ),
           e('div', { className: 'panel-input-wrapper' },
-            workspace && e('button', {
-              className: 'qa-panel-btn' + (qaPanelOpen ? ' active' : ''),
-              onClick: () => setQaPanelOpen(o => !o),
-              title: qaPanelOpen ? 'Close QA panel' : 'Open QA panel for this agent',
-            }, '\uD83E\uDDEA'),
-            workspace && e('label', {
-              className: 'qa-toggle' + (!workspace.testUrl ? ' disabled' : '') + (workspace.testingEnabled ? ' active' : ''),
-              title: !workspace.testUrl
-                ? 'Set a Test URL on this workspace to enable QA testing'
-                : (workspace.testingEnabled ? 'Disable QA testing for this workspace' : 'Enable QA testing for this workspace'),
-            },
-              e('input', {
-                type: 'checkbox',
-                checked: !!workspace.testingEnabled,
-                disabled: !workspace.testUrl,
-                onChange: (ev) => onUpdateWorkspaceTesting && onUpdateWorkspaceTesting(workspace.id, { testingEnabled: ev.target.checked }),
-              }),
-              'QA'
-            ),
             e('button', { className: 'image-upload-btn', onClick: () => fileInputRef.current?.click(), title: 'Upload image' }, '\uD83D\uDCCE'),
             e('textarea', {
               ref: inputRef,
@@ -1681,10 +1695,11 @@
                     }, '\u00D7')
                   ),
                   isActive && e('div', { className: 'workspace-testing', onClick: (ev) => ev.stopPropagation() },
+                    e('span', { className: 'workspace-testing-label' }, 'Test URL'),
                     e('input', {
                       type: 'text',
                       className: 'workspace-test-url-input',
-                      placeholder: 'Test URL (e.g. http://localhost:5173)',
+                      placeholder: 'http://localhost:5173',
                       defaultValue: ws.testUrl || '',
                       key: 'testurl-' + ws.id + '-' + (ws.testUrl || ''),
                       title: 'URL the QA testing agent will navigate to',
@@ -2625,7 +2640,6 @@
                   terminals,
                   terminalOutput,
                   workspace: activeWorkspace,
-                  onUpdateWorkspaceTesting: (id, updates) => ws.updateWorkspace(id, updates),
                   onSendMessage: (content) => ws.sendMessage(agent.id, content),
                   onSendImage: ws.sendImage,
                   onSendImages: ws.sendImages,
@@ -2670,7 +2684,6 @@
                   terminals,
                   terminalOutput,
                   workspace: activeWorkspace,
-                  onUpdateWorkspaceTesting: (id, updates) => ws.updateWorkspace(id, updates),
                   onSendMessage: (content) => ws.sendMessage(agent.id, content),
                   onSendImage: ws.sendImage,
                   onSendImages: ws.sendImages,
