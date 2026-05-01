@@ -1,0 +1,126 @@
+// REST endpoints under /api/browser/* — used by the QA agent (via curl)
+// to drive Playwright. Each handler is a thin wrapper around browserService.
+
+import { jsonResponse } from '../utils';
+import { browserService } from '../services/browser.service';
+
+function err(msg: string, status = 400): Response {
+  return jsonResponse({ ok: false, error: msg }, status);
+}
+
+async function readJson(req: Request): Promise<any> {
+  try { return await req.json(); }
+  catch { return {}; }
+}
+
+function requireString(obj: any, key: string): string | null {
+  const v = obj?.[key];
+  return typeof v === 'string' && v.length > 0 ? v : null;
+}
+
+export async function handleBrowserNavigate(req: Request): Promise<Response> {
+  const body = await readJson(req);
+  const workspaceId = requireString(body, 'workspaceId');
+  const url = requireString(body, 'url');
+  if (!workspaceId) return err('workspaceId required');
+  if (!url) return err('url required');
+  try {
+    const r = await browserService.navigate(workspaceId, url);
+    return jsonResponse({ ok: true, ...r });
+  } catch (e: any) {
+    return err(e?.message || String(e), 500);
+  }
+}
+
+export async function handleBrowserScreenshot(req: Request): Promise<Response> {
+  const body = await readJson(req);
+  const workspaceId = requireString(body, 'workspaceId');
+  if (!workspaceId) return err('workspaceId required');
+  try {
+    const path = await browserService.screenshot(workspaceId, {
+      selector: typeof body.selector === 'string' ? body.selector : undefined,
+      fullPage: body.fullPage === true,
+    });
+    return jsonResponse({ ok: true, path });
+  } catch (e: any) {
+    return err(e?.message || String(e), 500);
+  }
+}
+
+export async function handleBrowserClick(req: Request): Promise<Response> {
+  const body = await readJson(req);
+  const workspaceId = requireString(body, 'workspaceId');
+  const selector = requireString(body, 'selector');
+  if (!workspaceId) return err('workspaceId required');
+  if (!selector) return err('selector required');
+  try {
+    await browserService.click(workspaceId, selector);
+    return jsonResponse({ ok: true });
+  } catch (e: any) {
+    return err(e?.message || String(e), 500);
+  }
+}
+
+export async function handleBrowserType(req: Request): Promise<Response> {
+  const body = await readJson(req);
+  const workspaceId = requireString(body, 'workspaceId');
+  const selector = requireString(body, 'selector');
+  const text = typeof body.text === 'string' ? body.text : null;
+  if (!workspaceId) return err('workspaceId required');
+  if (!selector) return err('selector required');
+  if (text === null) return err('text required');
+  try {
+    await browserService.type(workspaceId, selector, text);
+    return jsonResponse({ ok: true });
+  } catch (e: any) {
+    return err(e?.message || String(e), 500);
+  }
+}
+
+export async function handleBrowserWaitForReady(req: Request): Promise<Response> {
+  const body = await readJson(req);
+  const workspaceId = requireString(body, 'workspaceId');
+  if (!workspaceId) return err('workspaceId required');
+  try {
+    const r = await browserService.waitForReady(workspaceId);
+    return jsonResponse({ ok: true, ...r });
+  } catch (e: any) {
+    return err(e?.message || String(e), 500);
+  }
+}
+
+export async function handleBrowserConsoleGet(req: Request): Promise<Response> {
+  const url = new URL(req.url);
+  const workspaceId = url.searchParams.get('workspaceId');
+  if (!workspaceId) return err('workspaceId required');
+  try {
+    const entries = await browserService.getConsoleOutput(workspaceId);
+    return jsonResponse({ ok: true, entries });
+  } catch (e: any) {
+    return err(e?.message || String(e), 500);
+  }
+}
+
+export async function handleBrowserConsoleClear(req: Request): Promise<Response> {
+  const body = await readJson(req);
+  const workspaceId = requireString(body, 'workspaceId');
+  if (!workspaceId) return err('workspaceId required');
+  try {
+    await browserService.clearConsole(workspaceId);
+    return jsonResponse({ ok: true });
+  } catch (e: any) {
+    return err(e?.message || String(e), 500);
+  }
+}
+
+export async function handleBrowserStatus(req: Request): Promise<Response> {
+  const url = new URL(req.url);
+  const workspaceId = url.searchParams.get('workspaceId');
+  if (!workspaceId) return err('workspaceId required');
+  try {
+    const status = await browserService.getStatus(workspaceId);
+    return jsonResponse(status);
+  } catch (e: any) {
+    return err(e?.message || String(e), 500);
+  }
+}
