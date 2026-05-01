@@ -10,6 +10,8 @@ export interface WorkspaceInfo {
   selectedAgentIds: string[];
   lockedAgentIds: string[];    // Agents locked to their current grid slot
   createdAt: number;
+  testUrl?: string;            // URL the QA agent navigates to (e.g. http://localhost:5173)
+  testingEnabled?: boolean;    // Whether the QA testing agent is provisioned for this workspace
 }
 
 export interface AgentInfo {
@@ -111,7 +113,7 @@ export type ClientMessage =
   // Workspaces
   | { type: 'get_workspaces' }
   | { type: 'create_workspace'; name: string }
-  | { type: 'update_workspace'; id: string; name?: string; gridColumns?: number; gridRows?: number; selectedAgentIds?: string[]; lockedAgentIds?: string[] }
+  | { type: 'update_workspace'; id: string; name?: string; gridColumns?: number; gridRows?: number; selectedAgentIds?: string[]; lockedAgentIds?: string[]; testUrl?: string; testingEnabled?: boolean }
   | { type: 'delete_workspace'; id: string }
   | { type: 'set_active_workspace'; id: string }
   // Terminals

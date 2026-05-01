@@ -391,6 +391,17 @@
     .workspace-agent-chip { display: flex; align-items: center; gap: 6px; padding: 3px 8px; font-size: 11px; color: var(--text-secondary); border-radius: 4px; }
     .workspace-agent-chip:hover { background: var(--bg-tertiary); }
 
+    /* Workspace testing config */
+    .workspace-testing { padding: 6px 12px 8px; display: flex; flex-direction: column; gap: 6px; }
+    .workspace-testing-row { display: flex; align-items: center; gap: 6px; }
+    .workspace-testing-label { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; min-width: 52px; flex-shrink: 0; }
+    .workspace-test-url-input { flex: 1; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 4px; color: var(--text-primary); padding: 3px 6px; font-size: 11px; outline: none; min-width: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .workspace-test-url-input:focus { border-color: var(--accent); }
+    .workspace-testing-toggle { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text-secondary); cursor: pointer; user-select: none; }
+    .workspace-testing-toggle input[type="checkbox"] { margin: 0; cursor: pointer; }
+    .workspace-testing-toggle.disabled { opacity: 0.5; cursor: not-allowed; }
+    .workspace-testing-toggle.disabled input[type="checkbox"] { cursor: not-allowed; }
+
     /* Empty grid slot */
     .slot-empty { display: flex; align-items: center; justify-content: center; background: var(--bg-primary); }
     .slot-add-btn { background: var(--bg-tertiary); border: 2px dashed var(--border); border-radius: 12px; color: var(--text-muted); cursor: pointer; padding: 16px 24px; font-size: 14px; font-weight: 500; transition: all 0.15s; }
@@ -1573,7 +1584,7 @@
       );
     }
 
-    function WorkspacesSidebar({ workspaces, agents, activeWorkspaceId, onSelectWorkspace, onCreateWorkspace, onDeleteWorkspace, onRenameWorkspace, onNewAgent, onEditAgent, onRemoveAgent, statusStartTimes }) {
+    function WorkspacesSidebar({ workspaces, agents, activeWorkspaceId, onSelectWorkspace, onCreateWorkspace, onDeleteWorkspace, onRenameWorkspace, onUpdateWorkspaceTesting, onNewAgent, onEditAgent, onRemoveAgent, statusStartTimes }) {
       const [showNewModal, setShowNewModal] = useState(false);
       const [renamingId, setRenamingId] = useState(null);
       const [renameValue, setRenameValue] = useState('');
@@ -1624,6 +1635,35 @@
                       onClick: (ev) => { ev.stopPropagation(); if (confirm('Delete workspace "' + ws.name + '"? Agents will be moved to another workspace.')) onDeleteWorkspace(ws.id); },
                       title: 'Delete workspace'
                     }, '\u00D7')
+                  ),
+                  isActive && e('div', { className: 'workspace-testing', onClick: (ev) => ev.stopPropagation() },
+                    e('div', { className: 'workspace-testing-row' },
+                      e('span', { className: 'workspace-testing-label' }, 'Test URL'),
+                      e('input', {
+                        type: 'text',
+                        className: 'workspace-test-url-input',
+                        placeholder: 'http://localhost:5173',
+                        defaultValue: ws.testUrl || '',
+                        key: 'testurl-' + ws.id + '-' + (ws.testUrl || ''),
+                        onBlur: (ev) => {
+                          const val = ev.target.value.trim();
+                          if (val !== (ws.testUrl || '')) onUpdateWorkspaceTesting(ws.id, { testUrl: val });
+                        },
+                        onKeyDown: (ev) => { if (ev.key === 'Enter') ev.target.blur(); },
+                      })
+                    ),
+                    e('label', {
+                      className: 'workspace-testing-toggle' + (!ws.testUrl ? ' disabled' : ''),
+                      title: !ws.testUrl ? 'Set a Test URL to enable QA testing' : 'Provision a QA testing agent for this workspace',
+                    },
+                      e('input', {
+                        type: 'checkbox',
+                        checked: !!ws.testingEnabled,
+                        disabled: !ws.testUrl,
+                        onChange: (ev) => onUpdateWorkspaceTesting(ws.id, { testingEnabled: ev.target.checked }),
+                      }),
+                      'Enable QA testing'
+                    )
                   ),
                   isActive && wsAgents.length > 0 && e('div', { className: 'workspace-agents' },
                     wsAgents.map(agent =>
@@ -2459,6 +2499,7 @@
             onCreateWorkspace: ws.createWorkspace,
             onDeleteWorkspace: ws.deleteWorkspace,
             onRenameWorkspace: (id, name) => ws.updateWorkspace(id, { name }),
+            onUpdateWorkspaceTesting: (id, updates) => ws.updateWorkspace(id, updates),
             onNewAgent: () => { setEditingAgent(null); setShowModal(true); },
             onEditAgent: (agent) => { setEditingAgent(agent); setShowModal(true); },
             onRemoveAgent: ws.removeAgent,
