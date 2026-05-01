@@ -401,6 +401,15 @@
     /* QA testing button in panel header */
     .qa-header-btn.active { background: rgba(86, 211, 100, 0.18); color: var(--qa-accent); }
     .qa-header-btn.qa-header-btn-empty { opacity: 0.5; }
+    .qa-header-btn.qa-has-unread { position: relative; }
+    .qa-header-btn.qa-has-unread::after { content: ''; position: absolute; top: 1px; right: 1px; width: 7px; height: 7px; background: var(--qa-accent); border: 1px solid var(--bg-secondary); border-radius: 50%; box-shadow: 0 0 4px var(--qa-accent); animation: qa-pulse 2.5s infinite; }
+
+    .qa-subpanel-working { padding: 8px 4px; font-size: 11px; color: var(--qa-accent); font-style: italic; text-align: center; }
+
+    /* ChatTurn styling for QA-originated messages in the coding agent's chat */
+    .chat-turn[data-source="qa"] { border-left: 2px solid var(--qa-accent); padding-left: 8px; background: rgba(86, 211, 100, 0.04); }
+    .chat-turn[data-source="qa"] .chat-turn-role { color: var(--qa-accent); }
+    .chat-turn[data-source="qa"] .chat-turn-role::before { content: '🧪 '; }
 
     /* Split body: when QA is open, terminal panel splits coding | QA columns */
     .panel-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
@@ -562,6 +571,7 @@
       const [terminals, setTerminals] = useState([]);
       const [terminalOutput, setTerminalOutput] = useState({});
       const [errorToasts, setErrorToasts] = useState([]);
+      const [qaUnread, setQaUnread] = useState({}); // sourceAgentId -> true when QA results arrived for that agent
       const wsRef = useRef(null);
       const agentsRef = useRef([]);
       const queueRef = useRef({});
@@ -727,6 +737,9 @@
               case 'workspace_deleted':
                 setWorkspaces(prev => prev.filter(w => w.id !== msg.id));
                 break;
+              case 'qa_results_ready':
+                setQaUnread(prev => ({ ...prev, [msg.sourceAgentId]: true }));
+                break;
               // Terminals
               case 'terminals_list':
                 setTerminals(msg.terminals);
@@ -764,10 +777,12 @@
       }, [drainQueue, sendRaw]);
 
       return {
-        connected, agents, messages, liveOutput, queued, sharedContext, fileChanges, thinkingOutput, notes, documents, settings, workspaces, statusStartTimes, tokenUsage, terminals, terminalOutput, errorToasts,
+        connected, agents, messages, liveOutput, queued, sharedContext, fileChanges, thinkingOutput, notes, documents, settings, workspaces, statusStartTimes, tokenUsage, terminals, terminalOutput, errorToasts, qaUnread,
         createAgent: (name, cwd, referencePaths, systemPrompt, workspaceId) => {
           sendRaw({ type: 'create_agent', name, cwd, referencePaths, systemPrompt, workspaceId });
         },
+        sendQaMessage: (workspaceId, sourceAgentId, content) => sendRaw({ type: 'send_qa_message', workspaceId, sourceAgentId, content }),
+        clearQaUnread: (sourceAgentId) => setQaUnread(prev => { if (!prev[sourceAgentId]) return prev; const { [sourceAgentId]: _, ...rest } = prev; return rest; }),
         sendMessage: (agentId, content) => {
           const agent = agentsRef.current.find(a => a.id === agentId);
           if (agent && (agent.status === 'working' || agent.status === 'thinking')) {
@@ -1070,9 +1085,10 @@
     }
 
     // Chat Turn (memoized for performance)
-    const ChatTurn = React.memo(function ChatTurn({ role, content, isStreaming, imageData, imageMimeType, showToolMessages, searchQuery, showRetry, onRetry }) {
+    const ChatTurn = React.memo(function ChatTurn({ role, content, isStreaming, imageData, imageMimeType, showToolMessages, searchQuery, showRetry, onRetry, source }) {
       const [copied, setCopied] = useState(false);
-      const roleLabels = { user: 'You', assistant: 'Claude', system: 'System' };
+      const isQa = source === 'qa';
+      const roleLabels = { user: isQa ? 'QA Tester' : 'You', assistant: 'Claude', system: 'System' };
       const turnClass = isStreaming ? 'chat-turn chat-turn-streaming' : 'chat-turn chat-turn-' + role;
       const displayContent = (role === 'assistant' || isStreaming) ? filterToolMessages(content, showToolMessages) : content;
       const hiddenCount = (role === 'assistant' || isStreaming) && !showToolMessages ? countToolMessages(content) : 0;
@@ -1083,7 +1099,7 @@
         setTimeout(() => setCopied(false), 1500);
       };
 
-      return e('div', { className: turnClass },
+      return e('div', { className: turnClass, 'data-source': source || undefined },
         e('button', { className: 'copy-msg-btn', onClick: handleCopy }, copied ? 'Copied!' : 'Copy'),
         e('div', { className: 'chat-turn-role' }, roleLabels[role] || role),
         imageData && e('img', { className: 'chat-image', src: 'data:' + (imageMimeType || 'image/png') + ';base64,' + imageData, alt: 'Uploaded image', onClick: () => window.open('data:' + (imageMimeType || 'image/png') + ';base64,' + imageData) }),
@@ -1100,11 +1116,11 @@
         showRetry && onRetry && e('button', { className: 'retry-btn', onClick: onRetry }, '\u21BB Retry')
       );
     }, (prev, next) => {
-      return prev.content === next.content && prev.role === next.role && prev.isStreaming === next.isStreaming && prev.searchQuery === next.searchQuery && prev.showToolMessages === next.showToolMessages && prev.showRetry === next.showRetry && prev.imageData === next.imageData;
+      return prev.content === next.content && prev.role === next.role && prev.isStreaming === next.isStreaming && prev.searchQuery === next.searchQuery && prev.showToolMessages === next.showToolMessages && prev.showRetry === next.showRetry && prev.imageData === next.imageData && prev.source === next.source;
     });
 
     // Terminal Panel
-    function TerminalPanel({ agent, messages, liveOutput, queuedMessages, fileChanges, thinkingOutput, statusStartTime, tokenUsage, terminals, terminalOutput, workspace, onSendMessage, onSendImage, onSendImages, onStop, onClearHistory, onClearFileChanges, onMinimize, onMaximize, isMaximized, onFocus, isFocused, onCreateTerminal, onKillTerminal, isLocked, onToggleLock, isDragging, isDragOver, onDragStart, onDragEnd, onDragOver, onDragLeave, onDrop }) {
+    function TerminalPanel({ agent, messages, liveOutput, queuedMessages, fileChanges, thinkingOutput, statusStartTime, tokenUsage, terminals, terminalOutput, workspace, qaAgent, qaMessages, qaHasUnread, onQaSend, onClearQaUnread, onSendMessage, onSendImage, onSendImages, onStop, onClearHistory, onClearFileChanges, onMinimize, onMaximize, isMaximized, onFocus, isFocused, onCreateTerminal, onKillTerminal, isLocked, onToggleLock, isDragging, isDragOver, onDragStart, onDragEnd, onDragOver, onDragLeave, onDrop }) {
       const [input, setInput] = useState('');
       const [inputHistory, setInputHistory] = useState([]);
       const [historyIdx, setHistoryIdx] = useState(-1);
@@ -1127,18 +1143,22 @@
         { title: 'Check console for errors', desc: 'Inspect runtime errors and warnings', prompt: 'Navigate to the test URL, wait for the page to load, then check the browser console for any errors or warnings. Report what you find with screenshots if helpful.' },
       ];
 
-      // QA agent status — placeholder until backend lands. For now: idle when input is empty, ready otherwise.
-      // Once backend is wired, this will read real agent status from the QA agent's AgentInfo.
-      const qaStatus = 'idle';
-      const qaStatusLabel = qaStatus === 'idle' ? 'Ready' : qaStatus === 'working' ? 'Working' : qaStatus === 'thinking' ? 'Thinking' : qaStatus === 'error' ? 'Error' : 'Idle';
+      // QA agent status — real read from the workspace's QA agent (lazily provisioned on first send).
+      const qaStatus = qaAgent ? qaAgent.status : 'idle';
+      const qaStatusLabel = qaStatus === 'working' ? 'Working' : qaStatus === 'thinking' ? 'Thinking' : qaStatus === 'error' ? 'Error' : qaStatus === 'stopped' ? 'Stopped' : 'Ready';
 
       const sendQaMessage = () => {
         const trimmed = qaInput.trim();
         if (!trimmed || !workspace || !workspace.testUrl) return;
-        // Backend wiring pending — record the prompt for "Run again" and clear the input.
         setLastQaPrompt(trimmed);
         setQaInput('');
+        if (onQaSend) onQaSend(workspace.id, agent.id, trimmed);
       };
+
+      // Clear the unread badge when the panel is opened.
+      useEffect(() => {
+        if (qaPanelOpen && qaHasUnread && onClearQaUnread && agent) onClearQaUnread(agent.id);
+      }, [qaPanelOpen, qaHasUnread, agent?.id]);
 
       // Drag-to-resize the QA panel split
       useEffect(() => {
@@ -1420,11 +1440,13 @@
               title: isLocked ? 'Unlock position' : 'Lock position',
             }, isLocked ? '\uD83D\uDD12' : '\uD83D\uDD13'),
             workspace && e('button', {
-              className: 'panel-btn qa-header-btn' + (qaPanelOpen ? ' active' : '') + (!workspace.testUrl ? ' qa-header-btn-empty' : ''),
+              className: 'panel-btn qa-header-btn' + (qaPanelOpen ? ' active' : '') + (!workspace.testUrl ? ' qa-header-btn-empty' : '') + (qaHasUnread ? ' qa-has-unread' : ''),
               onClick: () => setQaPanelOpen(o => !o),
               title: !workspace.testUrl
                 ? 'Set a Test URL on this workspace to start QA testing'
-                : (qaPanelOpen ? 'Close QA testing panel' : 'Open QA testing panel for this agent'),
+                : qaHasUnread
+                  ? 'QA results ready \u2014 click to view'
+                  : (qaPanelOpen ? 'Close QA testing panel' : 'Open QA testing panel for this agent'),
             }, '\uD83E\uDDEA'),
             e('button', { className: 'panel-btn', onClick: () => { setSearchVisible(prev => !prev); setTimeout(() => searchInputRef.current?.focus(), 50); }, title: 'Search (Ctrl+F)' }, '\uD83D\uDD0D'),
             isWorking && e('button', { className: 'panel-btn panel-btn-stop', onClick: () => onStop(agent.id), title: 'Stop (Esc)' }, 'Stop'),
@@ -1508,6 +1530,7 @@
                         content: m.content,
                         imageData: m.imageData,
                         imageMimeType: m.imageMimeType,
+                        source: m.source,
                         showToolMessages,
                         searchQuery: searchVisible ? searchQuery : '',
                         showRetry: realIdx === lastUserMsgIndex && m.role === 'user' && !isWorking,
@@ -1621,20 +1644,32 @@
             e('div', { className: 'qa-subpanel-content' },
               !(workspace && workspace.testUrl)
                 ? e('div', { className: 'qa-subpanel-empty' }, e('span', { style: { fontStyle: 'italic' } }, 'Set a Test URL on this workspace (left sidebar) to start chatting with the QA agent.'))
-                : e('div', { className: 'qa-subpanel-empty' },
-                    e('div', { className: 'qa-subpanel-empty-heading' }, 'Try one of these to start'),
-                    e('div', { className: 'qa-suggestions' },
-                      QA_SUGGESTIONS.map((s, i) => e('button', {
-                        key: i,
-                        className: 'qa-suggestion',
-                        onClick: () => setQaInput(s.prompt),
-                        title: 'Click to load this prompt into the input',
-                      },
-                        e('div', { className: 'qa-suggestion-title' }, s.title),
-                        e('div', { className: 'qa-suggestion-desc' }, s.desc)
-                      ))
+                : (qaMessages && qaMessages.length > 0)
+                  ? e(React.Fragment, null,
+                      qaMessages.map((m, i) => e(ChatTurn, {
+                        key: m.id || i,
+                        role: m.role,
+                        content: m.content,
+                        imageData: m.imageData,
+                        imageMimeType: m.imageMimeType,
+                        showToolMessages: false,
+                      })),
+                      qaStatus === 'working' && e('div', { className: 'qa-subpanel-working' }, 'QA agent is working...')
                     )
-                  )
+                  : e('div', { className: 'qa-subpanel-empty' },
+                      e('div', { className: 'qa-subpanel-empty-heading' }, 'Try one of these to start'),
+                      e('div', { className: 'qa-suggestions' },
+                        QA_SUGGESTIONS.map((s, i) => e('button', {
+                          key: i,
+                          className: 'qa-suggestion',
+                          onClick: () => setQaInput(s.prompt),
+                          title: 'Click to load this prompt into the input',
+                        },
+                          e('div', { className: 'qa-suggestion-title' }, s.title),
+                          e('div', { className: 'qa-suggestion-desc' }, s.desc)
+                        ))
+                      )
+                    )
             ),
             e('div', { className: 'qa-subpanel-input-wrapper' },
               e('textarea', {
@@ -2780,6 +2815,11 @@
                   terminals,
                   terminalOutput,
                   workspace: activeWorkspace,
+                  qaAgent: activeWorkspace && activeWorkspace.qaAgentId ? agents.find(a => a.id === activeWorkspace.qaAgentId) : null,
+                  qaMessages: activeWorkspace && activeWorkspace.qaAgentId ? (messages[activeWorkspace.qaAgentId] || []) : [],
+                  qaHasUnread: !!ws.qaUnread[agent.id],
+                  onQaSend: ws.sendQaMessage,
+                  onClearQaUnread: ws.clearQaUnread,
                   onSendMessage: (content) => ws.sendMessage(agent.id, content),
                   onSendImage: ws.sendImage,
                   onSendImages: ws.sendImages,
@@ -2824,6 +2864,11 @@
                   terminals,
                   terminalOutput,
                   workspace: activeWorkspace,
+                  qaAgent: activeWorkspace && activeWorkspace.qaAgentId ? agents.find(a => a.id === activeWorkspace.qaAgentId) : null,
+                  qaMessages: activeWorkspace && activeWorkspace.qaAgentId ? (messages[activeWorkspace.qaAgentId] || []) : [],
+                  qaHasUnread: !!ws.qaUnread[agent.id],
+                  onQaSend: ws.sendQaMessage,
+                  onClearQaUnread: ws.clearQaUnread,
                   onSendMessage: (content) => ws.sendMessage(agent.id, content),
                   onSendImage: ws.sendImage,
                   onSendImages: ws.sendImages,
