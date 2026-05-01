@@ -400,6 +400,7 @@
 
     /* QA testing button in panel header */
     .qa-header-btn.active { background: rgba(47, 129, 247, 0.15); color: var(--accent); }
+    .qa-header-btn.qa-header-btn-empty { opacity: 0.5; }
 
     /* QA sub-panel (embedded QA agent chat within a coding agent panel) */
     .qa-subpanel { border-top: 1px solid var(--accent); background: var(--bg-primary); display: flex; flex-direction: column; flex-shrink: 0; max-height: 45%; min-height: 180px; }
@@ -426,8 +427,8 @@
     .slot-empty.drag-over { outline: 2px dashed var(--accent); outline-offset: -2px; }
 
     /* Lock button */
-    .lock-btn { background: none; border: none; cursor: pointer; padding: 3px 5px; border-radius: 3px; font-size: 12px; opacity: 0; transition: opacity 0.15s; color: var(--text-muted); }
-    .panel-header:hover .lock-btn { opacity: 0.6; }
+    .lock-btn { background: none; border: none; cursor: pointer; padding: 3px 5px; border-radius: 3px; font-size: 12px; opacity: 0.6; transition: opacity 0.15s; color: var(--text-muted); }
+    .lock-btn:hover { opacity: 1; }
     .lock-btn.locked { opacity: 1; color: var(--accent); }
     .terminal-panel.locked { border-left: 2px solid var(--accent); }
 
@@ -1327,10 +1328,12 @@
               onClick: (ev) => { ev.stopPropagation(); onToggleLock(agent.id); },
               title: isLocked ? 'Unlock position' : 'Lock position',
             }, isLocked ? '\uD83D\uDD12' : '\uD83D\uDD13'),
-            workspace && workspace.testUrl && e('button', {
-              className: 'panel-btn qa-header-btn' + (qaPanelOpen ? ' active' : ''),
+            workspace && e('button', {
+              className: 'panel-btn qa-header-btn' + (qaPanelOpen ? ' active' : '') + (!workspace.testUrl ? ' qa-header-btn-empty' : ''),
               onClick: () => setQaPanelOpen(o => !o),
-              title: qaPanelOpen ? 'Close QA testing panel' : 'Open QA testing panel for this agent',
+              title: !workspace.testUrl
+                ? 'Set a Test URL on this workspace to start QA testing'
+                : (qaPanelOpen ? 'Close QA testing panel' : 'Open QA testing panel for this agent'),
             }, '\uD83E\uDDEA'),
             e('button', { className: 'panel-btn', onClick: () => { setSearchVisible(prev => !prev); setTimeout(() => searchInputRef.current?.focus(), 50); }, title: 'Search (Ctrl+F)' }, '\uD83D\uDD0D'),
             isWorking && e('button', { className: 'panel-btn panel-btn-stop', onClick: () => onStop(agent.id), title: 'Stop (Esc)' }, 'Stop'),
@@ -1464,7 +1467,11 @@
             e('button', { className: 'qa-subpanel-close', onClick: () => setQaPanelOpen(false), title: 'Close QA panel' }, '\u00D7')
           ),
           e('div', { className: 'qa-subpanel-content' },
-            e('div', { className: 'qa-subpanel-empty' }, 'No messages yet. Tell the QA agent what to test, or click \uD83E\uDDEA in this panel\u2019s header again to close.')
+            e('div', { className: 'qa-subpanel-empty' },
+              (workspace && workspace.testUrl)
+                ? 'No messages yet. Tell the QA agent what to test.'
+                : 'Set a Test URL on this workspace (left sidebar) to start chatting with the QA agent.'
+            )
           ),
           e('div', { className: 'qa-subpanel-input-wrapper' },
             e('textarea', {
@@ -1474,18 +1481,21 @@
               onKeyDown: (ev) => {
                 if (ev.key === 'Enter' && !ev.shiftKey) {
                   ev.preventDefault();
-                  if (qaInput.trim()) {
+                  if (qaInput.trim() && workspace && workspace.testUrl) {
                     // Backend wiring pending; clear input for now
                     setQaInput('');
                   }
                 }
               },
-              placeholder: 'Message the QA agent... (Enter to send, Shift+Enter for newline)',
+              placeholder: (workspace && workspace.testUrl)
+                ? 'Message the QA agent... (Enter to send, Shift+Enter for newline)'
+                : 'Set a Test URL first',
               rows: 1,
+              disabled: !(workspace && workspace.testUrl),
             }),
             e('button', {
               className: 'qa-subpanel-send',
-              disabled: !qaInput.trim(),
+              disabled: !qaInput.trim() || !(workspace && workspace.testUrl),
               onClick: () => { if (qaInput.trim()) setQaInput(''); },
               title: 'Send message to QA agent',
             }, 'Send')
