@@ -8,6 +8,7 @@ import { workspaceService } from './services/workspace.service';
 import { documentService } from './services/document.service';
 import { agentService, initAgentService } from './services/agent.service';
 import { terminalService } from './services/terminal.service';
+import { browserService } from './services/browser.service';
 
 import { websocketHandlers } from './ws';
 
@@ -108,6 +109,7 @@ async function shutdown() {
     (async () => {
       await agentService.shutdownAll();
       await terminalService.killAll();
+      await browserService.close();
     })(),
     new Promise<void>(resolve => setTimeout(() => {
       console.warn('Shutdown timeout — force killing all processes...');
