@@ -438,13 +438,16 @@
     .qa-suggestion-title { color: var(--qa-accent); font-weight: 500; margin-bottom: 2px; }
     .qa-suggestion-desc { color: var(--text-muted); font-size: 10px; }
 
-    /* Status pill in QA header */
-    .qa-status-pill { display: inline-flex; align-items: center; gap: 4px; padding: 1px 6px; background: var(--bg-tertiary); color: var(--text-secondary); font-size: 9px; font-weight: 500; border-radius: 8px; letter-spacing: 0.4px; text-transform: uppercase; flex-shrink: 0; }
-    .qa-status-pill.working { background: rgba(86, 211, 100, 0.2); color: var(--qa-accent); }
+    /* Status pill in QA header — only rendered for non-idle states to avoid clutter */
+    .qa-status-pill { display: inline-flex; align-items: center; gap: 4px; padding: 1px 6px; background: rgba(86, 211, 100, 0.2); color: var(--qa-accent); font-size: 9px; font-weight: 500; border-radius: 8px; letter-spacing: 0.4px; text-transform: uppercase; flex-shrink: 0; }
     .qa-status-pill.error { background: rgba(248, 81, 73, 0.2); color: var(--error); }
 
-    /* Run-again button in QA header */
-    .qa-rerun-btn { background: none; border: 1px solid var(--qa-accent-strong); color: var(--qa-accent); cursor: pointer; padding: 1px 7px; border-radius: 3px; font-size: 10px; font-weight: 500; flex-shrink: 0; transition: all 0.15s; }
+    /* QA test URL link — ellipsizes on narrow panels */
+    .qa-test-url { font-size: 10px; color: var(--text-muted); font-weight: 400; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; text-decoration: none; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .qa-test-url:hover { color: var(--qa-accent); text-decoration: underline; }
+
+    /* Run-again button in QA header — icon-only to save space */
+    .qa-rerun-btn { background: none; border: 1px solid var(--qa-accent-strong); color: var(--qa-accent); cursor: pointer; padding: 1px 6px; border-radius: 3px; font-size: 11px; font-weight: 500; flex-shrink: 0; transition: all 0.15s; line-height: 1; }
     .qa-rerun-btn:hover:not(:disabled) { background: var(--qa-accent); color: #0d1117; }
     .qa-rerun-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 
@@ -1596,24 +1599,23 @@
             e('div', { className: 'qa-subpanel-header' },
               e('div', { className: 'qa-subpanel-status' },
                 e('span', { className: 'qa-subpanel-pulse' }),
-                e('span', { className: 'qa-subpanel-badge' }, 'QA'),
-                e('span', null, '🧪 Testing Agent'),
-                e('span', { className: 'qa-status-pill' + (qaStatus === 'working' || qaStatus === 'thinking' ? ' working' : qaStatus === 'error' ? ' error' : '') }, qaStatusLabel),
+                e('span', { className: 'qa-subpanel-badge' }, '🧪 QA'),
+                qaStatus !== 'idle' && e('span', { className: 'qa-status-pill' + (qaStatus === 'error' ? ' error' : '') }, qaStatusLabel),
                 workspace && workspace.testUrl && e('a', {
+                  className: 'qa-test-url',
                   href: workspace.testUrl,
                   target: '_blank',
                   rel: 'noopener noreferrer',
                   onClick: (ev) => ev.stopPropagation(),
-                  style: { fontSize: 10, color: 'var(--text-muted)', fontWeight: 400, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', textDecoration: 'none' },
-                  title: 'Open test URL in a new tab',
-                }, '· ' + workspace.testUrl)
+                  title: 'Open ' + workspace.testUrl + ' in a new tab',
+                }, workspace.testUrl)
               ),
               e('button', {
                 className: 'qa-rerun-btn',
                 disabled: !lastQaPrompt || !(workspace && workspace.testUrl),
                 onClick: () => { if (lastQaPrompt) setQaInput(lastQaPrompt); },
-                title: lastQaPrompt ? 'Reload the last test prompt into the input' : 'No previous test to repeat',
-              }, '↻ Run again'),
+                title: lastQaPrompt ? 'Run last prompt again' : 'No previous test to repeat',
+              }, '↻'),
               e('button', { className: 'qa-subpanel-close', onClick: () => setQaPanelOpen(false), title: 'Close QA panel' }, '×')
             ),
             e('div', { className: 'qa-subpanel-content' },
