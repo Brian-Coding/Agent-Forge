@@ -33,6 +33,7 @@ export interface ChatMessage {
   timestamp: number;
   imageData?: string;         // Base64 encoded image data
   imageMimeType?: string;     // e.g. 'image/png', 'image/jpeg'
+  source?: 'qa';              // QA-originated message (for visual styling)
 }
 
 export interface ProjectNote {
@@ -116,6 +117,8 @@ export type ClientMessage =
   | { type: 'update_workspace'; id: string; name?: string; gridColumns?: number; gridRows?: number; selectedAgentIds?: string[]; lockedAgentIds?: string[]; testUrl?: string }
   | { type: 'delete_workspace'; id: string }
   | { type: 'set_active_workspace'; id: string }
+  // QA testing
+  | { type: 'send_qa_message'; workspaceId: string; sourceAgentId: string; content: string }
   // Terminals
   | { type: 'create_terminal'; agentId: string; command: string }
   | { type: 'kill_terminal'; id: string }
@@ -157,6 +160,8 @@ export type ServerMessage =
   | { type: 'workspace_created'; workspace: WorkspaceInfo }
   | { type: 'workspace_updated'; workspace: WorkspaceInfo }
   | { type: 'workspace_deleted'; id: string }
+  // QA testing
+  | { type: 'qa_results_ready'; workspaceId: string; sourceAgentId: string }
   // Terminals
   | { type: 'terminals_list'; terminals: TerminalSession[] }
   | { type: 'terminal_created'; terminal: TerminalSession }

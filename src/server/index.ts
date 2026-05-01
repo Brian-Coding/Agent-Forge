@@ -109,6 +109,7 @@ const server = Bun.serve({
   },
 });
 
+agentService.setGuiPort(server.port ?? 0);
 console.log(`Server running at http://localhost:${server.port}`);
 
 // --- Graceful shutdown ---

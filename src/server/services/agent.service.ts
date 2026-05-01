@@ -42,6 +42,62 @@ const messages: Map<string, ChatMessage[]> = (globalThis as any).__messagesMap ?
 const sendLocks: Map<string, Promise<void>> = (globalThis as any).__sendLocks ??= new Map<string, Promise<void>>();
 let sharedContext: string = (globalThis as any).__sharedContext ?? '';
 
+// QA testing state — pending tests per QA agent (FIFO), and the GUI server port
+// (set by index.ts after Bun.serve starts) for system-prompt URL substitution.
+interface PendingQaTest {
+  sourceAgentId: string;
+  triggeredAt: number;
+  hardKillTimer: ReturnType<typeof setTimeout> | null;
+}
+const pendingQaTests: Map<string, PendingQaTest[]> = (globalThis as any).__pendingQaTests ??= new Map<string, PendingQaTest[]>();
+let guiPort: number = ((globalThis as any).__guiPort as number) || 0;
+
+const QA_HARD_KILL_MS = 3 * 60 * 1000;
+
+const QA_SYSTEM_PROMPT_TEMPLATE = `You are a UI QA Testing Agent. Your job is to visually test web applications by taking screenshots, analyzing them, clicking buttons, filling forms, and reporting issues.
+
+## Available Browser Tools
+
+Call these via curl to http://localhost:{GUI_PORT}/api/browser/.
+Always include "workspaceId": "{WORKSPACE_ID}" in the JSON body or query string.
+
+- POST /navigate {"workspaceId":"{WORKSPACE_ID}","url":"..."}
+- POST /screenshot {"workspaceId":"{WORKSPACE_ID}","selector":"..." (optional),"fullPage":true (optional)}
+  -> Returns {"path":"/path/to/screenshot.png"}
+  -> Then use the Read tool on that path to see the rendered UI.
+- POST /click {"workspaceId":"{WORKSPACE_ID}","selector":"..."}
+- POST /type {"workspaceId":"{WORKSPACE_ID}","selector":"...","text":"..."}
+- POST /wait-for-ready {"workspaceId":"{WORKSPACE_ID}"} -- wait for HMR/page to stabilize
+- GET  /console?workspaceId={WORKSPACE_ID} -- recent console errors/warnings/logs
+- POST /console/clear {"workspaceId":"{WORKSPACE_ID}"}
+
+## Workflow
+
+1. Call /wait-for-ready to let the page settle.
+2. Navigate to the relevant page.
+3. Take a screenshot and Read the image to see the UI.
+4. Check /console for errors.
+5. Test interactions (click buttons, fill forms).
+6. Take screenshots after interactions to verify behavior.
+7. Compile a report with findings and screenshot file paths.
+
+## Time budget
+
+If you spend more than 60 seconds attempting one specific action (e.g. searching for an element that won't appear, or clicking targets that don't respond), STOP and report what you tried. Don't loop endlessly. The user would rather see a partial report than a stuck agent.
+
+## Report Format
+
+Structure your report as:
+- Summary of what was tested
+- Issues found (with screenshot paths)
+- Things that look correct
+- Console errors if any
+- Overall assessment
+
+Reference screenshot file paths in your report (e.g. "see screenshot at /path/to/file.png"). The system will automatically attach those screenshots as inline images in the report sent back to the coding agent.
+
+Keep reports concise and actionable.`;
+
 // Read from a stream reader with a timeout
 async function readWithTimeout<T>(reader: ReadableStreamDefaultReader<T>, ms: number): Promise<{ done: boolean; value?: T }> {
   let timer: ReturnType<typeof setTimeout>;
@@ -55,7 +111,7 @@ async function readWithTimeout<T>(reader: ReadableStreamDefaultReader<T>, ms: nu
   }
 }
 
-function addMessage(agentId: string, role: ChatMessage['role'], content: string, imageData?: string, imageMimeType?: string): ChatMessage {
+function addMessage(agentId: string, role: ChatMessage['role'], content: string, imageData?: string, imageMimeType?: string, source?: 'qa'): ChatMessage {
   const msg: ChatMessage = {
     id: generateId(),
     agentId,
@@ -65,6 +121,7 @@ function addMessage(agentId: string, role: ChatMessage['role'], content: string,
   };
   if (imageData) msg.imageData = imageData;
   if (imageMimeType) msg.imageMimeType = imageMimeType;
+  if (source) msg.source = source;
   if (!messages.has(agentId)) {
     messages.set(agentId, []);
   }
@@ -408,11 +465,11 @@ async function readStderr(agentId: string, stream: ReadableStream<Uint8Array>) {
 
 // --- Messaging implementation ---
 
-async function _sendMessageImpl(agentId: string, content: string): Promise<void> {
+async function _sendMessageImpl(agentId: string, content: string, source?: 'qa'): Promise<void> {
   const agent = agents.get(agentId);
   if (!agent) return;
 
-  const userMsg = addMessage(agentId, 'user', content);
+  const userMsg = addMessage(agentId, 'user', content, undefined, undefined, source);
   broadcast({ type: 'message', message: userMsg });
 
   agent.outputBuffer = '';
@@ -451,6 +508,11 @@ async function _sendMessageImpl(agentId: string, content: string): Promise<void>
     agent.info.status = exitCode === 0 ? 'idle' : 'error';
     broadcast({ type: 'agent_updated', agent: agent.info });
     await persistenceService.saveNow();
+
+    // If this is a QA agent with a pending test, relay the report to the source coding agent.
+    if (exitCode === 0 && pendingQaTests.has(agentId)) {
+      _processQaIdle(agentId).catch(e => console.error(`QA idle relay failed for ${agentId}:`, e));
+    }
   } catch (e) {
     console.error(`Error sending message to agent ${agentId}:`, e);
     if (proc.pid) persistenceService.untrackPid(proc.pid);
@@ -458,6 +520,99 @@ async function _sendMessageImpl(agentId: string, content: string): Promise<void>
     agent.info.status = 'error';
     broadcast({ type: 'agent_updated', agent: agent.info });
   }
+}
+
+// ============== QA orchestration ==============
+
+/**
+ * Build a context summary of a coding agent's conversation: 100% of user
+ * messages verbatim + abbreviated assistant responses (~200 char truncation).
+ * Used to ground the QA agent in what the user actually asked for.
+ */
+function buildChatSummary(agentId: string): string {
+  const msgs = messages.get(agentId) || [];
+  const parts: string[] = [];
+  for (const msg of msgs) {
+    if (msg.role === 'user') {
+      parts.push(`[User]: ${msg.content}`);
+    } else if (msg.role === 'assistant') {
+      const abbreviated = msg.content.length > 200
+        ? msg.content.substring(0, 200) + '...'
+        : msg.content;
+      parts.push(`[Agent]: ${abbreviated}`);
+    }
+  }
+  return parts.join('\n\n');
+}
+
+/**
+ * Find absolute screenshot paths the QA agent referenced in its report.
+ * Matches any path-like string ending in .png that contains "agent-forge-qa"
+ * (the screenshot dir signature). Tolerant of forward and back slashes so
+ * Windows and POSIX paths both work.
+ */
+function scanForScreenshots(text: string): string[] {
+  const re = /(?:[A-Za-z]:[\\\/]|\/)[^\s"'`<>()]*agent-forge-qa[^\s"'`<>()]*\.png/g;
+  const found = new Set<string>();
+  for (const m of text.matchAll(re)) found.add(m[0]);
+  return Array.from(found);
+}
+
+async function readImageAsBase64(filePath: string): Promise<string | null> {
+  try {
+    const file = Bun.file(filePath);
+    if (!(await file.exists())) return null;
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    // btoa expects a binary string
+    let binary = '';
+    for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]!);
+    return btoa(binary);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Called when a QA agent transitions to idle. Pops the oldest pending test,
+ * extracts the report from the QA agent's last assistant message, sends it
+ * to the source coding agent, persists screenshot messages, and broadcasts
+ * qa_results_ready.
+ */
+async function _processQaIdle(qaAgentId: string): Promise<void> {
+  const queue = pendingQaTests.get(qaAgentId);
+  if (!queue || queue.length === 0) return;
+  const test = queue.shift()!;
+  if (queue.length === 0) pendingQaTests.delete(qaAgentId);
+  if (test.hardKillTimer) clearTimeout(test.hardKillTimer);
+
+  const qaMsgs = messages.get(qaAgentId) || [];
+  const lastAssistant = [...qaMsgs].reverse().find(m => m.role === 'assistant');
+  const reportText = lastAssistant?.content?.trim() || '(QA agent produced no output)';
+
+  // 1) Send the report into the source coding agent's chat as a real turn,
+  //    tagged source: 'qa' so the frontend can style it distinctly.
+  await agentService.sendMessage(test.sourceAgentId, reportText, 'qa').catch(e => {
+    console.error(`Failed to relay QA report to ${test.sourceAgentId}:`, e);
+  });
+
+  // 2) Attach any referenced screenshots as display-only system messages.
+  const paths = scanForScreenshots(reportText);
+  for (const p of paths) {
+    const data = await readImageAsBase64(p);
+    if (!data) continue;
+    const screenshotMsg = addMessage(test.sourceAgentId, 'system', `QA screenshot: ${p}`, data, 'image/png', 'qa');
+    broadcast({ type: 'message', message: screenshotMsg });
+  }
+
+  // 3) Tell the frontend to flag the unread badge on the source agent's 🧪 button.
+  const sourceAgent = agents.get(test.sourceAgentId);
+  const workspaceId = sourceAgent?.info.workspaceId;
+  if (workspaceId) {
+    broadcast({ type: 'qa_results_ready', workspaceId, sourceAgentId: test.sourceAgentId });
+  }
+
+  // 4) If more pending tests are queued for this QA agent, the next one's
+  //    sendMessage is already serialized via sendLocks — nothing more to do.
 }
 
 async function _stopAgentImpl(agentId: string): Promise<boolean> {
@@ -660,11 +815,11 @@ export const agentService = {
 
   // --- Agent Control ---
 
-  async sendMessage(agentId: string, content: string): Promise<void> {
+  async sendMessage(agentId: string, content: string, source?: 'qa'): Promise<void> {
     const prev = sendLocks.get(agentId) ?? Promise.resolve();
     const current = prev.then(
-      () => _sendMessageImpl(agentId, content),
-      () => _sendMessageImpl(agentId, content),
+      () => _sendMessageImpl(agentId, content, source),
+      () => _sendMessageImpl(agentId, content, source),
     ).catch(e => { console.error(`sendMessage(${agentId}) error:`, e); });
     sendLocks.set(agentId, current);
     return current;
@@ -804,6 +959,80 @@ export const agentService = {
       console.error('killAllProcesses failed:', e);
       return { success: false, message: e.message || 'Failed to kill processes' };
     }
+  },
+
+  // --- QA testing ---
+
+  /** Called by index.ts after Bun.serve starts so the QA system prompt has a real port. */
+  setGuiPort(port: number): void {
+    guiPort = port;
+    (globalThis as any).__guiPort = port;
+  },
+
+  /**
+   * Send a message from a coding agent's QA panel to the workspace's QA agent.
+   * Spawns the QA agent on first call (lazy provisioning). Builds a chat
+   * summary of the source coding agent's conversation, prepends it to the
+   * user's content, and forwards to the QA agent's sendMessage. The pending
+   * test is recorded with a 3-minute hard-kill backstop; when the QA agent
+   * goes idle, _processQaIdle relays the report back into the source coding
+   * agent's chat.
+   */
+  async sendQaMessage(workspaceId: string, sourceAgentId: string, userContent: string): Promise<void> {
+    const ws = workspaceService.get(workspaceId);
+    if (!ws) throw new Error(`Workspace not found: ${workspaceId}`);
+    if (!ws.testUrl) throw new Error('Workspace has no Test URL set');
+    if (!agents.has(sourceAgentId)) throw new Error(`Source agent not found: ${sourceAgentId}`);
+
+    // 1) Resolve / provision the QA agent.
+    let qaAgentId = ws.qaAgentId;
+    if (!qaAgentId || !agents.has(qaAgentId)) {
+      const qaCwd = join(tmpdir(), 'agent-forge-qa', workspaceId);
+      if (!existsSync(qaCwd)) mkdirSync(qaCwd, { recursive: true });
+      const port = guiPort > 0 ? guiPort : 3333;
+      const systemPrompt = QA_SYSTEM_PROMPT_TEMPLATE
+        .replace(/{GUI_PORT}/g, String(port))
+        .replace(/{WORKSPACE_ID}/g, workspaceId);
+      const created = await agentService.createAgent('QA Tester', qaCwd, [], systemPrompt, workspaceId);
+      qaAgentId = created.id;
+      const updated = await workspaceService.update(workspaceId, { qaAgentId } as any);
+      if (updated) broadcast({ type: 'workspace_updated', workspace: updated });
+    }
+
+    // 2) Build the trigger message: chat summary + the user's QA-panel input.
+    const summary = buildChatSummary(sourceAgentId);
+    const triggerMessage = [
+      'A user is asking the QA testing agent (you) to test something. Below is a context summary of their recent conversation with the coding agent, followed by their actual instruction.',
+      '',
+      `Test URL: ${ws.testUrl}`,
+      `Workspace ID: ${workspaceId}`,
+      '',
+      '## Recent conversation with coding agent',
+      '',
+      summary || '(no prior conversation)',
+      '',
+      '## User instruction',
+      '',
+      userContent,
+    ].join('\n');
+
+    // 3) Record pending test with 3-minute hard-kill backstop.
+    const test: PendingQaTest = {
+      sourceAgentId,
+      triggeredAt: Date.now(),
+      hardKillTimer: null,
+    };
+    test.hardKillTimer = setTimeout(() => {
+      console.warn(`[qa] hard-kill triggered for ${qaAgentId} after ${QA_HARD_KILL_MS}ms`);
+      agentService.stopAgent(qaAgentId!).catch(() => {});
+    }, QA_HARD_KILL_MS);
+
+    if (!pendingQaTests.has(qaAgentId)) pendingQaTests.set(qaAgentId, []);
+    pendingQaTests.get(qaAgentId)!.push(test);
+
+    // 4) Forward to the QA agent. sendMessage uses the existing sendLocks
+    //    queue, so concurrent sendQaMessage calls serialize cleanly.
+    await agentService.sendMessage(qaAgentId, triggerMessage);
   },
 
   // --- Set agent workspace (for migration) ---

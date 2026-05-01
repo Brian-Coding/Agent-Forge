@@ -64,6 +64,15 @@ async function handleMessage(ws: ServerWebSocket<unknown>, message: ClientMessag
       break;
     }
 
+    case 'send_qa_message': {
+      try {
+        await agentService.sendQaMessage(message.workspaceId, message.sourceAgentId, message.content);
+      } catch (e: any) {
+        sendTo(ws, { type: 'error', message: e?.message || 'QA send failed' });
+      }
+      break;
+    }
+
     case 'stop_agent': {
       const success = await agentService.stopAgent(message.agentId);
       if (!success) {
