@@ -399,21 +399,45 @@
     .workspace-test-url-input:focus { border-color: var(--accent); color: var(--text-primary); }
 
     /* QA testing button in panel header */
-    .qa-header-btn.active { background: rgba(47, 129, 247, 0.15); color: var(--accent); }
+    .qa-header-btn.active { background: rgba(86, 211, 100, 0.18); color: var(--qa-accent); }
     .qa-header-btn.qa-header-btn-empty { opacity: 0.5; }
 
-    /* QA sub-panel (embedded QA agent chat within a coding agent panel) */
-    .qa-subpanel { border-top: 1px solid var(--accent); background: var(--bg-primary); display: flex; flex-direction: column; flex-shrink: 0; max-height: 45%; min-height: 180px; }
-    .qa-subpanel-header { display: flex; align-items: center; justify-content: space-between; padding: 6px 12px; background: rgba(47, 129, 247, 0.08); border-bottom: 1px solid var(--border); font-size: 12px; color: var(--accent); font-weight: 500; flex-shrink: 0; }
-    .qa-subpanel-status { display: flex; align-items: center; gap: 6px; }
-    .qa-subpanel-close { background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 0 4px; font-size: 14px; line-height: 1; }
+    /* Split body: when QA is open, terminal panel splits coding | QA columns */
+    .panel-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+    .panel-body.qa-split { flex-direction: row; }
+    .panel-main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; position: relative; }
+
+    /* Resizer between coding panel and QA panel */
+    .qa-resizer { width: 5px; background: var(--bg-tertiary); border-left: 1px solid var(--border); border-right: 1px solid var(--border); cursor: col-resize; flex-shrink: 0; transition: background 0.15s; position: relative; }
+    .qa-resizer:hover, .qa-resizer.dragging { background: var(--qa-accent); }
+    .qa-resizer::after { content: ''; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 2px; height: 28px; background: var(--text-muted); border-radius: 1px; opacity: 0.4; }
+
+    /* QA agent — distinct lime/test-pass green identity so it never reads as "just another panel" */
+    :root { --qa-accent: #56d364; --qa-accent-dim: rgba(86, 211, 100, 0.12); --qa-accent-strong: rgba(86, 211, 100, 0.28); }
+    .qa-subpanel { display: flex; flex-direction: column; flex-shrink: 0; min-width: 240px; min-height: 180px; background: var(--bg-primary); border-left: 3px solid var(--qa-accent); box-shadow: inset 0 0 0 1px rgba(86, 211, 100, 0.08); }
+    /* When stacked (QA below coding) */
+    .panel-body:not(.qa-split) > .qa-subpanel { width: 100%; max-height: 45%; border-left: none; border-top: 3px solid var(--qa-accent); }
+    .panel-body:not(.qa-split) > .qa-resizer { display: none; }
+
+    /* Distinctive striped header so the QA panel is instantly recognizable across the grid */
+    .qa-subpanel-header { display: flex; align-items: center; justify-content: space-between; padding: 7px 10px; background: linear-gradient(135deg, rgba(86, 211, 100, 0.16) 0%, rgba(86, 211, 100, 0.06) 100%), repeating-linear-gradient(45deg, transparent 0 6px, rgba(86, 211, 100, 0.05) 6px 7px); border-bottom: 1px solid var(--qa-accent-strong); font-size: 12px; color: var(--qa-accent); font-weight: 600; flex-shrink: 0; letter-spacing: 0.3px; }
+    .qa-subpanel-status { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1; overflow: hidden; }
+    .qa-subpanel-status > span:not(:first-child) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .qa-subpanel-badge { display: inline-flex; align-items: center; padding: 1px 5px; background: var(--qa-accent); color: #0d1117; font-size: 9px; font-weight: 700; border-radius: 3px; letter-spacing: 0.5px; flex-shrink: 0; }
+    .qa-subpanel-pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--qa-accent); flex-shrink: 0; box-shadow: 0 0 0 0 var(--qa-accent); animation: qa-pulse 2.5s infinite; }
+    @keyframes qa-pulse { 0% { box-shadow: 0 0 0 0 rgba(86, 211, 100, 0.55); } 70% { box-shadow: 0 0 0 6px rgba(86, 211, 100, 0); } 100% { box-shadow: 0 0 0 0 rgba(86, 211, 100, 0); } }
+    .qa-subpanel-close { background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 0 4px; font-size: 14px; line-height: 1; flex-shrink: 0; }
     .qa-subpanel-close:hover { color: var(--text-primary); }
-    .qa-subpanel-content { flex: 1; overflow-y: auto; padding: 8px 12px; min-height: 0; }
-    .qa-subpanel-empty { color: var(--text-muted); font-size: 11px; text-align: center; padding: 16px 8px; font-style: italic; }
-    .qa-subpanel-input-wrapper { display: flex; align-items: flex-end; padding: 6px 8px; border-top: 1px solid var(--border); background: var(--bg-secondary); gap: 6px; flex-shrink: 0; }
-    .qa-subpanel-input { flex: 1; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 4px; color: var(--text-primary); padding: 4px 8px; font-size: 12px; outline: none; resize: none; font-family: inherit; line-height: 1.4; max-height: 80px; }
-    .qa-subpanel-input:focus { border-color: var(--accent); }
-    .qa-subpanel-send { background: var(--accent); border: none; color: white; cursor: pointer; padding: 4px 10px; border-radius: 4px; font-size: 11px; font-weight: 500; flex-shrink: 0; }
+
+    .qa-subpanel-content { flex: 1; overflow-y: auto; padding: 8px 12px; min-height: 0; background: linear-gradient(180deg, rgba(86, 211, 100, 0.03) 0%, transparent 60px); }
+    .qa-subpanel-empty { color: var(--text-muted); font-size: 11px; text-align: center; padding: 20px 8px; font-style: italic; }
+
+    .qa-subpanel-input-wrapper { display: flex; align-items: flex-end; padding: 6px 8px; border-top: 1px solid var(--qa-accent-strong); background: var(--qa-accent-dim); gap: 6px; flex-shrink: 0; }
+    .qa-subpanel-input { flex: 1; min-width: 0; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 4px; color: var(--text-primary); padding: 4px 8px; font-size: 12px; outline: none; resize: none; font-family: inherit; line-height: 1.4; max-height: 80px; }
+    .qa-subpanel-input:focus { border-color: var(--qa-accent); }
+    .qa-subpanel-input:disabled { opacity: 0.5; }
+    .qa-subpanel-send { background: var(--qa-accent); border: none; color: #0d1117; cursor: pointer; padding: 4px 10px; border-radius: 4px; font-size: 11px; font-weight: 600; flex-shrink: 0; }
+    .qa-subpanel-send:hover:not(:disabled) { background: #6ddb78; }
     .qa-subpanel-send:disabled { opacity: 0.4; cursor: not-allowed; }
 
     /* Empty grid slot */
@@ -1072,6 +1096,33 @@
       const [pendingImages, setPendingImages] = useState([]);
       const [qaPanelOpen, setQaPanelOpen] = useState(false);
       const [qaInput, setQaInput] = useState('');
+      const [qaPanelWidthPct, setQaPanelWidthPct] = useState(40);
+      const [qaResizing, setQaResizing] = useState(false);
+      const panelBodyRef = useRef(null);
+
+      // Drag-to-resize the QA panel split
+      useEffect(() => {
+        if (!qaResizing) return;
+        const onMove = (ev) => {
+          const el = panelBodyRef.current;
+          if (!el) return;
+          const rect = el.getBoundingClientRect();
+          const pct = ((rect.right - ev.clientX) / rect.width) * 100;
+          // Clamp 25%..70% so neither side disappears
+          setQaPanelWidthPct(Math.max(25, Math.min(70, pct)));
+        };
+        const onUp = () => setQaResizing(false);
+        window.addEventListener('mousemove', onMove);
+        window.addEventListener('mouseup', onUp);
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
+        return () => {
+          window.removeEventListener('mousemove', onMove);
+          window.removeEventListener('mouseup', onUp);
+          document.body.style.cursor = '';
+          document.body.style.userSelect = '';
+        };
+      }, [qaResizing]);
       // Search state (Feature 1)
       const [searchVisible, setSearchVisible] = useState(false);
       const [searchQuery, setSearchQuery] = useState('');
@@ -1375,10 +1426,16 @@
         files.length > 0 && e('div', { className: 'panel-notification panel-notification-files', onClick: () => onClearFileChanges(agent.id) },
           files.length + ' file' + (files.length > 1 ? 's' : '') + ' changed \u2014 click to dismiss'
         ),
-        // Drop zone overlay (Feature 3)
-        dragging && e('div', { className: 'drop-zone-active' }, e('span', null, 'Drop image here')),
-        // Chat content
+        // Body \u2014 splits into [coding | resizer | QA] when QA panel is open and panel is wide enough; stacks otherwise
         e('div', {
+          ref: panelBodyRef,
+          className: 'panel-body' + (qaPanelOpen ? ' qa-split' : ''),
+        },
+          e('div', { className: 'panel-main' },
+            // Drop zone overlay (Feature 3)
+            dragging && e('div', { className: 'drop-zone-active' }, e('span', null, 'Drop image here')),
+            // Chat content
+            e('div', {
           className: 'panel-content', ref: contentRef, onClick: handleContentClick,
           onDragOver: (ev) => { ev.preventDefault(); setDragging(true); },
           onDragEnter: (ev) => { ev.preventDefault(); setDragging(true); },
@@ -1456,51 +1513,6 @@
             )
           );
         })(),
-        // QA sub-panel \u2014 embedded QA testing agent chat (backend wiring pending)
-        qaPanelOpen && e('div', { className: 'qa-subpanel' },
-          e('div', { className: 'qa-subpanel-header' },
-            e('div', { className: 'qa-subpanel-status' },
-              e('span', { className: 'status-dot status-idle' }),
-              e('span', null, '\uD83E\uDDEA QA Testing Agent'),
-              workspace && workspace.testUrl && e('span', { style: { fontSize: 10, color: 'var(--text-muted)', fontWeight: 400, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' } }, '\u00B7 ' + workspace.testUrl)
-            ),
-            e('button', { className: 'qa-subpanel-close', onClick: () => setQaPanelOpen(false), title: 'Close QA panel' }, '\u00D7')
-          ),
-          e('div', { className: 'qa-subpanel-content' },
-            e('div', { className: 'qa-subpanel-empty' },
-              (workspace && workspace.testUrl)
-                ? 'No messages yet. Tell the QA agent what to test.'
-                : 'Set a Test URL on this workspace (left sidebar) to start chatting with the QA agent.'
-            )
-          ),
-          e('div', { className: 'qa-subpanel-input-wrapper' },
-            e('textarea', {
-              className: 'qa-subpanel-input',
-              value: qaInput,
-              onChange: (ev) => setQaInput(ev.target.value),
-              onKeyDown: (ev) => {
-                if (ev.key === 'Enter' && !ev.shiftKey) {
-                  ev.preventDefault();
-                  if (qaInput.trim() && workspace && workspace.testUrl) {
-                    // Backend wiring pending; clear input for now
-                    setQaInput('');
-                  }
-                }
-              },
-              placeholder: (workspace && workspace.testUrl)
-                ? 'Message the QA agent... (Enter to send, Shift+Enter for newline)'
-                : 'Set a Test URL first',
-              rows: 1,
-              disabled: !(workspace && workspace.testUrl),
-            }),
-            e('button', {
-              className: 'qa-subpanel-send',
-              disabled: !qaInput.trim() || !(workspace && workspace.testUrl),
-              onClick: () => { if (qaInput.trim()) setQaInput(''); },
-              title: 'Send message to QA agent',
-            }, 'Send')
-          )
-        ),
         // Input
         e('div', { className: 'panel-input-container' },
           pendingImages.length > 0 && e('div', { style: { display: 'flex', alignItems: 'center', gap: 8, padding: '4px 12px', fontSize: 11, color: 'var(--text-secondary)', flexWrap: 'wrap' } },
@@ -1530,6 +1542,63 @@
               autoFocus: true,
             }),
             e('input', { ref: fileInputRef, type: 'file', accept: 'image/*', multiple: true, style: { display: 'none' }, onChange: (ev) => { for (let i = 0; i < ev.target.files.length; i++) handleImageUpload(ev.target.files[i]); ev.target.value = ''; } })
+          )
+        )
+          ),
+          // Resizer (only meaningful when split — CSS hides it when stacked)
+          qaPanelOpen && e('div', {
+            className: 'qa-resizer' + (qaResizing ? ' dragging' : ''),
+            onMouseDown: (ev) => { ev.preventDefault(); setQaResizing(true); },
+            title: 'Drag to resize QA panel',
+          }),
+          // QA sub-panel — sibling of .panel-main inside .panel-body
+          qaPanelOpen && e('div', {
+            className: 'qa-subpanel',
+            style: { width: qaPanelWidthPct + '%', flexBasis: qaPanelWidthPct + '%' },
+          },
+            e('div', { className: 'qa-subpanel-header' },
+              e('div', { className: 'qa-subpanel-status' },
+                e('span', { className: 'qa-subpanel-pulse' }),
+                e('span', { className: 'qa-subpanel-badge' }, 'QA'),
+                e('span', null, '🧪 Testing Agent'),
+                workspace && workspace.testUrl && e('span', { style: { fontSize: 10, color: 'var(--text-muted)', fontWeight: 400, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' } }, '· ' + workspace.testUrl)
+              ),
+              e('button', { className: 'qa-subpanel-close', onClick: () => setQaPanelOpen(false), title: 'Close QA panel' }, '×')
+            ),
+            e('div', { className: 'qa-subpanel-content' },
+              e('div', { className: 'qa-subpanel-empty' },
+                (workspace && workspace.testUrl)
+                  ? 'No messages yet. Tell the QA agent what to test.'
+                  : 'Set a Test URL on this workspace (left sidebar) to start chatting with the QA agent.'
+              )
+            ),
+            e('div', { className: 'qa-subpanel-input-wrapper' },
+              e('textarea', {
+                className: 'qa-subpanel-input',
+                value: qaInput,
+                onChange: (ev) => setQaInput(ev.target.value),
+                onKeyDown: (ev) => {
+                  if (ev.key === 'Enter' && !ev.shiftKey) {
+                    ev.preventDefault();
+                    if (qaInput.trim() && workspace && workspace.testUrl) {
+                      // Backend wiring pending; clear input for now
+                      setQaInput('');
+                    }
+                  }
+                },
+                placeholder: (workspace && workspace.testUrl)
+                  ? 'Message the QA agent...'
+                  : 'Set a Test URL first',
+                rows: 1,
+                disabled: !(workspace && workspace.testUrl),
+              }),
+              e('button', {
+                className: 'qa-subpanel-send',
+                disabled: !qaInput.trim() || !(workspace && workspace.testUrl),
+                onClick: () => { if (qaInput.trim()) setQaInput(''); },
+                title: 'Send message to QA agent',
+              }, 'Send')
+            )
           )
         )
       );
