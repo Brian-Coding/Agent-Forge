@@ -54,7 +54,13 @@ function recordConsole(wsCtx, level, text) {
 
 async function ensureBrowser() {
   if (browser) return;
-  browser = await chromium.launch({ headless: true });
+  // Headed by default so the user can watch the QA agent click around in
+  // real time. slowMo paces each action enough to follow visually without
+  // making tests painfully slow. Set BROWSER_HEADLESS=1 to suppress the
+  // window (e.g. for CI or background runs).
+  const headless = process.env.BROWSER_HEADLESS === '1';
+  const slowMo = process.env.BROWSER_SLOWMO != null ? parseInt(process.env.BROWSER_SLOWMO, 10) : 250;
+  browser = await chromium.launch({ headless, slowMo });
 }
 
 async function ensureContext(workspaceId) {
