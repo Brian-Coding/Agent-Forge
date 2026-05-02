@@ -525,21 +525,39 @@ async function _sendMessageImpl(agentId: string, content: string, source?: 'qa')
 // ============== QA orchestration ==============
 
 /**
- * Build a context summary of a coding agent's conversation: 100% of user
- * messages verbatim + abbreviated assistant responses (~200 char truncation).
- * Used to ground the QA agent in what the user actually asked for.
+ * Build a context summary of a coding agent's conversation for the QA agent.
+ * Sliding window of the last QA_SUMMARY_RECENT_MSGS messages so we don't ship
+ * the entire history every test (chats often contain pasted plans, transcripts,
+ * etc. that balloon the trigger to 30KB+). User messages truncated to
+ * QA_SUMMARY_USER_CAP, assistants to QA_SUMMARY_ASSISTANT_CAP. Notes if any
+ * older context was dropped.
  */
+const QA_SUMMARY_RECENT_MSGS = 12;
+const QA_SUMMARY_USER_CAP = 1000;
+const QA_SUMMARY_ASSISTANT_CAP = 200;
+
 function buildChatSummary(agentId: string): string {
-  const msgs = messages.get(agentId) || [];
+  const allMsgs = messages.get(agentId) || [];
+  const turns = allMsgs.filter(m => m.role === 'user' || m.role === 'assistant');
+  const start = Math.max(0, turns.length - QA_SUMMARY_RECENT_MSGS);
+  const recent = turns.slice(start);
+  const omitted = start;
+
   const parts: string[] = [];
-  for (const msg of msgs) {
+  if (omitted > 0) {
+    parts.push(`(${omitted} earlier message${omitted === 1 ? '' : 's'} omitted for brevity)`);
+  }
+  for (const msg of recent) {
     if (msg.role === 'user') {
-      parts.push(`[User]: ${msg.content}`);
-    } else if (msg.role === 'assistant') {
-      const abbreviated = msg.content.length > 200
-        ? msg.content.substring(0, 200) + '...'
+      const text = msg.content.length > QA_SUMMARY_USER_CAP
+        ? msg.content.substring(0, QA_SUMMARY_USER_CAP) + `... [truncated, ${msg.content.length - QA_SUMMARY_USER_CAP} chars cut]`
         : msg.content;
-      parts.push(`[Agent]: ${abbreviated}`);
+      parts.push(`[User]: ${text}`);
+    } else {
+      const text = msg.content.length > QA_SUMMARY_ASSISTANT_CAP
+        ? msg.content.substring(0, QA_SUMMARY_ASSISTANT_CAP) + '...'
+        : msg.content;
+      parts.push(`[Agent]: ${text}`);
     }
   }
   return parts.join('\n\n');
