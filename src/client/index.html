@@ -1139,6 +1139,25 @@
       const [qaResizing, setQaResizing] = useState(false);
       const [lastQaPrompt, setLastQaPrompt] = useState('');
       const [qaShowActivity, setQaShowActivity] = useState(false);
+      const qaContentRef = useRef(null);
+
+      const scrollQaToBottom = () => {
+        const el = qaContentRef.current;
+        if (el) el.scrollTop = el.scrollHeight;
+      };
+
+      const clearQaHistory = () => {
+        if (!qaAgent) return;
+        if (confirm('Clear QA agent chat history? This wipes all prior tests and resets the conversation context.')) {
+          if (onClearHistory) onClearHistory(qaAgent.id);
+          setLastQaPrompt('');
+        }
+      };
+
+      // Auto-scroll to bottom when QA messages arrive (best-effort; user can still scroll up freely).
+      useEffect(() => {
+        scrollQaToBottom();
+      }, [qaMessages?.length]);
       const panelBodyRef = useRef(null);
 
       // QA suggestion prompts shown on empty state
@@ -1640,13 +1659,25 @@
               ),
               e('button', {
                 className: 'qa-rerun-btn',
+                disabled: !qaMessages || qaMessages.length === 0,
+                onClick: scrollQaToBottom,
+                title: 'Scroll to latest message',
+              }, '↓'),
+              e('button', {
+                className: 'qa-rerun-btn',
+                disabled: !qaAgent,
+                onClick: clearQaHistory,
+                title: qaAgent ? 'Clear QA chat history (wipes context)' : 'No QA agent yet',
+              }, 'Clear'),
+              e('button', {
+                className: 'qa-rerun-btn',
                 disabled: !lastQaPrompt || !(workspace && workspace.testUrl),
                 onClick: () => { if (lastQaPrompt) setQaInput(lastQaPrompt); },
                 title: lastQaPrompt ? 'Run last prompt again' : 'No previous test to repeat',
               }, '↻'),
               e('button', { className: 'qa-subpanel-close', onClick: () => setQaPanelOpen(false), title: 'Close QA panel' }, '×')
             ),
-            e('div', { className: 'qa-subpanel-content' },
+            e('div', { className: 'qa-subpanel-content', ref: qaContentRef },
               !(workspace && workspace.testUrl)
                 ? e('div', { className: 'qa-subpanel-empty' }, e('span', { style: { fontStyle: 'italic' } }, 'Set a Test URL on this workspace (left sidebar) to start chatting with the QA agent.'))
                 : (qaMessages && qaMessages.length > 0)
