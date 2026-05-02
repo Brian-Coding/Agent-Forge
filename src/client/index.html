@@ -405,6 +405,10 @@
     .qa-header-btn.qa-has-unread::after { content: ''; position: absolute; top: 1px; right: 1px; width: 7px; height: 7px; background: var(--qa-accent); border: 1px solid var(--bg-secondary); border-radius: 50%; box-shadow: 0 0 4px var(--qa-accent); animation: qa-pulse 2.5s infinite; }
 
     .qa-subpanel-working { padding: 8px 4px; font-size: 11px; color: var(--qa-accent); font-style: italic; text-align: center; }
+    .qa-activity-toggle { display: flex; align-items: center; gap: 8px; padding: 4px 0 8px; border-bottom: 1px dashed var(--border); margin-bottom: 8px; }
+    .qa-activity-toggle-btn { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 10px; padding: 2px 6px; border-radius: 3px; text-transform: uppercase; letter-spacing: 0.5px; }
+    .qa-activity-toggle-btn:hover { color: var(--qa-accent); background: rgba(86, 211, 100, 0.08); }
+    .qa-activity-meta { font-size: 10px; color: var(--text-muted); margin-left: auto; }
 
     /* ChatTurn styling for QA-originated messages in the coding agent's chat */
     .chat-turn[data-source="qa"] { border-left: 2px solid var(--qa-accent); padding-left: 8px; background: rgba(86, 211, 100, 0.04); }
@@ -1134,6 +1138,7 @@
       const [qaPanelWidthPct, setQaPanelWidthPct] = useState(40);
       const [qaResizing, setQaResizing] = useState(false);
       const [lastQaPrompt, setLastQaPrompt] = useState('');
+      const [qaShowActivity, setQaShowActivity] = useState(false);
       const panelBodyRef = useRef(null);
 
       // QA suggestion prompts shown on empty state
@@ -1645,17 +1650,42 @@
               !(workspace && workspace.testUrl)
                 ? e('div', { className: 'qa-subpanel-empty' }, e('span', { style: { fontStyle: 'italic' } }, 'Set a Test URL on this workspace (left sidebar) to start chatting with the QA agent.'))
                 : (qaMessages && qaMessages.length > 0)
-                  ? e(React.Fragment, null,
-                      qaMessages.map((m, i) => e(ChatTurn, {
-                        key: m.id || i,
-                        role: m.role,
-                        content: m.content,
-                        imageData: m.imageData,
-                        imageMimeType: m.imageMimeType,
-                        showToolMessages: false,
-                      })),
-                      qaStatus === 'working' && e('div', { className: 'qa-subpanel-working' }, 'QA agent is working...')
-                    )
+                  ? (() => {
+                      // Render strategy: by default surface only the last assistant turn (the report)
+                      // and a small toggle. When expanded, show all assistant turns plus user prompts
+                      // stripped to just the user's actual instruction (drops the chat-summary envelope).
+                      const lastAssistant = [...qaMessages].reverse().find(m => m.role === 'assistant');
+                      const stripUserTrigger = (text) => {
+                        const marker = '## User instruction';
+                        const idx = text.indexOf(marker);
+                        if (idx === -1) return text.length > 200 ? text.substring(0, 200) + '...' : text;
+                        return text.substring(idx + marker.length).trim();
+                      };
+                      const visibleMessages = qaShowActivity
+                        ? qaMessages.filter(m => m.role === 'user' || m.role === 'assistant')
+                        : (lastAssistant ? [lastAssistant] : []);
+                      return e(React.Fragment, null,
+                        e('div', { className: 'qa-activity-toggle' },
+                          e('button', {
+                            className: 'qa-activity-toggle-btn',
+                            onClick: () => setQaShowActivity(v => !v),
+                            title: qaShowActivity ? 'Hide intermediate steps; show only the report' : 'Show all messages from the QA agent',
+                          }, qaShowActivity ? '▴ Hide activity' : '▾ Show activity'),
+                          e('span', { className: 'qa-activity-meta' },
+                            qaMessages.filter(m => m.role === 'assistant').length + ' message' + (qaMessages.filter(m => m.role === 'assistant').length === 1 ? '' : 's')
+                          )
+                        ),
+                        visibleMessages.map((m, i) => e(ChatTurn, {
+                          key: m.id || i,
+                          role: m.role,
+                          content: m.role === 'user' ? stripUserTrigger(m.content) : m.content,
+                          imageData: m.imageData,
+                          imageMimeType: m.imageMimeType,
+                          showToolMessages: false,
+                        })),
+                        qaStatus === 'working' && e('div', { className: 'qa-subpanel-working' }, 'QA agent is working...')
+                      );
+                    })()
                   : e('div', { className: 'qa-subpanel-empty' },
                       e('div', { className: 'qa-subpanel-empty-heading' }, 'Try one of these to start'),
                       e('div', { className: 'qa-suggestions' },
