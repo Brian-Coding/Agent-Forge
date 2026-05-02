@@ -526,40 +526,55 @@ async function _sendMessageImpl(agentId: string, content: string, source?: 'qa')
 
 /**
  * Build a context summary of a coding agent's conversation for the QA agent.
- * Sliding window of the last QA_SUMMARY_RECENT_MSGS messages so we don't ship
- * the entire history every test (chats often contain pasted plans, transcripts,
- * etc. that balloon the trigger to 30KB+). User messages truncated to
- * QA_SUMMARY_USER_CAP, assistants to QA_SUMMARY_ASSISTANT_CAP. Notes if any
- * older context was dropped.
+ *
+ * Goal: enough context for the QA agent to know what was recently worked on,
+ * without shipping the entire chat (which can balloon to 30KB+ when the user
+ * has pasted plans, transcripts, etc.).
+ *
+ * Strategy:
+ *   1. Sliding window of the last QA_SUMMARY_RECENT_MSGS messages.
+ *   2. Per-message caps — generous enough that assistant code-change
+ *      descriptions survive intact, but capped so a single huge paste
+ *      can't dominate.
+ *   3. Total-budget safety net — if the windowed/capped output still
+ *      exceeds QA_SUMMARY_MAX_TOTAL, drop oldest messages until under.
+ *   4. Note any trimming at the top so the QA agent knows context is partial.
  */
-const QA_SUMMARY_RECENT_MSGS = 12;
-const QA_SUMMARY_USER_CAP = 1000;
-const QA_SUMMARY_ASSISTANT_CAP = 200;
+const QA_SUMMARY_RECENT_MSGS = 15;
+const QA_SUMMARY_USER_CAP = 2000;
+const QA_SUMMARY_ASSISTANT_CAP = 1000;
+const QA_SUMMARY_MAX_TOTAL = 15000;
 
 function buildChatSummary(agentId: string): string {
   const allMsgs = messages.get(agentId) || [];
   const turns = allMsgs.filter(m => m.role === 'user' || m.role === 'assistant');
   const start = Math.max(0, turns.length - QA_SUMMARY_RECENT_MSGS);
   const recent = turns.slice(start);
-  const omitted = start;
+  let omitted = start;
+
+  // Per-message caps with truncation markers.
+  const formatted = recent.map(msg => {
+    const cap = msg.role === 'user' ? QA_SUMMARY_USER_CAP : QA_SUMMARY_ASSISTANT_CAP;
+    const role = msg.role === 'user' ? 'User' : 'Agent';
+    const text = msg.content.length > cap
+      ? msg.content.substring(0, cap) + `... [truncated, ${msg.content.length - cap} chars cut]`
+      : msg.content;
+    return `[${role}]: ${text}`;
+  });
+
+  // Total-budget walk: if still oversized, drop oldest until under.
+  let totalLen = formatted.reduce((sum, t) => sum + t.length + 2, 0); // +2 for join separator
+  while (totalLen > QA_SUMMARY_MAX_TOTAL && formatted.length > 1) {
+    const dropped = formatted.shift()!;
+    totalLen -= dropped.length + 2;
+    omitted++;
+  }
 
   const parts: string[] = [];
   if (omitted > 0) {
     parts.push(`(${omitted} earlier message${omitted === 1 ? '' : 's'} omitted for brevity)`);
   }
-  for (const msg of recent) {
-    if (msg.role === 'user') {
-      const text = msg.content.length > QA_SUMMARY_USER_CAP
-        ? msg.content.substring(0, QA_SUMMARY_USER_CAP) + `... [truncated, ${msg.content.length - QA_SUMMARY_USER_CAP} chars cut]`
-        : msg.content;
-      parts.push(`[User]: ${text}`);
-    } else {
-      const text = msg.content.length > QA_SUMMARY_ASSISTANT_CAP
-        ? msg.content.substring(0, QA_SUMMARY_ASSISTANT_CAP) + '...'
-        : msg.content;
-      parts.push(`[Agent]: ${text}`);
-    }
-  }
+  parts.push(...formatted);
   return parts.join('\n\n');
 }
 
