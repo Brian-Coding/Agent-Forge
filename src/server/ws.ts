@@ -66,8 +66,11 @@ async function handleMessage(ws: ServerWebSocket<unknown>, message: ClientMessag
 
     case 'send_qa_message': {
       try {
+        console.log(`[qa] send_qa_message ws=${message.workspaceId} src=${message.sourceAgentId} content="${message.content.slice(0, 80)}..."`);
         await agentService.sendQaMessage(message.workspaceId, message.sourceAgentId, message.content);
+        console.log(`[qa] send_qa_message dispatched ok`);
       } catch (e: any) {
+        console.error(`[qa] send_qa_message failed:`, e);
         sendTo(ws, { type: 'error', message: e?.message || 'QA send failed' });
       }
       break;
