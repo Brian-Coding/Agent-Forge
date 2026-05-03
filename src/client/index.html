@@ -432,6 +432,12 @@
     .qa-inline-shot { max-width: 100%; border: 1px solid var(--qa-accent-strong); border-radius: 4px; cursor: zoom-in; }
     .qa-inline-shot-caption { font-size: 10px; color: var(--text-muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-all; }
 
+    /* Verdict-change note (shown under the pill row when a previous run exists) */
+    .qa-verdict-change { display: inline-block; font-size: 10px; padding: 1px 6px; border-radius: 3px; margin-bottom: 8px; font-weight: 500; letter-spacing: 0.3px; }
+    .qa-verdict-change-same { background: var(--bg-tertiary); color: var(--text-muted); }
+    .qa-verdict-change-better { background: rgba(86, 211, 100, 0.12); color: var(--qa-accent); }
+    .qa-verdict-change-worse { background: rgba(248, 81, 73, 0.12); color: var(--error); }
+
     /* Continue-testing follow-up buttons under a completed report */
     .qa-continue-row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 12px; padding-top: 8px; border-top: 1px dashed var(--border); }
     .qa-continue-btn { background: var(--bg-secondary); border: 1px solid var(--border); border-left: 2px solid var(--qa-accent); color: var(--text-secondary); cursor: pointer; padding: 5px 10px; border-radius: 4px; font-size: 11px; transition: all 0.15s; }
@@ -1850,6 +1856,17 @@
                       // and a small toggle. When expanded, show all assistant turns plus user prompts
                       // stripped to just the user's actual instruction (drops the chat-summary envelope).
                       const lastAssistant = [...qaMessages].reverse().find(m => m.role === 'assistant');
+                      // Find the assistant message before the most recent — used for verdict-change indicator.
+                      const prevAssistant = (() => {
+                        const seen = [];
+                        for (let i = qaMessages.length - 1; i >= 0; i--) {
+                          if (qaMessages[i].role === 'assistant') {
+                            seen.push(qaMessages[i]);
+                            if (seen.length === 2) return qaMessages[i];
+                          }
+                        }
+                        return null;
+                      })();
                       const stripUserTrigger = (text) => {
                         const marker = '## User instruction';
                         const idx = text.indexOf(marker);
@@ -1875,12 +1892,28 @@
                       const renderReport = () => {
                         if (!lastAssistant) return null;
                         const { verdict, body } = parseVerdict(lastAssistant.content);
+                        const prevVerdict = prevAssistant ? parseVerdict(prevAssistant.content).verdict : null;
                         // Strip any [Using tool: ...] annotations from the body so they don't render literally.
                         const cleanBody = filterToolMessages(body, false);
                         const isIdle = qaStatus === 'idle';
+                        // Verdict-change indicator
+                        let verdictChangeNote = null;
+                        if (verdict && prevVerdict) {
+                          if (verdict.kind === prevVerdict.kind) {
+                            verdictChangeNote = e('span', { className: 'qa-verdict-change qa-verdict-change-same' },
+                              '↔ same as last run'
+                            );
+                          } else {
+                            const direction = (prevVerdict.kind === 'fail' || (prevVerdict.kind === 'warn' && verdict.kind === 'pass')) ? 'better' : 'worse';
+                            verdictChangeNote = e('span', { className: 'qa-verdict-change qa-verdict-change-' + direction },
+                              (direction === 'better' ? '↗ improved: ' : '↘ regressed: ') + prevVerdict.kind.toUpperCase() + ' → ' + verdict.kind.toUpperCase()
+                            );
+                          }
+                        }
                         return e('div', { className: 'chat-turn chat-turn-assistant' },
                           e('div', { className: 'chat-turn-role' }, 'QA Tester'),
                           renderQaVerdictRow(verdict),
+                          verdictChangeNote,
                           e(MarkdownContent, { content: cleanBody }),
                           screenshotPaths.length > 0 && e('div', { className: 'qa-inline-shots' },
                             screenshotPaths.map((p, i) => e('div', { key: i },
