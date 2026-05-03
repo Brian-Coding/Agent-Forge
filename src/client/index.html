@@ -1133,7 +1133,20 @@
       const [showToolMessages, setShowToolMessages] = useState(false);
       const [dragging, setDragging] = useState(false);
       const [pendingImages, setPendingImages] = useState([]);
-      const [qaPanelOpen, setQaPanelOpen] = useState(false);
+      // QA panel open/close persists per-agent across page reloads via localStorage
+      const qaOpenKey = agent ? `qa-panel-open-${agent.id}` : null;
+      const [qaPanelOpen, setQaPanelOpen] = useState(() => {
+        if (!qaOpenKey) return false;
+        try { return localStorage.getItem(qaOpenKey) === 'true'; } catch { return false; }
+      });
+      useEffect(() => {
+        if (!qaOpenKey) return;
+        try {
+          if (qaPanelOpen) localStorage.setItem(qaOpenKey, 'true');
+          else localStorage.removeItem(qaOpenKey);
+        } catch {}
+      }, [qaPanelOpen, qaOpenKey]);
+
       const [qaInput, setQaInput] = useState('');
       const [qaPanelWidthPct, setQaPanelWidthPct] = useState(40);
       const [qaResizing, setQaResizing] = useState(false);
