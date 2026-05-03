@@ -1275,6 +1275,7 @@
       // QA suggestion prompts shown on empty state
       const QA_SUGGESTIONS = [
         { title: 'Test most recent development', desc: 'Review recent chat history and test the latest changes', prompt: 'Test the most recent changes I just made. Review my recent conversation with the coding agent for context, then navigate to the test URL, screenshot the relevant areas, test any new interactions, and report any issues you find.' },
+        { title: 'Explore everything', desc: 'Walk through the entire app, click every nav element, screenshot each state', prompt: 'Explore the entire app exhaustively. Navigate to the test URL, then visit every top-level navigation element (tabs, primary buttons, menu items) in turn. For each: click it, wait for the page to settle, take a screenshot, and briefly describe what you see. Within each major area, also exercise at least one secondary interactive element (sub-tab, button, form). Report a comprehensive summary of every distinct state you observed, with screenshot references.' },
         { title: 'Take a screenshot', desc: 'Quick visual check of the current page', prompt: 'Navigate to the test URL, take a full-page screenshot, and describe what you see. Highlight anything that looks broken or unusual.' },
         { title: 'Check console for errors', desc: 'Inspect runtime errors and warnings', prompt: 'Navigate to the test URL, wait for the page to load, then check the browser console for any errors or warnings. Report what you find with screenshots if helpful.' },
       ];
