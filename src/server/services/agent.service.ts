@@ -161,7 +161,26 @@ Then structure the rest of the report as:
 
 Reference screenshot file paths in your report (e.g. "see screenshot at /path/to/file.png"). The system will automatically attach those screenshots as inline images in the report sent back to the coding agent.
 
-Keep reports concise and actionable.`;
+Keep reports concise and actionable.
+
+============================================================
+## FINAL INSTRUCTION — VERDICT LINE IS NOT OPTIONAL
+============================================================
+
+Your report MUST start with EXACTLY one of these three lines, and nothing before it (no "QA Report" markdown header, no preamble, no introductory paragraph):
+
+  ✅ PASS — short summary
+  ⚠️ WARNINGS — short summary
+  ❌ FAIL — short summary
+
+Concrete example of a complete report's first 4 lines:
+
+  ⚠️ WARNINGS — 120 console warnings + 2 ergonomic issues found
+
+  ## Summary
+  Explored the GALAXY tab, opened Save/Load and Fleet Templates modals...
+
+If you skip this line, the system has to synthesize one for you, which is strictly worse than what you would have written. Apply the verdict resolution rules above (FAIL > WARNINGS > PASS, first match wins) and emit the line. THIS IS THE ONLY THING THE USER SCANS AT FIRST GLANCE.`;
 
 // Read from a stream reader with a timeout
 async function readWithTimeout<T>(reader: ReadableStreamDefaultReader<T>, ms: number): Promise<{ done: boolean; value?: T }> {
@@ -676,6 +695,38 @@ async function readImageAsBase64(filePath: string): Promise<string | null> {
  * to the source coding agent, persists screenshot messages, and broadcasts
  * qa_results_ready.
  */
+/**
+ * Infer a verdict from a finished report's body when the agent didn't emit one.
+ * Heuristics in priority order (FAIL > WARN > PASS, first match wins):
+ *   - FAIL: explicit failure markers (page didn't load, JS error, uncaught exception, broken)
+ *   - WARN: any "issues found" section with content, mentions of warnings/concerns,
+ *           console warning counts, ergonomic concerns, bugs/spam/etc.
+ *   - PASS: nothing matched
+ */
+function inferVerdictFromReport(text: string): { kind: 'pass' | 'warn' | 'fail'; summary: string } {
+  if (
+    /page (?:didn'?t|did not|failed to) load/i.test(text) ||
+    /uncaught (?:exception|error)/i.test(text) ||
+    /threw (?:an?\s+)?(?:error|exception)/i.test(text) ||
+    /critical (?:error|failure|issue)/i.test(text) ||
+    /\bcompletely broken\b/i.test(text) ||
+    /\bcould not load\b/i.test(text)
+  ) {
+    return { kind: 'fail', summary: 'inferred from report content (no verdict line emitted)' };
+  }
+  if (
+    (/issues?\s+found/i.test(text) && !/no\s+issues?\s+(?:found|to\s+report)/i.test(text)) ||
+    /\d+\+?\s*(?:console\s+)?warnings?/i.test(text) ||
+    /console\s+(?:warning|warn)/i.test(text) ||
+    /ergonomic\s+(?:concern|issue|problem)/i.test(text) ||
+    (/\b(?:bug|broken|spam|noise|concern|problem|misleading|hostile)\b/i.test(text) &&
+     !/(?:no|nothing|zero)\s+(?:bug|broken|concerns?|problems?)\b/i.test(text))
+  ) {
+    return { kind: 'warn', summary: 'inferred from report content (no verdict line emitted)' };
+  }
+  return { kind: 'pass', summary: 'inferred from report content (no verdict line emitted)' };
+}
+
 async function _processQaIdle(qaAgentId: string): Promise<void> {
   const queue = pendingQaTests.get(qaAgentId);
   if (!queue || queue.length === 0) return;
@@ -713,6 +764,16 @@ async function _processQaIdle(qaAgentId: string): Promise<void> {
       ``,
       reportText,
     ].join('\n');
+  }
+  // Agent finished cleanly but forgot the verdict line — infer from content
+  // and prepend it so the pill still renders. Triggers when the agent emits
+  // a structured report but skips the required leading verdict.
+  else if (!hasVerdict) {
+    const inferred = inferVerdictFromReport(reportText);
+    const emoji = inferred.kind === 'pass' ? '✅' : inferred.kind === 'warn' ? '⚠️' : '❌';
+    const label = inferred.kind === 'pass' ? 'PASS' : inferred.kind === 'warn' ? 'WARNINGS' : 'FAIL';
+    reportText = `${emoji} ${label} — ${inferred.summary}\n\n${reportText}`;
+    console.log(`[qa] verdict inferred for ${qaAgentId}: ${label}`);
   }
 
   // 1) Send the report into the source coding agent's chat as a real turn,
