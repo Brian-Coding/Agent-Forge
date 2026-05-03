@@ -481,6 +481,10 @@
     .qa-rerun-btn:hover:not(:disabled) { background: var(--qa-accent); color: #0d1117; }
     .qa-rerun-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 
+    /* Abort-test button — only visible when a test is in flight */
+    .qa-abort-btn { background: rgba(248, 81, 73, 0.15); border: 1px solid rgba(248, 81, 73, 0.5); color: var(--error); cursor: pointer; padding: 1px 8px; border-radius: 3px; font-size: 11px; font-weight: 600; flex-shrink: 0; transition: all 0.15s; line-height: 1; }
+    .qa-abort-btn:hover { background: var(--error); color: white; }
+
     .qa-subpanel-input-wrapper { display: flex; align-items: flex-end; padding: 6px 8px; border-top: 1px solid var(--qa-accent-strong); background: var(--qa-accent-dim); gap: 6px; flex-shrink: 0; }
     .qa-subpanel-input { flex: 1; min-width: 0; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 4px; color: var(--text-primary); padding: 4px 8px; font-size: 12px; outline: none; resize: none; font-family: inherit; line-height: 1.4; max-height: 80px; }
     .qa-subpanel-input:focus { border-color: var(--qa-accent); }
@@ -803,6 +807,7 @@
           sendRaw({ type: 'create_agent', name, cwd, referencePaths, systemPrompt, workspaceId });
         },
         sendQaMessage: (workspaceId, sourceAgentId, content) => sendRaw({ type: 'send_qa_message', workspaceId, sourceAgentId, content }),
+        abortQaTest: (workspaceId) => sendRaw({ type: 'abort_qa_test', workspaceId }),
         clearQaUnread: (sourceAgentId) => setQaUnread(prev => { if (!prev[sourceAgentId]) return prev; const { [sourceAgentId]: _, ...rest } = prev; return rest; }),
         sendMessage: (agentId, content) => {
           const agent = agentsRef.current.find(a => a.id === agentId);
@@ -1203,7 +1208,7 @@
     });
 
     // Terminal Panel
-    function TerminalPanel({ agent, messages, liveOutput, queuedMessages, fileChanges, thinkingOutput, statusStartTime, tokenUsage, terminals, terminalOutput, workspace, qaAgent, qaMessages, qaTokenUsage, qaHasUnread, onQaSend, onClearQaUnread, onSendMessage, onSendImage, onSendImages, onStop, onClearHistory, onClearFileChanges, onMinimize, onMaximize, isMaximized, onFocus, isFocused, onCreateTerminal, onKillTerminal, isLocked, onToggleLock, isDragging, isDragOver, onDragStart, onDragEnd, onDragOver, onDragLeave, onDrop }) {
+    function TerminalPanel({ agent, messages, liveOutput, queuedMessages, fileChanges, thinkingOutput, statusStartTime, tokenUsage, terminals, terminalOutput, workspace, qaAgent, qaMessages, qaTokenUsage, qaHasUnread, onQaSend, onQaAbort, onClearQaUnread, onSendMessage, onSendImage, onSendImages, onStop, onClearHistory, onClearFileChanges, onMinimize, onMaximize, isMaximized, onFocus, isFocused, onCreateTerminal, onKillTerminal, isLocked, onToggleLock, isDragging, isDragOver, onDragStart, onDragEnd, onDragOver, onDragLeave, onDrop }) {
       const [input, setInput] = useState('');
       const [inputHistory, setInputHistory] = useState([]);
       const [historyIdx, setHistoryIdx] = useState(-1);
@@ -1788,6 +1793,11 @@
                 onClick: () => { if (lastQaPrompt) setQaInput(lastQaPrompt); },
                 title: lastQaPrompt ? 'Run last prompt again' : 'No previous test to repeat',
               }, '↻'),
+              (qaStatus === 'working' || qaStatus === 'thinking') && e('button', {
+                className: 'qa-abort-btn',
+                onClick: () => { if (workspace && onQaAbort) onQaAbort(workspace.id); },
+                title: 'Abort the in-flight QA test (partial report will be relayed)',
+              }, '◼ Abort'),
               e('button', { className: 'qa-subpanel-close', onClick: () => setQaPanelOpen(false), title: 'Close QA panel' }, '×')
             ),
             qaHasStats && e('div', { className: 'qa-subpanel-stats' },
@@ -3037,6 +3047,7 @@
                   qaTokenUsage: activeWorkspace && activeWorkspace.qaAgentId ? tokenUsage[activeWorkspace.qaAgentId] : null,
                   qaHasUnread: !!ws.qaUnread[agent.id],
                   onQaSend: ws.sendQaMessage,
+                  onQaAbort: ws.abortQaTest,
                   onClearQaUnread: ws.clearQaUnread,
                   onSendMessage: (content) => ws.sendMessage(agent.id, content),
                   onSendImage: ws.sendImage,
@@ -3087,6 +3098,7 @@
                   qaTokenUsage: activeWorkspace && activeWorkspace.qaAgentId ? tokenUsage[activeWorkspace.qaAgentId] : null,
                   qaHasUnread: !!ws.qaUnread[agent.id],
                   onQaSend: ws.sendQaMessage,
+                  onQaAbort: ws.abortQaTest,
                   onClearQaUnread: ws.clearQaUnread,
                   onSendMessage: (content) => ws.sendMessage(agent.id, content),
                   onSendImage: ws.sendImage,

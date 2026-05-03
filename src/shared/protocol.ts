@@ -119,6 +119,7 @@ export type ClientMessage =
   | { type: 'set_active_workspace'; id: string }
   // QA testing
   | { type: 'send_qa_message'; workspaceId: string; sourceAgentId: string; content: string }
+  | { type: 'abort_qa_test'; workspaceId: string }
   // Terminals
   | { type: 'create_terminal'; agentId: string; command: string }
   | { type: 'kill_terminal'; id: string }

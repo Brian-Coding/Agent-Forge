@@ -76,6 +76,20 @@ async function handleMessage(ws: ServerWebSocket<unknown>, message: ClientMessag
       break;
     }
 
+    case 'abort_qa_test': {
+      try {
+        const wsInfo = workspaceService.get(message.workspaceId);
+        if (!wsInfo) throw new Error('Workspace not found');
+        if (!wsInfo.qaAgentId) throw new Error('No QA agent provisioned');
+        console.log(`[qa] abort_qa_test ws=${message.workspaceId} qa=${wsInfo.qaAgentId}`);
+        await agentService.stopAgent(wsInfo.qaAgentId);
+      } catch (e: any) {
+        console.error(`[qa] abort_qa_test failed:`, e);
+        sendTo(ws, { type: 'error', message: e?.message || 'QA abort failed' });
+      }
+      break;
+    }
+
     case 'stop_agent': {
       const success = await agentService.stopAgent(message.agentId);
       if (!success) {

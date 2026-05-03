@@ -715,6 +715,14 @@ async function _stopAgentImpl(agentId: string): Promise<boolean> {
   await documentService.releaseLocksForAgent(agentId);
   agent.info.status = 'idle';
   broadcast({ type: 'agent_updated', agent: agent.info });
+
+  // If a QA test was in flight against this agent, relay the partial report so
+  // the user sees what got captured before the abort. Otherwise the pending
+  // test would orphan and the source coding agent would never hear back.
+  if (pendingQaTests.has(agentId)) {
+    _processQaIdle(agentId).catch(e => console.error(`QA partial relay failed for ${agentId}:`, e));
+  }
+
   return true;
 }
 
