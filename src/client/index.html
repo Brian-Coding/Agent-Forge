@@ -432,6 +432,11 @@
     .qa-inline-shot { max-width: 100%; border: 1px solid var(--qa-accent-strong); border-radius: 4px; cursor: zoom-in; }
     .qa-inline-shot-caption { font-size: 10px; color: var(--text-muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-all; }
 
+    /* Continue-testing follow-up buttons under a completed report */
+    .qa-continue-row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 12px; padding-top: 8px; border-top: 1px dashed var(--border); }
+    .qa-continue-btn { background: var(--bg-secondary); border: 1px solid var(--border); border-left: 2px solid var(--qa-accent); color: var(--text-secondary); cursor: pointer; padding: 5px 10px; border-radius: 4px; font-size: 11px; transition: all 0.15s; }
+    .qa-continue-btn:hover { background: rgba(86, 211, 100, 0.08); border-color: var(--qa-accent); color: var(--text-primary); }
+
     /* Live-streaming screenshots strip during in-flight tests */
     .qa-live-shots { padding: 6px 0 10px; border-bottom: 1px dashed var(--qa-accent-strong); margin-bottom: 8px; }
     .qa-live-shots-heading { font-size: 10px; color: var(--error); text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; margin-bottom: 6px; }
@@ -1872,6 +1877,7 @@
                         const { verdict, body } = parseVerdict(lastAssistant.content);
                         // Strip any [Using tool: ...] annotations from the body so they don't render literally.
                         const cleanBody = filterToolMessages(body, false);
+                        const isIdle = qaStatus === 'idle';
                         return e('div', { className: 'chat-turn chat-turn-assistant' },
                           e('div', { className: 'chat-turn-role' }, 'QA Tester'),
                           renderQaVerdictRow(verdict),
@@ -1886,6 +1892,19 @@
                               }),
                               e('div', { className: 'qa-inline-shot-caption' }, p)
                             ))
+                          ),
+                          // Continue-testing nudge — only after a completed test
+                          isIdle && e('div', { className: 'qa-continue-row' },
+                            e('button', {
+                              className: 'qa-continue-btn',
+                              onClick: () => setQaInput('Building on what you just tested, dig deeper. Look for edge cases I missed, click less obvious elements, check error states, exercise interactive elements you skipped, and report anything new you find. Do not re-do the same checks you already covered.'),
+                              title: 'Load a follow-up prompt that continues from this test’s context',
+                            }, '↳ Continue testing'),
+                            e('button', {
+                              className: 'qa-continue-btn',
+                              onClick: () => setQaInput('Take a fresh screenshot of the current page state and tell me what changed, if anything, since the last screenshot you reported.'),
+                              title: 'Re-screenshot and diff against the previous state',
+                            }, '↻ Re-check current state')
                           )
                         );
                       };
