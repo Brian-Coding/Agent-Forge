@@ -1103,13 +1103,36 @@
     }
 
     // Chat Turn (memoized for performance)
+    // Parse a verdict header off the start of a QA report. Returns { verdict, body }.
+    function parseQaVerdict(text) {
+      if (!text) return { verdict: null, body: text || '' };
+      const m = text.match(/^\s*(\u2705\s*PASS|\u26A0\uFE0F\s*WARNINGS?|\u274C\s*FAIL)\s*[\u2014:\-]?\s*([^\n]*)/i);
+      if (!m) return { verdict: null, body: text };
+      const raw = m[1].toUpperCase();
+      const kind = raw.includes('PASS') ? 'pass' : raw.includes('FAIL') ? 'fail' : 'warn';
+      const summary = m[2].trim();
+      const body = text.substring(m[0].length).replace(/^\n+/, '');
+      return { verdict: { kind, summary, raw: m[1].trim() }, body };
+    }
+
     const ChatTurn = React.memo(function ChatTurn({ role, content, isStreaming, imageData, imageMimeType, showToolMessages, searchQuery, showRetry, onRetry, source }) {
       const [copied, setCopied] = useState(false);
       const isQa = source === 'qa';
       const roleLabels = { user: isQa ? 'QA Tester' : 'You', assistant: 'Claude', system: 'System' };
       const turnClass = isStreaming ? 'chat-turn chat-turn-streaming' : 'chat-turn chat-turn-' + role;
-      const displayContent = (role === 'assistant' || isStreaming) ? filterToolMessages(content, showToolMessages) : content;
-      const hiddenCount = (role === 'assistant' || isStreaming) && !showToolMessages ? countToolMessages(content) : 0;
+      // Filter [Using tool: ...] annotations for assistant messages AND for QA-source
+      // messages regardless of role (since QA reports are relayed as role=user).
+      const shouldFilterTools = role === 'assistant' || isStreaming || isQa;
+      let displayContent = shouldFilterTools ? filterToolMessages(content, showToolMessages) : content;
+      const hiddenCount = shouldFilterTools && !showToolMessages ? countToolMessages(content) : 0;
+
+      // For QA messages, peel the verdict header off the top so it can render as a pill.
+      let verdict = null;
+      if (isQa) {
+        const parsed = parseQaVerdict(displayContent);
+        verdict = parsed.verdict;
+        displayContent = parsed.body;
+      }
 
       const handleCopy = () => {
         navigator.clipboard.writeText(content);
@@ -1117,20 +1140,30 @@
         setTimeout(() => setCopied(false), 1500);
       };
 
+      // Render the body as markdown for QA messages too, so the report's headings / lists
+      // / code blocks come out nicely (regular user messages stay as plain text).
+      const renderBody = () => {
+        if (isQa || (role === 'assistant' && !isStreaming)) {
+          return e(React.Fragment, null,
+            e(MarkdownContent, { content: displayContent, searchQuery }),
+            hiddenCount > 0 && e('div', { className: 'tool-hidden-count' }, hiddenCount + ' tool call' + (hiddenCount > 1 ? 's' : '') + ' hidden')
+          );
+        }
+        return e('div', { className: 'chat-turn-content' },
+          searchQuery && !isStreaming ? highlightText(displayContent, searchQuery) : displayContent,
+          isStreaming && e('span', { className: 'cursor' }),
+          isStreaming && hiddenCount > 0 && e('div', { className: 'tool-hidden-count' }, hiddenCount + ' tool call' + (hiddenCount > 1 ? 's' : '') + ' hidden')
+        );
+      };
+
       return e('div', { className: turnClass, 'data-source': source || undefined },
         e('button', { className: 'copy-msg-btn', onClick: handleCopy }, copied ? 'Copied!' : 'Copy'),
         e('div', { className: 'chat-turn-role' }, roleLabels[role] || role),
+        verdict && e('div', { className: 'qa-verdict qa-verdict-' + verdict.kind },
+          verdict.raw + (verdict.summary ? ' \u2014 ' + verdict.summary : '')
+        ),
         imageData && e('img', { className: 'chat-image', src: 'data:' + (imageMimeType || 'image/png') + ';base64,' + imageData, alt: 'Uploaded image', onClick: () => window.open('data:' + (imageMimeType || 'image/png') + ';base64,' + imageData) }),
-        role === 'assistant' && !isStreaming
-          ? e(React.Fragment, null,
-              e(MarkdownContent, { content: displayContent, searchQuery }),
-              hiddenCount > 0 && e('div', { className: 'tool-hidden-count' }, hiddenCount + ' tool call' + (hiddenCount > 1 ? 's' : '') + ' hidden')
-            )
-          : e('div', { className: 'chat-turn-content' },
-              searchQuery && !isStreaming ? highlightText(displayContent, searchQuery) : displayContent,
-              isStreaming && e('span', { className: 'cursor' }),
-              isStreaming && hiddenCount > 0 && e('div', { className: 'tool-hidden-count' }, hiddenCount + ' tool call' + (hiddenCount > 1 ? 's' : '') + ' hidden')
-            ),
+        renderBody(),
         showRetry && onRetry && e('button', { className: 'retry-btn', onClick: onRetry }, '\u21BB Retry')
       );
     }, (prev, next) => {
