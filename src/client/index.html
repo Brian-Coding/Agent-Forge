@@ -1199,7 +1199,7 @@
     });
 
     // Terminal Panel
-    function TerminalPanel({ agent, messages, liveOutput, queuedMessages, fileChanges, thinkingOutput, statusStartTime, tokenUsage, terminals, terminalOutput, workspace, qaAgent, qaMessages, qaHasUnread, onQaSend, onClearQaUnread, onSendMessage, onSendImage, onSendImages, onStop, onClearHistory, onClearFileChanges, onMinimize, onMaximize, isMaximized, onFocus, isFocused, onCreateTerminal, onKillTerminal, isLocked, onToggleLock, isDragging, isDragOver, onDragStart, onDragEnd, onDragOver, onDragLeave, onDrop }) {
+    function TerminalPanel({ agent, messages, liveOutput, queuedMessages, fileChanges, thinkingOutput, statusStartTime, tokenUsage, terminals, terminalOutput, workspace, qaAgent, qaMessages, qaTokenUsage, qaHasUnread, onQaSend, onClearQaUnread, onSendMessage, onSendImage, onSendImages, onStop, onClearHistory, onClearFileChanges, onMinimize, onMaximize, isMaximized, onFocus, isFocused, onCreateTerminal, onKillTerminal, isLocked, onToggleLock, isDragging, isDragOver, onDragStart, onDragEnd, onDragOver, onDragLeave, onDrop }) {
       const [input, setInput] = useState('');
       const [inputHistory, setInputHistory] = useState([]);
       const [historyIdx, setHistoryIdx] = useState(-1);
@@ -1805,7 +1805,7 @@
                         const s = Math.round((ms % 60000) / 1000);
                         return m + 'm ' + s + 's';
                       };
-                      const usage = qaAgent ? tokenUsage[qaAgent.id] : null;
+                      const usage = qaTokenUsage || null;
                       const fmtTokens = (n) => n >= 1000 ? Math.round(n / 100) / 10 + 'k' : String(n);
                       const fmtCost = (c) => c < 0.01 ? '<$0.01' : '$' + c.toFixed(2);
 
@@ -3029,6 +3029,7 @@
                   workspace: activeWorkspace,
                   qaAgent: activeWorkspace && activeWorkspace.qaAgentId ? agents.find(a => a.id === activeWorkspace.qaAgentId) : null,
                   qaMessages: activeWorkspace && activeWorkspace.qaAgentId ? (messages[activeWorkspace.qaAgentId] || []) : [],
+                  qaTokenUsage: activeWorkspace && activeWorkspace.qaAgentId ? tokenUsage[activeWorkspace.qaAgentId] : null,
                   qaHasUnread: !!ws.qaUnread[agent.id],
                   onQaSend: ws.sendQaMessage,
                   onClearQaUnread: ws.clearQaUnread,
@@ -3078,6 +3079,7 @@
                   workspace: activeWorkspace,
                   qaAgent: activeWorkspace && activeWorkspace.qaAgentId ? agents.find(a => a.id === activeWorkspace.qaAgentId) : null,
                   qaMessages: activeWorkspace && activeWorkspace.qaAgentId ? (messages[activeWorkspace.qaAgentId] || []) : [],
+                  qaTokenUsage: activeWorkspace && activeWorkspace.qaAgentId ? tokenUsage[activeWorkspace.qaAgentId] : null,
                   qaHasUnread: !!ws.qaUnread[agent.id],
                   onQaSend: ws.sendQaMessage,
                   onClearQaUnread: ws.clearQaUnread,
