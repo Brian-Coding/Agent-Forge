@@ -432,6 +432,13 @@
     .qa-inline-shot { max-width: 100%; border: 1px solid var(--qa-accent-strong); border-radius: 4px; cursor: zoom-in; }
     .qa-inline-shot-caption { font-size: 10px; color: var(--text-muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-all; }
 
+    /* Live-streaming screenshots strip during in-flight tests */
+    .qa-live-shots { padding: 6px 0 10px; border-bottom: 1px dashed var(--qa-accent-strong); margin-bottom: 8px; }
+    .qa-live-shots-heading { font-size: 10px; color: var(--error); text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; margin-bottom: 6px; }
+    .qa-live-shots-row { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; }
+    .qa-live-shot { height: 80px; width: auto; border: 1px solid var(--qa-accent-strong); border-radius: 3px; cursor: zoom-in; flex-shrink: 0; }
+    .qa-live-shot:hover { border-color: var(--qa-accent); }
+
     /* Split body: when QA is open, terminal panel splits coding | QA columns */
     .panel-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
     .panel-body.qa-split { flex-direction: row; }
@@ -597,6 +604,7 @@
       const [terminalOutput, setTerminalOutput] = useState({});
       const [errorToasts, setErrorToasts] = useState([]);
       const [qaUnread, setQaUnread] = useState({}); // sourceAgentId -> true when QA results arrived for that agent
+      const [qaLiveShots, setQaLiveShots] = useState({}); // workspaceId -> [{path, timestamp}]
       const wsRef = useRef(null);
       const agentsRef = useRef([]);
       const queueRef = useRef({});
@@ -764,6 +772,15 @@
                 break;
               case 'qa_results_ready':
                 setQaUnread(prev => ({ ...prev, [msg.sourceAgentId]: true }));
+                // Clear the live-shots accumulator for this workspace since the report
+                // (with embedded screenshots) is the canonical view from now on.
+                setQaLiveShots(prev => { const { [msg.workspaceId]: _, ...rest } = prev; return rest; });
+                break;
+              case 'qa_screenshot_taken':
+                setQaLiveShots(prev => ({
+                  ...prev,
+                  [msg.workspaceId]: [...(prev[msg.workspaceId] || []), { path: msg.path, timestamp: msg.timestamp }],
+                }));
                 break;
               // Terminals
               case 'terminals_list':
@@ -802,7 +819,7 @@
       }, [drainQueue, sendRaw]);
 
       return {
-        connected, agents, messages, liveOutput, queued, sharedContext, fileChanges, thinkingOutput, notes, documents, settings, workspaces, statusStartTimes, tokenUsage, terminals, terminalOutput, errorToasts, qaUnread,
+        connected, agents, messages, liveOutput, queued, sharedContext, fileChanges, thinkingOutput, notes, documents, settings, workspaces, statusStartTimes, tokenUsage, terminals, terminalOutput, errorToasts, qaUnread, qaLiveShots,
         createAgent: (name, cwd, referencePaths, systemPrompt, workspaceId) => {
           sendRaw({ type: 'create_agent', name, cwd, referencePaths, systemPrompt, workspaceId });
         },
@@ -1208,7 +1225,7 @@
     });
 
     // Terminal Panel
-    function TerminalPanel({ agent, messages, liveOutput, queuedMessages, fileChanges, thinkingOutput, statusStartTime, tokenUsage, terminals, terminalOutput, workspace, qaAgent, qaMessages, qaTokenUsage, qaHasUnread, onQaSend, onQaAbort, onClearQaUnread, onSendMessage, onSendImage, onSendImages, onStop, onClearHistory, onClearFileChanges, onMinimize, onMaximize, isMaximized, onFocus, isFocused, onCreateTerminal, onKillTerminal, isLocked, onToggleLock, isDragging, isDragOver, onDragStart, onDragEnd, onDragOver, onDragLeave, onDrop }) {
+    function TerminalPanel({ agent, messages, liveOutput, queuedMessages, fileChanges, thinkingOutput, statusStartTime, tokenUsage, terminals, terminalOutput, workspace, qaAgent, qaMessages, qaTokenUsage, qaHasUnread, qaLiveShots, onQaSend, onQaAbort, onClearQaUnread, onSendMessage, onSendImage, onSendImages, onStop, onClearHistory, onClearFileChanges, onMinimize, onMaximize, isMaximized, onFocus, isFocused, onCreateTerminal, onKillTerminal, isLocked, onToggleLock, isDragging, isDragOver, onDragStart, onDragEnd, onDragOver, onDragLeave, onDrop }) {
       const [input, setInput] = useState('');
       const [inputHistory, setInputHistory] = useState([]);
       const [historyIdx, setHistoryIdx] = useState(-1);
@@ -1806,6 +1823,20 @@
               qaCost > 0 && e('span', null, '💰 ' + qaFmtCost(qaCost))
             ),
             e('div', { className: 'qa-subpanel-content', ref: qaContentRef },
+              // Live screenshots streamed during an in-flight test. Cleared by qa_results_ready.
+              qaStatus === 'working' && qaLiveShots && qaLiveShots.length > 0 && e('div', { className: 'qa-live-shots' },
+                e('div', { className: 'qa-live-shots-heading' }, '🔴 Live screenshots (' + qaLiveShots.length + ')'),
+                e('div', { className: 'qa-live-shots-row' },
+                  qaLiveShots.map((shot, i) => e('img', {
+                    key: shot.timestamp + '-' + i,
+                    className: 'qa-live-shot',
+                    src: '/api/qa/screenshot?path=' + encodeURIComponent(shot.path),
+                    alt: 'Live screenshot ' + (i + 1),
+                    title: 'Click to open full-size',
+                    onClick: () => window.open('/api/qa/screenshot?path=' + encodeURIComponent(shot.path)),
+                  }))
+                )
+              ),
               !(workspace && workspace.testUrl)
                 ? e('div', { className: 'qa-subpanel-empty' }, e('span', { style: { fontStyle: 'italic' } }, 'Set a Test URL on this workspace (left sidebar) to start chatting with the QA agent.'))
                 : (qaMessages && qaMessages.length > 0)
@@ -3045,6 +3076,7 @@
                   qaAgent: activeWorkspace && activeWorkspace.qaAgentId ? agents.find(a => a.id === activeWorkspace.qaAgentId) : null,
                   qaMessages: activeWorkspace && activeWorkspace.qaAgentId ? (messages[activeWorkspace.qaAgentId] || []) : [],
                   qaTokenUsage: activeWorkspace && activeWorkspace.qaAgentId ? tokenUsage[activeWorkspace.qaAgentId] : null,
+                  qaLiveShots: activeWorkspace ? (ws.qaLiveShots[activeWorkspace.id] || []) : [],
                   qaHasUnread: !!ws.qaUnread[agent.id],
                   onQaSend: ws.sendQaMessage,
                   onQaAbort: ws.abortQaTest,
@@ -3096,6 +3128,7 @@
                   qaAgent: activeWorkspace && activeWorkspace.qaAgentId ? agents.find(a => a.id === activeWorkspace.qaAgentId) : null,
                   qaMessages: activeWorkspace && activeWorkspace.qaAgentId ? (messages[activeWorkspace.qaAgentId] || []) : [],
                   qaTokenUsage: activeWorkspace && activeWorkspace.qaAgentId ? tokenUsage[activeWorkspace.qaAgentId] : null,
+                  qaLiveShots: activeWorkspace ? (ws.qaLiveShots[activeWorkspace.id] || []) : [],
                   qaHasUnread: !!ws.qaUnread[agent.id],
                   onQaSend: ws.sendQaMessage,
                   onQaAbort: ws.abortQaTest,

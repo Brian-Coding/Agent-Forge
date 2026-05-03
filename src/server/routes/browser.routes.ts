@@ -3,6 +3,7 @@
 
 import { jsonResponse } from '../utils';
 import { browserService } from '../services/browser.service';
+import { broadcast } from '../broadcast';
 import * as path from 'node:path';
 import * as os from 'node:os';
 
@@ -43,6 +44,8 @@ export async function handleBrowserScreenshot(req: Request): Promise<Response> {
       selector: typeof body.selector === 'string' ? body.selector : undefined,
       fullPage: body.fullPage === true,
     });
+    // Stream to clients so the QA panel can show screenshots live as they're taken.
+    broadcast({ type: 'qa_screenshot_taken', workspaceId, path, timestamp: Date.now() });
     return jsonResponse({ ok: true, path });
   } catch (e: any) {
     return err(e?.message || String(e), 500);

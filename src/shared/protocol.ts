@@ -163,6 +163,7 @@ export type ServerMessage =
   | { type: 'workspace_deleted'; id: string }
   // QA testing
   | { type: 'qa_results_ready'; workspaceId: string; sourceAgentId: string }
+  | { type: 'qa_screenshot_taken'; workspaceId: string; path: string; timestamp: number }
   // Terminals
   | { type: 'terminals_list'; terminals: TerminalSession[] }
   | { type: 'terminal_created'; terminal: TerminalSession }
