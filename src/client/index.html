@@ -415,11 +415,14 @@
     .chat-turn[data-source="qa"] .chat-turn-role { color: var(--qa-accent); }
     .chat-turn[data-source="qa"] .chat-turn-role::before { content: '🧪 '; }
 
-    /* QA verdict pill (PASS / WARN / FAIL) injected at top of report */
-    .qa-verdict { display: inline-block; padding: 3px 10px; border-radius: 4px; font-size: 12px; font-weight: 700; margin-bottom: 8px; letter-spacing: 0.3px; }
-    .qa-verdict-pass { background: rgba(86, 211, 100, 0.18); color: var(--qa-accent); border: 1px solid var(--qa-accent-strong); }
-    .qa-verdict-warn { background: rgba(210, 153, 34, 0.18); color: var(--warning); border: 1px solid rgba(210, 153, 34, 0.4); }
-    .qa-verdict-fail { background: rgba(248, 81, 73, 0.18); color: var(--error); border: 1px solid rgba(248, 81, 73, 0.4); }
+    /* QA verdict dashboard — three pills always visible; the agent's chosen
+       verdict lights up with summary, the other two stay grey/dim. */
+    .qa-verdict-row { display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; }
+    .qa-verdict { display: inline-block; padding: 3px 10px; border-radius: 4px; font-size: 12px; font-weight: 700; letter-spacing: 0.3px; white-space: nowrap; }
+    .qa-verdict-active.qa-verdict-pass { background: rgba(86, 211, 100, 0.18); color: var(--qa-accent); border: 1px solid var(--qa-accent-strong); }
+    .qa-verdict-active.qa-verdict-warn { background: rgba(210, 153, 34, 0.18); color: var(--warning); border: 1px solid rgba(210, 153, 34, 0.4); }
+    .qa-verdict-active.qa-verdict-fail { background: rgba(248, 81, 73, 0.18); color: var(--error); border: 1px solid rgba(248, 81, 73, 0.4); }
+    .qa-verdict-inactive { background: var(--bg-tertiary); color: var(--text-muted); border: 1px solid var(--border); opacity: 0.5; font-weight: 500; text-transform: lowercase; }
 
     /* QA test stats footer (timing + cost) */
     .qa-stats { display: flex; gap: 12px; padding: 6px 0 4px; margin-top: 8px; border-top: 1px dashed var(--border); font-size: 10px; color: var(--text-muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
@@ -1103,6 +1106,28 @@
     }
 
     // Chat Turn (memoized for performance)
+    // Render the verdict dashboard — three pills always visible, the active one
+    // (matching the agent's verdict) lit; the other two greyed. Returns null if
+    // the agent didn't emit a parseable verdict.
+    const QA_VERDICT_KINDS = [
+      { kind: 'pass', label: 'PASS', emoji: '✅' },
+      { kind: 'warn', label: 'WARN', emoji: '⚠️' },
+      { kind: 'fail', label: 'FAIL', emoji: '❌' },
+    ];
+    function renderQaVerdictRow(verdict) {
+      if (!verdict) return null;
+      return e('div', { className: 'qa-verdict-row' },
+        QA_VERDICT_KINDS.map(({ kind, label, emoji }) => {
+          const isActive = verdict.kind === kind;
+          const className = 'qa-verdict ' + (isActive ? 'qa-verdict-active qa-verdict-' + kind : 'qa-verdict-inactive');
+          const text = isActive
+            ? emoji + ' ' + label + (verdict.summary ? ' — ' + verdict.summary : '')
+            : emoji + ' ' + label;
+          return e('div', { key: kind, className }, text);
+        })
+      );
+    }
+
     // Find the verdict header anywhere in a QA agent's output (the agent often writes
     // a preamble + tool calls before the report). Tolerates an optional markdown
     // header prefix (#, ##, ###). Returns { verdict, body } where body is everything
@@ -1164,9 +1189,7 @@
       return e('div', { className: turnClass, 'data-source': source || undefined },
         e('button', { className: 'copy-msg-btn', onClick: handleCopy }, copied ? 'Copied!' : 'Copy'),
         e('div', { className: 'chat-turn-role' }, roleLabels[role] || role),
-        verdict && e('div', { className: 'qa-verdict qa-verdict-' + verdict.kind },
-          verdict.raw + (verdict.summary ? ' \u2014 ' + verdict.summary : '')
-        ),
+        renderQaVerdictRow(verdict),
         imageData && e('img', { className: 'chat-image', src: 'data:' + (imageMimeType || 'image/png') + ';base64,' + imageData, alt: 'Uploaded image', onClick: () => window.open('data:' + (imageMimeType || 'image/png') + ';base64,' + imageData) }),
         renderBody(),
         showRetry && onRetry && e('button', { className: 'retry-btn', onClick: onRetry }, '\u21BB Retry')
@@ -1799,9 +1822,7 @@
                         const cleanBody = filterToolMessages(body, false);
                         return e('div', { className: 'chat-turn chat-turn-assistant' },
                           e('div', { className: 'chat-turn-role' }, 'QA Tester'),
-                          verdict && e('div', { className: 'qa-verdict qa-verdict-' + verdict.kind },
-                            verdict.raw + (verdict.summary ? ' — ' + verdict.summary : '')
-                          ),
+                          renderQaVerdictRow(verdict),
                           e(MarkdownContent, { content: cleanBody }),
                           screenshotPaths.length > 0 && e('div', { className: 'qa-inline-shots' },
                             screenshotPaths.map((p, i) => e('div', { key: i },
