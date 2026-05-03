@@ -424,8 +424,8 @@
     .qa-verdict-active.qa-verdict-fail { background: rgba(248, 81, 73, 0.18); color: var(--error); border: 1px solid rgba(248, 81, 73, 0.4); }
     .qa-verdict-inactive { background: var(--bg-tertiary); color: var(--text-muted); border: 1px solid var(--border); opacity: 0.5; font-weight: 500; text-transform: lowercase; }
 
-    /* QA test stats footer (timing + cost) */
-    .qa-stats { display: flex; gap: 12px; padding: 6px 0 4px; margin-top: 8px; border-top: 1px dashed var(--border); font-size: 10px; color: var(--text-muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    /* QA test stats strip — renders directly under the QA panel header */
+    .qa-subpanel-stats { display: flex; gap: 14px; padding: 4px 12px; background: rgba(86, 211, 100, 0.05); border-bottom: 1px solid var(--qa-accent-strong); font-size: 10px; color: var(--text-secondary); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; flex-shrink: 0; }
 
     /* Inline screenshots in QA panel content */
     .qa-inline-shots { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; padding-top: 8px; border-top: 1px dashed var(--qa-accent-strong); }
@@ -1246,6 +1246,26 @@
       useEffect(() => {
         scrollQaToBottom();
       }, [qaMessages?.length]);
+
+      // Stats for the most recent QA test — surfaced as a strip under the QA panel header.
+      const qaLastAssistantMsg = (qaMessages && qaMessages.length > 0) ? [...qaMessages].reverse().find(m => m.role === 'assistant') : null;
+      const qaLastUserMsg = (qaMessages && qaMessages.length > 0) ? [...qaMessages].reverse().find(m => m.role === 'user') : null;
+      const qaDurationMs = (qaLastAssistantMsg && qaLastUserMsg && qaLastAssistantMsg.timestamp > qaLastUserMsg.timestamp)
+        ? qaLastAssistantMsg.timestamp - qaLastUserMsg.timestamp
+        : 0;
+      const qaFmtDuration = (ms) => {
+        if (ms <= 0) return null;
+        if (ms < 1000) return ms + 'ms';
+        if (ms < 60000) return (ms / 1000).toFixed(1) + 's';
+        const m = Math.floor(ms / 60000);
+        const s = Math.round((ms % 60000) / 1000);
+        return m + 'm ' + s + 's';
+      };
+      const qaFmtTokens = (n) => n >= 1000 ? Math.round(n / 100) / 10 + 'k' : String(n);
+      const qaFmtCost = (c) => c < 0.01 ? '<$0.01' : '$' + c.toFixed(2);
+      const qaTokens = qaTokenUsage ? (qaTokenUsage.totalInputTokens + qaTokenUsage.totalOutputTokens) : 0;
+      const qaCost = qaTokenUsage ? qaTokenUsage.totalCostUsd : 0;
+      const qaHasStats = qaDurationMs > 0 || qaTokens > 0 || qaCost > 0;
       const panelBodyRef = useRef(null);
 
       // QA suggestion prompts shown on empty state
@@ -1765,6 +1785,11 @@
               }, '↻'),
               e('button', { className: 'qa-subpanel-close', onClick: () => setQaPanelOpen(false), title: 'Close QA panel' }, '×')
             ),
+            qaHasStats && e('div', { className: 'qa-subpanel-stats' },
+              qaDurationMs > 0 && e('span', null, '⏱ ' + qaFmtDuration(qaDurationMs)),
+              qaTokens > 0 && e('span', null, '🪙 ' + qaFmtTokens(qaTokens) + ' tokens'),
+              qaCost > 0 && e('span', null, '💰 ' + qaFmtCost(qaCost))
+            ),
             e('div', { className: 'qa-subpanel-content', ref: qaContentRef },
               !(workspace && workspace.testUrl)
                 ? e('div', { className: 'qa-subpanel-empty' }, e('span', { style: { fontStyle: 'italic' } }, 'Set a Test URL on this workspace (left sidebar) to start chatting with the QA agent.'))
@@ -1789,25 +1814,6 @@
                       const screenshotPaths = lastAssistant
                         ? [...new Set(lastAssistant.content.match(SCREENSHOT_PATH_RE) || [])]
                         : [];
-
-                      // Compute timing + cost stats for the most recent test.
-                      // Timing: from the last user message timestamp to lastAssistant.timestamp.
-                      const lastUserMsg = [...qaMessages].reverse().find(m => m.role === 'user');
-                      let durationMs = 0;
-                      if (lastAssistant && lastUserMsg && lastAssistant.timestamp > lastUserMsg.timestamp) {
-                        durationMs = lastAssistant.timestamp - lastUserMsg.timestamp;
-                      }
-                      const fmtDuration = (ms) => {
-                        if (ms <= 0) return null;
-                        if (ms < 1000) return ms + 'ms';
-                        if (ms < 60000) return (ms / 1000).toFixed(1) + 's';
-                        const m = Math.floor(ms / 60000);
-                        const s = Math.round((ms % 60000) / 1000);
-                        return m + 'm ' + s + 's';
-                      };
-                      const usage = qaTokenUsage || null;
-                      const fmtTokens = (n) => n >= 1000 ? Math.round(n / 100) / 10 + 'k' : String(n);
-                      const fmtCost = (c) => c < 0.01 ? '<$0.01' : '$' + c.toFixed(2);
 
                       const visibleMessages = qaShowActivity
                         ? qaMessages.filter(m => m.role === 'user' || m.role === 'assistant')
@@ -1859,13 +1865,7 @@
                               showToolMessages: false,
                             }))
                           : renderReport(),
-                        qaStatus === 'working' && e('div', { className: 'qa-subpanel-working' }, 'QA agent is working...'),
-                        // Stats footer — only visible when we have a completed run
-                        lastAssistant && (durationMs > 0 || (usage && usage.totalCostUsd > 0)) && e('div', { className: 'qa-stats' },
-                          durationMs > 0 && e('span', null, '⏱ ' + fmtDuration(durationMs)),
-                          usage && (usage.totalInputTokens + usage.totalOutputTokens) > 0 && e('span', null, '🪙 ' + fmtTokens(usage.totalInputTokens + usage.totalOutputTokens) + ' tokens'),
-                          usage && usage.totalCostUsd > 0 && e('span', null, '💰 ' + fmtCost(usage.totalCostUsd))
-                        )
+                        qaStatus === 'working' && e('div', { className: 'qa-subpanel-working' }, 'QA agent is working...')
                       );
                     })()
                   : e('div', { className: 'qa-subpanel-empty' },
