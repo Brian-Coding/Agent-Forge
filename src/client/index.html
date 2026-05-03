@@ -1134,7 +1134,11 @@
     // AFTER the verdict line (preamble before is dropped as noise).
     function parseQaVerdict(text) {
       if (!text) return { verdict: null, body: text || '' };
-      const re = /^[ \t]*#{0,3}[ \t]*(\u2705\s*PASS|\u26A0\uFE0F\s*WARNINGS?|\u274C\s*FAIL)\s*[\u2014:\-]?\s*([^\n]*)/im;
+      // Tolerant matcher: optional markdown # prefix, optional bold **, optional emoji,
+      // then PASS / WARNINGS / FAIL (case-insensitive), then optional summary.
+      // The agent has been inconsistent \u2014 sometimes "# \u2705 PASS \u2014 ...", sometimes just
+      // "PASS \u2014 ..." or "**PASS**: ...". This catches all of those shapes.
+      const re = /^[ \t]*#{0,3}[ \t]*\*{0,2}[ \t]*(?:\u2705\s*)?(?:\u26A0\uFE0F\s*)?(?:\u274C\s*)?(PASS|WARNINGS?|FAIL)\b[ \t]*\*{0,2}\s*[\u2014:\-]?\s*([^\n]*)/im;
       const m = re.exec(text);
       if (!m) return { verdict: null, body: text };
       const raw = m[1].toUpperCase();

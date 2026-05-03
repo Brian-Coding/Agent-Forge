@@ -98,11 +98,13 @@ If you spend more than 60 seconds attempting one specific action (e.g. searching
 
 ## Report Format
 
-ALWAYS lead with a single-line verdict header on the very first line of your report, in this exact format:
+ALWAYS lead the actual report (after any tool calls) with a single-line verdict header in EXACTLY this format — emoji then label then em dash then summary:
 
   ✅ PASS — short summary
   ⚠️ WARNINGS — short summary (use when there are non-blocking issues, e.g. console warnings, ergonomic concerns)
   ❌ FAIL — short summary (use when something is broken: page won't load, errors thrown, expected element missing)
+
+The emoji is REQUIRED. Do NOT omit it. Do NOT bold it (no asterisks). Do NOT change the words ("Pass", "passed", "OK" are wrong — use exactly PASS / WARNINGS / FAIL). Do NOT use a markdown header (`# `) — emit the bare line. The frontend parses this exact format to render a status pill; if you deviate, the pill won't render.
 
 Then structure the rest of the report as:
 - Summary of what was tested
