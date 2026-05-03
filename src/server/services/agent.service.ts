@@ -52,7 +52,7 @@ interface PendingQaTest {
 const pendingQaTests: Map<string, PendingQaTest[]> = (globalThis as any).__pendingQaTests ??= new Map<string, PendingQaTest[]>();
 let guiPort: number = ((globalThis as any).__guiPort as number) || 0;
 
-const QA_HARD_KILL_MS = 5 * 60 * 1000;
+const QA_HARD_KILL_MS = 10 * 60 * 1000;
 
 const QA_SYSTEM_PROMPT_TEMPLATE = `You are a UI QA Testing Agent. Your job is to visually test web applications by taking screenshots, analyzing them, clicking buttons, filling forms, and reporting issues.
 
@@ -107,7 +107,9 @@ If the user asks for thorough or complete exploration ("explore everything", "te
 5. Continue until you've visited every major page/area at least once.
 6. Compile a comprehensive report describing every distinct state you observed, with screenshot references.
 
-Expect exhaustive mode to take 2-4 minutes and produce many screenshots. Don't apologize for thoroughness — that's what was asked. The hard-kill backstop is 5 minutes; aim to wrap up with time to spare.
+Expect exhaustive mode to take 4-8 minutes and produce many screenshots. Don't apologize for thoroughness — that's what was asked.
+
+CRITICAL: There is a hard 10-minute kill backstop. Once you've explored the major areas, STOP exploring and write your verdict + report. A complete report at 8 minutes beats a partial transcript at 10 minutes. If you find yourself nearing 8 minutes of work, immediately wrap up — write the verdict line, summarize what you saw, list issues, done.
 
 ## Time budget
 
@@ -666,7 +668,34 @@ async function _processQaIdle(qaAgentId: string): Promise<void> {
 
   const qaMsgs = messages.get(qaAgentId) || [];
   const lastAssistant = [...qaMsgs].reverse().find(m => m.role === 'assistant');
-  const reportText = lastAssistant?.content?.trim() || '(QA agent produced no output)';
+  let reportText = lastAssistant?.content?.trim() || '(QA agent produced no output)';
+
+  // If the report was interrupted (timeout / abort) and doesn't contain a verdict
+  // line, synthesize one so the frontend renders a WARN pill instead of falling
+  // back to a wall of stream-of-consciousness text. Preserve the agent's actual
+  // partial transcript below as a quoted block so nothing is lost.
+  const isInterrupted = /\[Stopped[: ]/.test(reportText);
+  const hasVerdict = /(?:^|\n)[ \t]*(?:#{0,3}[ \t]*)?(?:✅\s*|⚠️\s*|❌\s*)?(PASS|WARNINGS?|FAIL)\b/i.test(reportText);
+  if (isInterrupted && !hasVerdict) {
+    const elapsedMs = Date.now() - test.triggeredAt;
+    const elapsedStr = elapsedMs >= 60000
+      ? `${Math.floor(elapsedMs / 60000)}m ${Math.round((elapsedMs % 60000) / 1000)}s`
+      : `${Math.round(elapsedMs / 1000)}s`;
+    const isTimeout = /\[Stopped: time limit/.test(reportText);
+    const reasonLabel = isTimeout
+      ? `the 10-minute hard-kill timer fired (${elapsedStr} elapsed)`
+      : `the test was aborted by the user (${elapsedStr} elapsed)`;
+    reportText = [
+      `⚠️ WARNINGS — test was interrupted before completion`,
+      ``,
+      `**Why:** ${reasonLabel}.`,
+      `**What this means:** the agent didn't get to write a structured report or final verdict — what follows is the raw partial transcript of what it did before being stopped.`,
+      ``,
+      `## Partial transcript`,
+      ``,
+      reportText,
+    ].join('\n');
+  }
 
   // 1) Send the report into the source coding agent's chat as a real turn,
   //    tagged source: 'qa' so the frontend can style it distinctly.
@@ -694,7 +723,7 @@ async function _processQaIdle(qaAgentId: string): Promise<void> {
   //    sendMessage is already serialized via sendLocks — nothing more to do.
 }
 
-async function _stopAgentImpl(agentId: string): Promise<boolean> {
+async function _stopAgentImpl(agentId: string, reason: 'user' | 'timeout' | 'system' = 'user'): Promise<boolean> {
   const agent = agents.get(agentId);
   if (!agent) return false;
 
@@ -705,8 +734,14 @@ async function _stopAgentImpl(agentId: string): Promise<boolean> {
     agent.process = null;
   }
 
+  const reasonMarker = reason === 'timeout'
+    ? '[Stopped: time limit reached]'
+    : reason === 'system'
+      ? '[Stopped by system]'
+      : '[Stopped by user]';
+
   if (agent.outputBuffer.trim()) {
-    const partialMsg = addMessage(agentId, 'assistant', agent.outputBuffer.trim() + '\n\n[Stopped by user]');
+    const partialMsg = addMessage(agentId, 'assistant', agent.outputBuffer.trim() + '\n\n' + reasonMarker);
     broadcast({ type: 'message', message: partialMsg });
     agent.outputBuffer = '';
   }
@@ -912,12 +947,12 @@ export const agentService = {
     return current;
   },
 
-  async stopAgent(agentId: string): Promise<boolean> {
+  async stopAgent(agentId: string, reason: 'user' | 'timeout' | 'system' = 'user'): Promise<boolean> {
     // Execute immediately — don't queue behind sendLocks.
     // Killing the process causes the in-flight sendMessage to resolve naturally.
     // Reset the lock chain so queued sends after stop don't run stale.
     sendLocks.delete(agentId);
-    return _stopAgentImpl(agentId);
+    return _stopAgentImpl(agentId, reason);
   },
 
   async killAgent(agentId: string): Promise<boolean> {
@@ -1111,7 +1146,7 @@ export const agentService = {
     };
     test.hardKillTimer = setTimeout(() => {
       console.warn(`[qa] hard-kill triggered for ${qaAgentId} after ${QA_HARD_KILL_MS}ms`);
-      agentService.stopAgent(qaAgentId!).catch(() => {});
+      agentService.stopAgent(qaAgentId!, 'timeout').catch(() => {});
     }, QA_HARD_KILL_MS);
 
     if (!pendingQaTests.has(qaAgentId)) pendingQaTests.set(qaAgentId, []);
