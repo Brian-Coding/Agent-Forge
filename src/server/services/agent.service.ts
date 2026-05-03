@@ -52,7 +52,7 @@ interface PendingQaTest {
 const pendingQaTests: Map<string, PendingQaTest[]> = (globalThis as any).__pendingQaTests ??= new Map<string, PendingQaTest[]>();
 let guiPort: number = ((globalThis as any).__guiPort as number) || 0;
 
-const QA_HARD_KILL_MS = 10 * 60 * 1000;
+const QA_HARD_KILL_MS = 30 * 60 * 1000;
 
 const QA_SYSTEM_PROMPT_TEMPLATE = `You are a UI QA Testing Agent. Your job is to visually test web applications by taking screenshots, analyzing them, clicking buttons, filling forms, and reporting issues.
 
@@ -107,9 +107,26 @@ If the user asks for thorough or complete exploration ("explore everything", "te
 5. Continue until you've visited every major page/area at least once.
 6. Compile a comprehensive report describing every distinct state you observed, with screenshot references.
 
-Expect exhaustive mode to take 4-8 minutes and produce many screenshots. Don't apologize for thoroughness — that's what was asked.
+Expect exhaustive mode to take 10-25 minutes and produce many screenshots. Don't apologize for thoroughness — that's what was asked.
 
-CRITICAL: There is a hard 10-minute kill backstop. Once you've explored the major areas, STOP exploring and write your verdict + report. A complete report at 8 minutes beats a partial transcript at 10 minutes. If you find yourself nearing 8 minutes of work, immediately wrap up — write the verdict line, summarize what you saw, list issues, done.
+### Don't get stuck on one screen
+
+A common failure mode is fixating on a single page/modal for too long, exercising every minor variant. Avoid this:
+
+- **Per-screen budget: ~3 minutes max.** If you've spent 3 minutes on a single screen/modal/area without uncovering meaningful new behavior, leave it and move to the next major area. Note it in your report ("I explored the Fleet Templates modal for ~3 min, opening the editor and trying basic interactions; deeper testing of template options deferred").
+- **No repeat clicks.** If you've already clicked an element and seen what happens, don't click it again "just to be sure" unless something specific suggests state changed.
+- **If an action doesn't reveal new state, move on.** If clicking a button does nothing visible (and the console shows no errors), one re-try is fine; a third is wasted budget.
+- **Coverage > depth.** A shallow visit to every major area is more valuable than a deep dive into one area while leaving others untouched.
+
+### Time budget
+
+There is a hard 30-minute kill backstop. Pace yourself:
+
+- **Minutes 0–25**: explore. Cover breadth before depth.
+- **Minutes 25–27**: review your coverage. Identify any major area you haven't touched yet — quickly visit it (at least one screenshot) so it's represented in the report.
+- **Minutes 27–30**: STOP exploring. Write your verdict + structured report. A complete report at 28 minutes beats a partial transcript at 30. Once you've started writing the report, do NOT call any more tools.
+
+CRITICAL: A complete report with the verdict header is what the user actually consumes. If you exceed the budget without writing the verdict, the system synthesizes a placeholder one and labels the run as interrupted — that's strictly worse than a real verdict you wrote yourself.
 
 ## Time budget
 
@@ -682,8 +699,9 @@ async function _processQaIdle(qaAgentId: string): Promise<void> {
       ? `${Math.floor(elapsedMs / 60000)}m ${Math.round((elapsedMs % 60000) / 1000)}s`
       : `${Math.round(elapsedMs / 1000)}s`;
     const isTimeout = /\[Stopped: time limit/.test(reportText);
+    const killMin = Math.round(QA_HARD_KILL_MS / 60000);
     const reasonLabel = isTimeout
-      ? `the 10-minute hard-kill timer fired (${elapsedStr} elapsed)`
+      ? `the ${killMin}-minute hard-kill timer fired (${elapsedStr} elapsed)`
       : `the test was aborted by the user (${elapsedStr} elapsed)`;
     reportText = [
       `⚠️ WARNINGS — test was interrupted before completion`,
