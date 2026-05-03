@@ -1103,15 +1103,20 @@
     }
 
     // Chat Turn (memoized for performance)
-    // Parse a verdict header off the start of a QA report. Returns { verdict, body }.
+    // Find the verdict header anywhere in a QA agent's output (the agent often writes
+    // a preamble + tool calls before the report). Tolerates an optional markdown
+    // header prefix (#, ##, ###). Returns { verdict, body } where body is everything
+    // AFTER the verdict line (preamble before is dropped as noise).
     function parseQaVerdict(text) {
       if (!text) return { verdict: null, body: text || '' };
-      const m = text.match(/^\s*(\u2705\s*PASS|\u26A0\uFE0F\s*WARNINGS?|\u274C\s*FAIL)\s*[\u2014:\-]?\s*([^\n]*)/i);
+      const re = /^[ \t]*#{0,3}[ \t]*(\u2705\s*PASS|\u26A0\uFE0F\s*WARNINGS?|\u274C\s*FAIL)\s*[\u2014:\-]?\s*([^\n]*)/im;
+      const m = re.exec(text);
       if (!m) return { verdict: null, body: text };
       const raw = m[1].toUpperCase();
       const kind = raw.includes('PASS') ? 'pass' : raw.includes('FAIL') ? 'fail' : 'warn';
       const summary = m[2].trim();
-      const body = text.substring(m[0].length).replace(/^\n+/, '');
+      const verdictEnd = m.index + m[0].length;
+      const body = text.substring(verdictEnd).replace(/^\n+/, '');
       return { verdict: { kind, summary, raw: m[1].trim() }, body };
     }
 
@@ -1753,17 +1758,8 @@
                         return text.substring(idx + marker.length).trim();
                       };
 
-                      // Parse the verdict header off the top of the latest report.
-                      const parseVerdict = (text) => {
-                        if (!text) return { verdict: null, body: text || '' };
-                        const m = text.match(/^\s*(✅\s*PASS|⚠️\s*WARNINGS?|❌\s*FAIL)\s*[—:-]?\s*([^\n]*)/i);
-                        if (!m) return { verdict: null, body: text };
-                        const raw = m[1].toUpperCase();
-                        const kind = raw.includes('PASS') ? 'pass' : raw.includes('FAIL') ? 'fail' : 'warn';
-                        const summary = m[2].trim();
-                        const body = text.substring(m[0].length).replace(/^\n+/, '');
-                        return { verdict: { kind, summary, raw: m[1].trim() }, body };
-                      };
+                      // Use the top-level parseQaVerdict so the QA panel and ChatTurn stay in sync.
+                      const parseVerdict = parseQaVerdict;
 
                       // Find any screenshot paths the QA agent referenced in its report.
                       const SCREENSHOT_PATH_RE = /(?:[A-Za-z]:[\\\/]|\/)[^\s"'`<>()]*agent-forge-qa[^\s"'`<>()]*\.png/g;
@@ -1799,12 +1795,14 @@
                       const renderReport = () => {
                         if (!lastAssistant) return null;
                         const { verdict, body } = parseVerdict(lastAssistant.content);
+                        // Strip any [Using tool: ...] annotations from the body so they don't render literally.
+                        const cleanBody = filterToolMessages(body, false);
                         return e('div', { className: 'chat-turn chat-turn-assistant' },
                           e('div', { className: 'chat-turn-role' }, 'QA Tester'),
                           verdict && e('div', { className: 'qa-verdict qa-verdict-' + verdict.kind },
                             verdict.raw + (verdict.summary ? ' — ' + verdict.summary : '')
                           ),
-                          e(MarkdownContent, { content: body }),
+                          e(MarkdownContent, { content: cleanBody }),
                           screenshotPaths.length > 0 && e('div', { className: 'qa-inline-shots' },
                             screenshotPaths.map((p, i) => e('div', { key: i },
                               e('img', {
