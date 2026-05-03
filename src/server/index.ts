@@ -16,7 +16,7 @@ import { handleDirectories } from './routes/directories.routes';
 import { handleGetPorts, handleKillPort } from './routes/ports.routes';
 import { handleGitBranch } from './routes/git.routes';
 import { handleListSimulators, handleBootSimulator, handleShutdownSimulator, handleEraseSimulator, handleCleanDerivedData } from './routes/simulator.routes';
-import { handleBrowserNavigate, handleBrowserScreenshot, handleBrowserClick, handleBrowserType, handleBrowserWaitForReady, handleBrowserConsoleGet, handleBrowserConsoleClear, handleBrowserStatus } from './routes/browser.routes';
+import { handleBrowserNavigate, handleBrowserScreenshot, handleBrowserClick, handleBrowserType, handleBrowserWaitForReady, handleBrowserConsoleGet, handleBrowserConsoleClear, handleBrowserStatus, handleQaScreenshot } from './routes/browser.routes';
 
 // Catch unhandled promise rejections to prevent silent crashes
 process.on('unhandledRejection', (reason, promise) => {
@@ -97,6 +97,7 @@ const server = Bun.serve({
     if (url.pathname === '/api/browser/console' && req.method === 'GET') return handleBrowserConsoleGet(req);
     if (url.pathname === '/api/browser/console/clear' && req.method === 'POST') return handleBrowserConsoleClear(req);
     if (url.pathname === '/api/browser/status' && req.method === 'GET') return handleBrowserStatus(req);
+    if (url.pathname === '/api/qa/screenshot' && req.method === 'GET') return handleQaScreenshot(req);
 
     return new Response('Not Found', { status: 404 });
   },

@@ -3,6 +3,8 @@
 
 import { jsonResponse } from '../utils';
 import { browserService } from '../services/browser.service';
+import * as path from 'node:path';
+import * as os from 'node:os';
 
 function err(msg: string, status = 400): Response {
   return jsonResponse({ ok: false, error: msg }, status);
@@ -123,4 +125,31 @@ export async function handleBrowserStatus(req: Request): Promise<Response> {
   } catch (e: any) {
     return err(e?.message || String(e), 500);
   }
+}
+
+/**
+ * Serve a QA screenshot from disk. Path validation: must be inside
+ * os.tmpdir()/agent-forge-qa/, must end in .png. Used by the frontend
+ * to render screenshots inline in the QA panel without base64-encoding
+ * megabytes of image data over the WS.
+ */
+export async function handleQaScreenshot(req: Request): Promise<Response> {
+  const url = new URL(req.url);
+  const requested = url.searchParams.get('path');
+  if (!requested) return err('path required');
+
+  const allowedRoot = path.resolve(path.join(os.tmpdir(), 'agent-forge-qa'));
+  const resolved = path.resolve(requested);
+  if (!resolved.startsWith(allowedRoot + path.sep) && resolved !== allowedRoot) {
+    return err('path outside allowed root', 403);
+  }
+  if (!resolved.toLowerCase().endsWith('.png')) {
+    return err('only .png files allowed', 400);
+  }
+
+  const file = Bun.file(resolved);
+  if (!(await file.exists())) return err('not found', 404);
+  return new Response(file, {
+    headers: { 'content-type': 'image/png', 'cache-control': 'public, max-age=3600' },
+  });
 }
