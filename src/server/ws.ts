@@ -90,6 +90,20 @@ async function handleMessage(ws: ServerWebSocket<unknown>, message: ClientMessag
       break;
     }
 
+    case 'provision_atlas_agent': {
+      try {
+        console.log(`[atlas] provision ws=${message.workspaceId} cwd=${message.projectCwd}`);
+        const created = await agentService.provisionAtlasAgent(message.workspaceId, message.projectCwd);
+        broadcast({ type: 'agent_created', agent: created });
+        broadcast({ type: 'agents_list', agents: agentService.getAgents() });
+        console.log(`[atlas] agent created id=${created.id}`);
+      } catch (e: any) {
+        console.error(`[atlas] provision failed:`, e);
+        sendTo(ws, { type: 'error', message: e?.message || 'Atlas provisioning failed' });
+      }
+      break;
+    }
+
     case 'stop_agent': {
       const success = await agentService.stopAgent(message.agentId);
       if (!success) {

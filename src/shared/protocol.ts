@@ -120,6 +120,8 @@ export type ClientMessage =
   // QA testing
   | { type: 'send_qa_message'; workspaceId: string; sourceAgentId: string; content: string }
   | { type: 'abort_qa_test'; workspaceId: string }
+  // UI Atlas
+  | { type: 'provision_atlas_agent'; workspaceId: string; projectCwd: string }
   // Terminals
   | { type: 'create_terminal'; agentId: string; command: string }
   | { type: 'kill_terminal'; id: string }

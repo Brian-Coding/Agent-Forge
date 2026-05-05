@@ -397,6 +397,10 @@
     .workspace-test-url-input { flex: 1; min-width: 0; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 3px; color: var(--text-secondary); padding: 2px 6px; font-size: 10px; outline: none; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; box-sizing: border-box; }
     .workspace-test-url-input::placeholder { color: var(--text-muted); }
     .workspace-test-url-input:focus { border-color: var(--accent); color: var(--text-primary); }
+    .workspace-atlas { padding: 2px 12px 6px; }
+    .workspace-atlas-btn { width: 100%; background: var(--bg-tertiary); border: 1px solid var(--border); color: var(--text-secondary); padding: 4px 8px; border-radius: 4px; font-size: 11px; cursor: pointer; transition: all 0.15s; }
+    .workspace-atlas-btn:hover:not(:disabled) { background: rgba(86, 211, 100, 0.1); border-color: var(--qa-accent); color: var(--text-primary); }
+    .workspace-atlas-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
     /* QA testing button in panel header */
     .qa-header-btn.active { background: rgba(86, 211, 100, 0.18); color: var(--qa-accent); }
@@ -836,6 +840,7 @@
         },
         sendQaMessage: (workspaceId, sourceAgentId, content) => sendRaw({ type: 'send_qa_message', workspaceId, sourceAgentId, content }),
         abortQaTest: (workspaceId) => sendRaw({ type: 'abort_qa_test', workspaceId }),
+        provisionAtlasAgent: (workspaceId, projectCwd) => sendRaw({ type: 'provision_atlas_agent', workspaceId, projectCwd }),
         clearQaUnread: (sourceAgentId) => setQaUnread(prev => { if (!prev[sourceAgentId]) return prev; const { [sourceAgentId]: _, ...rest } = prev; return rest; }),
         sendMessage: (agentId, content) => {
           const agent = agentsRef.current.find(a => a.id === agentId);
@@ -2131,7 +2136,7 @@
       );
     }
 
-    function WorkspacesSidebar({ workspaces, agents, activeWorkspaceId, onSelectWorkspace, onCreateWorkspace, onDeleteWorkspace, onRenameWorkspace, onUpdateWorkspaceTesting, onNewAgent, onEditAgent, onRemoveAgent, statusStartTimes }) {
+    function WorkspacesSidebar({ workspaces, agents, activeWorkspaceId, onSelectWorkspace, onCreateWorkspace, onDeleteWorkspace, onRenameWorkspace, onUpdateWorkspaceTesting, onProvisionAtlas, onNewAgent, onEditAgent, onRemoveAgent, statusStartTimes }) {
       const [showNewModal, setShowNewModal] = useState(false);
       const [renamingId, setRenamingId] = useState(null);
       const [renameValue, setRenameValue] = useState('');
@@ -2198,6 +2203,25 @@
                       },
                       onKeyDown: (ev) => { if (ev.key === 'Enter') ev.target.blur(); },
                     })
+                  ),
+                  isActive && e('div', { className: 'workspace-atlas', onClick: (ev) => ev.stopPropagation() },
+                    e('button', {
+                      className: 'workspace-atlas-btn',
+                      disabled: !ws.testUrl,
+                      title: !ws.testUrl
+                        ? 'Set a Test URL first — the Atlas Agent walks the live app at that URL'
+                        : 'Create a UI Atlas Agent for this workspace. You will be prompted for the project repo path.',
+                      onClick: () => {
+                        if (!ws.testUrl) return;
+                        const firstAgent = wsAgents[0];
+                        const defaultCwd = firstAgent ? firstAgent.cwd : '';
+                        const cwd = window.prompt(
+                          'Path to the project repo for the Atlas Agent to read code from:\n\n(The agent will read source files in this directory and write the atlas to docs/ui-atlas/atlas.md inside it.)',
+                          defaultCwd
+                        );
+                        if (cwd && cwd.trim()) onProvisionAtlas(ws.id, cwd.trim());
+                      },
+                    }, '🗺️ Create UI Atlas Agent')
                   ),
                   isActive && wsAgents.length > 0 && e('div', { className: 'workspace-agents' },
                     wsAgents.map(agent =>
@@ -3034,6 +3058,7 @@
             onDeleteWorkspace: ws.deleteWorkspace,
             onRenameWorkspace: (id, name) => ws.updateWorkspace(id, { name }),
             onUpdateWorkspaceTesting: (id, updates) => ws.updateWorkspace(id, updates),
+            onProvisionAtlas: (workspaceId, projectCwd) => ws.provisionAtlasAgent(workspaceId, projectCwd),
             onNewAgent: () => { setEditingAgent(null); setShowModal(true); },
             onEditAgent: (agent) => { setEditingAgent(agent); setShowModal(true); },
             onRemoveAgent: ws.removeAgent,
