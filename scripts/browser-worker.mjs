@@ -130,7 +130,17 @@ const handlers = {
     const dir = screenshotsDir(body.workspaceId);
     await ensureDir(dir);
     pruneOldScreenshots(dir).catch(() => {});
-    const filename = `screenshot-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.png`;
+    // Two filename modes:
+    //   - body.name: stable per-surface name. Sanitized + ".png" appended if missing.
+    //                Re-runs overwrite the existing file. This is what the Atlas Agent uses.
+    //   - default:   timestamp + random suffix. Used by ad-hoc screenshots (QA Tester etc).
+    let filename;
+    if (typeof body.name === 'string' && body.name.trim()) {
+      const safe = body.name.trim().replace(/[\\/:*?"<>|]/g, '-').replace(/\.png$/i, '');
+      filename = safe + '.png';
+    } else {
+      filename = `screenshot-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.png`;
+    }
     const filePath = path.join(dir, filename);
     if (body.selector) {
       const el = await wsCtx.page.$(body.selector);

@@ -88,11 +88,12 @@ export async function handleBrowserScreenshot(req: Request): Promise<Response> {
   const body = await readJson(req);
   const workspaceId = requireString(body, 'workspaceId');
   if (!workspaceId) return err('workspaceId required');
-  trackBrowserCall(workspaceId, 'screenshot', { selector: body.selector, fullPage: body.fullPage === true });
+  trackBrowserCall(workspaceId, 'screenshot', { selector: body.selector, fullPage: body.fullPage === true, name: body.name });
   try {
     const path = await browserService.screenshot(workspaceId, {
       selector: typeof body.selector === 'string' ? body.selector : undefined,
       fullPage: body.fullPage === true,
+      name: typeof body.name === 'string' ? body.name : undefined,
     });
     // Stream to clients so the QA panel can show screenshots live as they're taken.
     broadcast({ type: 'qa_screenshot_taken', workspaceId, path, timestamp: Date.now() });

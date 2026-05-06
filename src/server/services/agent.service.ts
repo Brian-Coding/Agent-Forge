@@ -200,8 +200,11 @@ The same Playwright-backed REST endpoints the QA Tester uses. Call via curl to h
 Always include "workspaceId": "{WORKSPACE_ID}" in the JSON body or query string.
 
 - POST /navigate {"workspaceId":"{WORKSPACE_ID}","url":"..."}
-- POST /screenshot {"workspaceId":"{WORKSPACE_ID}","selector":"..." (optional),"fullPage":true (optional)}
+- POST /screenshot {"workspaceId":"{WORKSPACE_ID}","name":"surface-<slug>","selector":"..." (optional),"fullPage":true (optional)}
   -> Returns {"path":"/path/to/screenshot.png"}. Use the Read tool on the path to see the rendered UI.
+  -> ALWAYS pass "name" with the matching surface ID slug (e.g. "surface-galaxy-canvas" for surface.galaxy-canvas). The server saves to <screenshots-dir>/<name>.png OVERWRITING any existing file with that name.
+  -> This means re-scans cleanly replace prior screenshots without filling the repo with timestamped duplicates. One screenshot file per surface is the goal.
+  -> If you want multiple screenshots for one surface (e.g. tabs), use a sub-suffix: name="surface-fleet-mgmt-modal-split", "surface-fleet-mgmt-modal-merge", etc.
 - POST /click {"workspaceId":"{WORKSPACE_ID}","selector":"..."}
 - POST /type {"workspaceId":"{WORKSPACE_ID}","selector":"...","text":"..."}
 - POST /wait-for-ready {"workspaceId":"{WORKSPACE_ID}"}

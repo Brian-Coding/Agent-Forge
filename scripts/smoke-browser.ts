@@ -28,6 +28,13 @@ async function main() {
   const elPath = await browserService.screenshot(WS, { selector: 'h1' });
   console.log('[smoke] h1 saved:', elPath);
 
+  console.log('[smoke] screenshot with stable name (overwrite test)...');
+  const stable1 = await browserService.screenshot(WS, { name: 'surface-test-stable' });
+  const stable2 = await browserService.screenshot(WS, { name: 'surface-test-stable' });
+  console.log('[smoke] stable path 1:', stable1);
+  console.log('[smoke] stable path 2:', stable2);
+  console.log('[smoke] paths match (overwrite worked)?', stable1 === stable2);
+
   console.log('[smoke] status:', await browserService.getStatus(WS));
 
   console.log('[smoke] evaluate page.title via page.evaluate...');
