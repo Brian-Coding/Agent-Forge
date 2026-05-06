@@ -439,6 +439,15 @@
     .atlas-body img:hover { border-color: var(--qa-accent); }
     .atlas-empty { padding: 20px 12px; color: var(--text-muted); font-size: 12px; }
     .atlas-error { color: var(--error); }
+    .atlas-running-body { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 12px; }
+    .atlas-running-explainer { font-size: 11px; color: var(--text-muted); padding: 8px 10px; background: var(--bg-secondary); border-left: 2px solid var(--qa-accent); border-radius: 4px; line-height: 1.5; }
+    .atlas-activity-feed { display: flex; flex-direction: column; gap: 6px; }
+    .atlas-activity-heading { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; }
+    .atlas-activity-msg { padding: 6px 8px; border-radius: 4px; font-size: 11px; line-height: 1.4; }
+    .atlas-activity-user { background: rgba(47, 129, 247, 0.06); border-left: 2px solid var(--accent); }
+    .atlas-activity-assistant { background: rgba(86, 211, 100, 0.04); border-left: 2px solid var(--qa-accent); }
+    .atlas-activity-role { font-size: 10px; font-weight: 600; color: var(--text-muted); margin-bottom: 2px; }
+    .atlas-activity-text { color: var(--text-secondary); white-space: pre-wrap; word-wrap: break-word; }
 
     /* QA testing button in panel header */
     .qa-header-btn.active { background: rgba(86, 211, 100, 0.18); color: var(--qa-accent); }
@@ -2415,7 +2424,7 @@
     }
 
     // Notes Panel
-    function AtlasPanel({ activeWorkspace, agents, statusStartTimes, qaLiveShots, onRescanAtlas, onProvisionAtlas }) {
+    function AtlasPanel({ activeWorkspace, agents, messages, statusStartTimes, qaLiveShots, onRescanAtlas, onProvisionAtlas }) {
       const [content, setContent] = useState('');
       const [loading, setLoading] = useState(false);
       const [error, setError] = useState(null);
@@ -2477,6 +2486,10 @@
         const liveCount = (qaLiveShots && qaLiveShots[wsId]) ? qaLiveShots[wsId].length : 0;
         const runStartedAt = statusStartTimes[atlasAgent.id];
         const elapsedMs = runStartedAt ? Date.now() - runStartedAt : 0;
+        // Show the agent's recent activity so the user can see what it's doing
+        // even though the agent is hidden from the grid/chip list.
+        const atlasMsgs = (messages && messages[atlasAgent.id]) || [];
+        const recentMsgs = atlasMsgs.slice(-8); // last few turns
         return e('div', { className: 'atlas-panel' },
           e('div', { className: 'atlas-header' },
             e('div', { className: 'atlas-title' }, '🗺️ UI Atlas'),
@@ -2484,7 +2497,23 @@
               'Scanning... ' + liveCount + ' shots · ' + Math.floor(elapsedMs / 60000) + 'm elapsed'
             )
           ),
-          e('div', { className: 'atlas-empty' }, 'Atlas is scanning. Once complete the document will appear here.')
+          e('div', { className: 'atlas-running-body' },
+            e('div', { className: 'atlas-running-explainer' },
+              'The agent is working through its passes (project structure → code reading → browser walkthrough → state construction → reconciliation → self-verification → write atlas). The first ~10 minutes are typically code reading with no browser activity. Screenshots accumulate during the walkthrough phase.'
+            ),
+            recentMsgs.length > 0 && e('div', { className: 'atlas-activity-feed' },
+              e('div', { className: 'atlas-activity-heading' }, 'Recent activity'),
+              recentMsgs.map((m, i) => {
+                // Strip [Using tool: Bash] noise + truncate.
+                const text = (m.content || '').replace(/\n?\[Using tool: [^\]]+\]\n?/g, '').trim();
+                const preview = text.length > 280 ? text.slice(0, 280) + '...' : text;
+                return e('div', { key: m.id || i, className: 'atlas-activity-msg atlas-activity-' + m.role },
+                  e('div', { className: 'atlas-activity-role' }, m.role === 'user' ? '→ Trigger' : 'Atlas'),
+                  e('div', { className: 'atlas-activity-text' }, preview || '(no text content)')
+                );
+              })
+            )
+          )
         );
       }
 
@@ -3321,6 +3350,7 @@
           sidebarTab === 'atlas' && e(AtlasPanel, {
             activeWorkspace,
             agents,
+            messages,
             statusStartTimes,
             qaLiveShots: ws.qaLiveShots,
             onRescanAtlas: ws.rescanAtlas,
