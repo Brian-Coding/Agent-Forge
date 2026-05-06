@@ -56,6 +56,21 @@ const QA_HARD_KILL_MS = 30 * 60 * 1000;
 
 const QA_SYSTEM_PROMPT_TEMPLATE = `You are a UI QA Testing Agent. Your job is to visually test web applications by taking screenshots, analyzing them, clicking buttons, filling forms, and reporting issues.
 
+## Consult the UI Atlas FIRST
+
+This workspace may have a UI Atlas — a comprehensive map of every surface in the app, every entity it shows, and the click paths to reach each one. The atlas is at \`docs/ui-atlas/atlas.md\` relative to the project the user is working on, and it should be in your referencePaths if it exists.
+
+BEFORE planning any test:
+
+1. Read \`docs/ui-atlas/atlas.md\` if you have access to it. The atlas's §2 (Visual surfaces) tells you what surfaces exist, where they are, what data they show, and how to reach them.
+2. Use the atlas to derive your test plan:
+   - When the user says "test the homepage" — the atlas tells you what data + actions are on the homepage. Test those specifically, not generic "click around".
+   - When the user says "test fleet management" — the atlas's §1 entry for Fleet lists every surface where fleets appear. Visit each and exercise the actions.
+   - When the user says "explore everything" — the atlas's §4 Coverage tells you which surfaces haven't been tested recently; prioritize those.
+3. After your test, the atlas's §5 (Observed inconsistencies) and §7 (Open questions) often contain things worth investigating — re-verify any of those that fall in the scope of the user's prompt.
+
+If no atlas exists in the workspace, fall back to your normal browser-walkthrough approach. The atlas is a force multiplier when present, not a hard requirement.
+
 ## Available Browser Tools
 
 Call these via curl to http://localhost:{GUI_PORT}/api/browser/.
@@ -869,6 +884,17 @@ async function _sendMessageImpl(agentId: string, content: string, source?: 'qa')
     if (exitCode === 0 && pendingQaTests.has(agentId)) {
       _processQaIdle(agentId).catch(e => console.error(`QA idle relay failed for ${agentId}:`, e));
     }
+
+    // If this is the workspace's UI Atlas Agent and the run completed
+    // successfully, stamp atlasLastScanAt on the workspace. The frontend
+    // uses this for the freshness indicator.
+    if (exitCode === 0 && agent.info.workspaceId) {
+      const ws = workspaceService.get(agent.info.workspaceId);
+      if (ws && ws.atlasAgentId === agentId) {
+        const updated = await workspaceService.update(agent.info.workspaceId, { atlasLastScanAt: Date.now() });
+        if (updated) broadcast({ type: 'workspace_updated', workspace: updated });
+      }
+    }
   } catch (e) {
     console.error(`Error sending message to agent ${agentId}:`, e);
     if (proc.pid) persistenceService.untrackPid(proc.pid);
@@ -1180,7 +1206,7 @@ export const agentService = {
 
   // --- Agent CRUD ---
 
-  async createAgent(name: string, cwd: string, referencePaths: string[] = [], systemPrompt: string = '', workspaceId?: string): Promise<AgentInfo> {
+  async createAgent(name: string, cwd: string, referencePaths: string[] = [], systemPrompt: string = '', workspaceId?: string, opts: { hideFromGrid?: boolean } = {}): Promise<AgentInfo> {
     if (!existsSync(cwd)) {
       throw new Error(`Working directory does not exist: ${cwd}`);
     }
@@ -1197,17 +1223,32 @@ export const agentService = {
       wsId = ws.id;
     }
 
+    // Auto-include the workspace's UI Atlas as a referencePath when one
+    // exists, so every agent in this workspace is atlas-aware. Skip for the
+    // Atlas agent itself (it owns the atlas, doesn't reference it). Skip if
+    // the path already appears in the user-supplied referencePaths.
+    const ws = workspaceService.get(wsId);
+    const isAtlasAgent = name === 'UI Atlas Agent';
+    const finalRefPaths = [...referencePaths];
+    if (!isAtlasAgent && ws?.atlasProjectCwd) {
+      const atlasPath = join(ws.atlasProjectCwd, 'docs', 'ui-atlas');
+      if (existsSync(atlasPath) && !finalRefPaths.includes(atlasPath)) {
+        finalRefPaths.unshift(atlasPath);
+      }
+    }
+
     const id = generateId();
     const info: AgentInfo = {
       id,
       name,
       cwd,
-      referencePaths,
+      referencePaths: finalRefPaths,
       systemPrompt,
       status: 'idle',
       createdAt: Date.now(),
       workspaceId: wsId,
     };
+    if (opts.hideFromGrid) info.hideFromGrid = true;
 
     agents.set(id, {
       info,
@@ -1225,7 +1266,7 @@ export const agentService = {
       numTurns: 0,
     });
 
-    workspaceService.addAgentToWorkspace(wsId, id);
+    workspaceService.addAgentToWorkspace(wsId, id, opts.hideFromGrid);
     startFileWatcher(id);
     documentService.startPlansWatcher(id, cwd);
     await persistenceService.saveNow();
@@ -1464,12 +1505,72 @@ export const agentService = {
       .replace(/{WORKSPACE_ID}/g, workspaceId)
       .replace(/{TEST_URL}/g, ws.testUrl);
 
-    const created = await agentService.createAgent('UI Atlas Agent', projectCwd, [], systemPrompt, workspaceId);
-    // Store the atlas agent's id on the workspace so the frontend can find it
-    // (for the progress widget) and so re-spawn / status logic has a stable handle.
-    const updated = await workspaceService.update(workspaceId, { atlasAgentId: created.id });
+    const created = await agentService.createAgent('UI Atlas Agent', projectCwd, [], systemPrompt, workspaceId, { hideFromGrid: true });
+    // Persist atlas state on the workspace so re-scans don't re-prompt for the
+    // path and the frontend can display freshness / progress widgets.
+    const updated = await workspaceService.update(workspaceId, {
+      atlasAgentId: created.id,
+      atlasProjectCwd: projectCwd,
+    });
     if (updated) broadcast({ type: 'workspace_updated', workspace: updated });
+
+    // Auto-trigger the initial discovery — the user clicked "Build" with the
+    // unambiguous intent of "and now do the work". They shouldn't have to
+    // hunt for the agent's chat panel and type a kickoff prompt manually.
+    const kickoff = `Build the initial UI Atlas for this project per your system prompt. Be exhaustive — every surface in §2 needs a verified screenshot, every entity in §1 needs at least one verified surface, and Pass 6 self-verification must pass before you write the final atlas. Use /api/browser/evaluate aggressively for any surface that doesn't yield to clicks (canvas double-clicks, planet selection, multi-system empire state, in-flight battle state, etc). Use stable per-surface filenames ("name": "surface-<slug>") on every screenshot.`;
+    // Don't await — the agent runs for ~1 hour. Caller returns immediately
+    // so the frontend can transition to the running state.
+    agentService.sendMessage(created.id, kickoff).catch(e => {
+      console.error(`[atlas] auto-kickoff failed for ${created.id}:`, e);
+    });
+
     return created;
+  },
+
+  /**
+   * Re-scan flow: archive current atlas, wipe shots/, delete the existing
+   * atlas agent (gets a fresh one with the latest system prompt), then
+   * provision a new agent + auto-trigger.
+   *
+   * Errors if the workspace doesn't have a saved atlasProjectCwd (i.e. no
+   * prior atlas exists — the user should hit Build, not Re-scan).
+   */
+  async rescanAtlas(workspaceId: string): Promise<AgentInfo> {
+    const ws = workspaceService.get(workspaceId);
+    if (!ws) throw new Error(`Workspace not found: ${workspaceId}`);
+    if (!ws.atlasProjectCwd) throw new Error('No prior atlas — use Build instead of Re-scan');
+
+    // Archive + wipe before spawning. We do this synchronously so the new run
+    // starts from a clean slate — no half-overlapping output from the
+    // previous scan.
+    const fs = await import('node:fs/promises');
+    const path = await import('node:path');
+    const atlasDir = path.join(ws.atlasProjectCwd, 'docs', 'ui-atlas');
+    const archiveRoot = path.join(atlasDir, '.history');
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const archiveDir = path.join(archiveRoot, stamp);
+    try {
+      // Move atlas.md to archive (if it exists)
+      await fs.mkdir(archiveDir, { recursive: true });
+      const atlasMd = path.join(atlasDir, 'atlas.md');
+      try { await fs.rename(atlasMd, path.join(archiveDir, 'atlas.md')); } catch {}
+      const changelog = path.join(atlasDir, 'changelog.md');
+      try { await fs.copyFile(changelog, path.join(archiveDir, 'changelog.md')); } catch {}
+      // Move shots/ to archive
+      const shotsDir = path.join(atlasDir, 'shots');
+      try { await fs.rename(shotsDir, path.join(archiveDir, 'shots')); } catch {}
+      console.log(`[atlas] archived previous scan to ${archiveDir}`);
+    } catch (e) {
+      console.warn(`[atlas] archive step failed (continuing):`, e);
+    }
+
+    // Delete the previous atlas agent so the new one picks up the latest
+    // system prompt (in case we've shipped updates since the previous scan).
+    if (ws.atlasAgentId && agents.has(ws.atlasAgentId)) {
+      await agentService.removeAgent(ws.atlasAgentId);
+    }
+
+    return await agentService.provisionAtlasAgent(workspaceId, ws.atlasProjectCwd);
   },
 
   /**

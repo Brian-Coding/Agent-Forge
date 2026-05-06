@@ -104,6 +104,20 @@ async function handleMessage(ws: ServerWebSocket<unknown>, message: ClientMessag
       break;
     }
 
+    case 'rescan_atlas': {
+      try {
+        console.log(`[atlas] rescan ws=${message.workspaceId}`);
+        const created = await agentService.rescanAtlas(message.workspaceId);
+        broadcast({ type: 'agent_created', agent: created });
+        broadcast({ type: 'agents_list', agents: agentService.getAgents() });
+        console.log(`[atlas] rescan agent created id=${created.id}`);
+      } catch (e: any) {
+        console.error(`[atlas] rescan failed:`, e);
+        sendTo(ws, { type: 'error', message: e?.message || 'Atlas rescan failed' });
+      }
+      break;
+    }
+
     case 'stop_agent': {
       const success = await agentService.stopAgent(message.agentId);
       if (!success) {

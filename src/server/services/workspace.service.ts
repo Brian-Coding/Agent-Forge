@@ -50,7 +50,7 @@ export const workspaceService = {
     return ws;
   },
 
-  async update(id: string, updates: { name?: string; gridColumns?: number; gridRows?: number; selectedAgentIds?: string[]; lockedAgentIds?: string[]; testUrl?: string; qaAgentId?: string; atlasAgentId?: string }): Promise<WorkspaceInfo | null> {
+  async update(id: string, updates: { name?: string; gridColumns?: number; gridRows?: number; selectedAgentIds?: string[]; lockedAgentIds?: string[]; testUrl?: string; qaAgentId?: string; atlasAgentId?: string; atlasProjectCwd?: string; atlasLastScanAt?: number }): Promise<WorkspaceInfo | null> {
     const ws = workspaces.get(id);
     if (!ws) return null;
     if (updates.name !== undefined) ws.name = updates.name;
@@ -61,6 +61,8 @@ export const workspaceService = {
     if (updates.testUrl !== undefined) ws.testUrl = updates.testUrl;
     if (updates.qaAgentId !== undefined) ws.qaAgentId = updates.qaAgentId;
     if (updates.atlasAgentId !== undefined) ws.atlasAgentId = updates.atlasAgentId;
+    if (updates.atlasProjectCwd !== undefined) ws.atlasProjectCwd = updates.atlasProjectCwd;
+    if (updates.atlasLastScanAt !== undefined) ws.atlasLastScanAt = updates.atlasLastScanAt;
     await persistenceService.saveNow();
     return ws;
   },
@@ -95,8 +97,13 @@ export const workspaceService = {
     return true;
   },
 
-  /** Add agent to workspace's selectedAgentIds in the first empty slot */
-  addAgentToWorkspace(wsId: string, agentId: string): void {
+  /**
+   * Add agent to workspace's selectedAgentIds in the first empty slot.
+   * If hideFromGrid is true, skip — the agent is workspace-scoped but not
+   * supposed to appear in the grid (e.g. UI Atlas Agent, QA Tester).
+   */
+  addAgentToWorkspace(wsId: string, agentId: string, hideFromGrid?: boolean): void {
+    if (hideFromGrid) return;
     const ws = workspaces.get(wsId);
     if (!ws) return;
     const totalSlots = ws.gridColumns * ws.gridRows;

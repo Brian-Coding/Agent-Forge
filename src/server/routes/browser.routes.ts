@@ -209,6 +209,47 @@ export async function handleBrowserEvaluate(req: Request): Promise<Response> {
 }
 
 /**
+ * Serve a UI Atlas file (atlas.md or screenshot) for the atlas viewer panel.
+ * Sandboxed: must resolve under <workspace.atlasProjectCwd>/docs/ui-atlas/.
+ *
+ * Query params:
+ *   - workspaceId: which workspace's atlas to read from
+ *   - relPath: relative path inside docs/ui-atlas/ (e.g. "atlas.md" or "shots/surface-galaxy.png")
+ */
+export async function handleAtlasFile(req: Request): Promise<Response> {
+  const url = new URL(req.url);
+  const workspaceId = url.searchParams.get('workspaceId');
+  const relPath = url.searchParams.get('relPath');
+  if (!workspaceId) return err('workspaceId required');
+  if (!relPath) return err('relPath required');
+
+  // Inline-import to avoid circular deps in the route module.
+  const { workspaceService } = await import('../services/workspace.service');
+  const ws = workspaceService.get(workspaceId);
+  if (!ws) return err('Workspace not found', 404);
+  if (!ws.atlasProjectCwd) return err('Workspace has no atlas project cwd', 404);
+
+  const atlasRoot = path.resolve(path.join(ws.atlasProjectCwd, 'docs', 'ui-atlas'));
+  const requested = path.resolve(path.join(atlasRoot, relPath));
+  if (!requested.startsWith(atlasRoot + path.sep) && requested !== atlasRoot) {
+    return err('relPath outside atlas root', 403);
+  }
+
+  const file = Bun.file(requested);
+  if (!(await file.exists())) return err('not found', 404);
+  // Pick a reasonable content-type by extension.
+  const ext = path.extname(requested).toLowerCase();
+  const contentType = ext === '.md' ? 'text/markdown; charset=utf-8'
+    : ext === '.png' ? 'image/png'
+    : ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg'
+    : ext === '.json' ? 'application/json'
+    : 'application/octet-stream';
+  return new Response(file, {
+    headers: { 'content-type': contentType, 'cache-control': 'no-cache' },
+  });
+}
+
+/**
  * Serve a QA screenshot from disk. Path validation: must be inside
  * os.tmpdir()/agent-forge-qa/, must end in .png. Used by the frontend
  * to render screenshots inline in the QA panel without base64-encoding

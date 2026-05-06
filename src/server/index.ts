@@ -16,7 +16,7 @@ import { handleDirectories } from './routes/directories.routes';
 import { handleGetPorts, handleKillPort } from './routes/ports.routes';
 import { handleGitBranch } from './routes/git.routes';
 import { handleListSimulators, handleBootSimulator, handleShutdownSimulator, handleEraseSimulator, handleCleanDerivedData } from './routes/simulator.routes';
-import { handleBrowserNavigate, handleBrowserScreenshot, handleBrowserClick, handleBrowserType, handleBrowserWaitForReady, handleBrowserConsoleGet, handleBrowserConsoleClear, handleBrowserStatus, handleBrowserEvaluate, handleQaScreenshot } from './routes/browser.routes';
+import { handleBrowserNavigate, handleBrowserScreenshot, handleBrowserClick, handleBrowserType, handleBrowserWaitForReady, handleBrowserConsoleGet, handleBrowserConsoleClear, handleBrowserStatus, handleBrowserEvaluate, handleQaScreenshot, handleAtlasFile } from './routes/browser.routes';
 
 // Catch unhandled promise rejections to prevent silent crashes
 process.on('unhandledRejection', (reason, promise) => {
@@ -99,6 +99,7 @@ const server = Bun.serve({
     if (url.pathname === '/api/browser/status' && req.method === 'GET') return handleBrowserStatus(req);
     if (url.pathname === '/api/browser/evaluate' && req.method === 'POST') return handleBrowserEvaluate(req);
     if (url.pathname === '/api/qa/screenshot' && req.method === 'GET') return handleQaScreenshot(req);
+    if (url.pathname === '/api/atlas/file' && req.method === 'GET') return handleAtlasFile(req);
 
     return new Response('Not Found', { status: 404 });
   },
