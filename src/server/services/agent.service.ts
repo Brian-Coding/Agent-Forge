@@ -1462,6 +1462,10 @@ export const agentService = {
       .replace(/{TEST_URL}/g, ws.testUrl);
 
     const created = await agentService.createAgent('UI Atlas Agent', projectCwd, [], systemPrompt, workspaceId);
+    // Store the atlas agent's id on the workspace so the frontend can find it
+    // (for the progress widget) and so re-spawn / status logic has a stable handle.
+    const updated = await workspaceService.update(workspaceId, { atlasAgentId: created.id });
+    if (updated) broadcast({ type: 'workspace_updated', workspace: updated });
     return created;
   },
 

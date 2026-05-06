@@ -7,6 +7,54 @@ import { broadcast } from '../broadcast';
 import * as path from 'node:path';
 import * as os from 'node:os';
 
+// ============== Stuck-pattern detection ==============
+// Track recent browser endpoint calls per workspace. If the agent makes the same
+// call (endpoint + args) 5 times in a row, broadcast an advisory warning.
+// Once unstuck (different call), the streak resets.
+//
+// HMR-safe state via globalThis so it survives `bun --hot` reloads.
+interface CallRecord { endpoint: string; argsHash: string; timestamp: number }
+const callHistoryByWs: Map<string, CallRecord[]> =
+  ((globalThis as any).__browserCallHistory ??= new Map<string, CallRecord[]>());
+const lastWarnedFor: Map<string, string> =
+  ((globalThis as any).__browserLastWarnedFor ??= new Map<string, string>());
+
+const STUCK_REPEAT_THRESHOLD = 5;
+const HISTORY_LIMIT = 20;
+
+function trackBrowserCall(workspaceId: string, endpoint: string, args: any): void {
+  const argsHash = (() => {
+    try { return JSON.stringify(args ?? {}).slice(0, 200); }
+    catch { return '<unserializable>'; }
+  })();
+  const record: CallRecord = { endpoint, argsHash, timestamp: Date.now() };
+  const history = callHistoryByWs.get(workspaceId) ?? [];
+  history.push(record);
+  while (history.length > HISTORY_LIMIT) history.shift();
+  callHistoryByWs.set(workspaceId, history);
+
+  if (history.length < STUCK_REPEAT_THRESHOLD) return;
+  const recent = history.slice(-STUCK_REPEAT_THRESHOLD);
+  const allSame = recent.every(r => r.endpoint === record.endpoint && r.argsHash === record.argsHash);
+  const streakKey = `${endpoint}|${argsHash}`;
+  if (allSame) {
+    if (lastWarnedFor.get(workspaceId) !== streakKey) {
+      lastWarnedFor.set(workspaceId, streakKey);
+      console.warn(`[qa-stuck] ws=${workspaceId} endpoint=${endpoint} repeated ${STUCK_REPEAT_THRESHOLD}x args=${argsHash}`);
+      broadcast({
+        type: 'qa_stuck_warning',
+        workspaceId,
+        endpoint,
+        repeatCount: STUCK_REPEAT_THRESHOLD,
+        argsPreview: argsHash,
+      });
+    }
+  } else {
+    lastWarnedFor.delete(workspaceId);
+  }
+}
+// ====================================================
+
 function err(msg: string, status = 400): Response {
   return jsonResponse({ ok: false, error: msg }, status);
 }
@@ -27,6 +75,7 @@ export async function handleBrowserNavigate(req: Request): Promise<Response> {
   const url = requireString(body, 'url');
   if (!workspaceId) return err('workspaceId required');
   if (!url) return err('url required');
+  trackBrowserCall(workspaceId, 'navigate', { url });
   try {
     const r = await browserService.navigate(workspaceId, url);
     return jsonResponse({ ok: true, ...r });
@@ -39,6 +88,7 @@ export async function handleBrowserScreenshot(req: Request): Promise<Response> {
   const body = await readJson(req);
   const workspaceId = requireString(body, 'workspaceId');
   if (!workspaceId) return err('workspaceId required');
+  trackBrowserCall(workspaceId, 'screenshot', { selector: body.selector, fullPage: body.fullPage === true });
   try {
     const path = await browserService.screenshot(workspaceId, {
       selector: typeof body.selector === 'string' ? body.selector : undefined,
@@ -58,6 +108,7 @@ export async function handleBrowserClick(req: Request): Promise<Response> {
   const selector = requireString(body, 'selector');
   if (!workspaceId) return err('workspaceId required');
   if (!selector) return err('selector required');
+  trackBrowserCall(workspaceId, 'click', { selector });
   try {
     await browserService.click(workspaceId, selector);
     return jsonResponse({ ok: true });
@@ -74,6 +125,7 @@ export async function handleBrowserType(req: Request): Promise<Response> {
   if (!workspaceId) return err('workspaceId required');
   if (!selector) return err('selector required');
   if (text === null) return err('text required');
+  trackBrowserCall(workspaceId, 'type', { selector, text });
   try {
     await browserService.type(workspaceId, selector, text);
     return jsonResponse({ ok: true });
@@ -86,6 +138,7 @@ export async function handleBrowserWaitForReady(req: Request): Promise<Response>
   const body = await readJson(req);
   const workspaceId = requireString(body, 'workspaceId');
   if (!workspaceId) return err('workspaceId required');
+  trackBrowserCall(workspaceId, 'wait-for-ready', {});
   try {
     const r = await browserService.waitForReady(workspaceId);
     return jsonResponse({ ok: true, ...r });
@@ -145,6 +198,7 @@ export async function handleBrowserEvaluate(req: Request): Promise<Response> {
   const script = requireString(body, 'script');
   if (!workspaceId) return err('workspaceId required');
   if (!script) return err('script (non-empty string) required');
+  trackBrowserCall(workspaceId, 'evaluate', { script: script.slice(0, 120) });
   try {
     const result = await browserService.evaluate(workspaceId, script);
     return jsonResponse({ ok: true, result });

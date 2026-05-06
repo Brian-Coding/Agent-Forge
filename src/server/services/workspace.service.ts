@@ -50,7 +50,7 @@ export const workspaceService = {
     return ws;
   },
 
-  async update(id: string, updates: { name?: string; gridColumns?: number; gridRows?: number; selectedAgentIds?: string[]; lockedAgentIds?: string[]; testUrl?: string; qaAgentId?: string }): Promise<WorkspaceInfo | null> {
+  async update(id: string, updates: { name?: string; gridColumns?: number; gridRows?: number; selectedAgentIds?: string[]; lockedAgentIds?: string[]; testUrl?: string; qaAgentId?: string; atlasAgentId?: string }): Promise<WorkspaceInfo | null> {
     const ws = workspaces.get(id);
     if (!ws) return null;
     if (updates.name !== undefined) ws.name = updates.name;
@@ -60,6 +60,7 @@ export const workspaceService = {
     if (updates.lockedAgentIds !== undefined) ws.lockedAgentIds = updates.lockedAgentIds;
     if (updates.testUrl !== undefined) ws.testUrl = updates.testUrl;
     if (updates.qaAgentId !== undefined) ws.qaAgentId = updates.qaAgentId;
+    if (updates.atlasAgentId !== undefined) ws.atlasAgentId = updates.atlasAgentId;
     await persistenceService.saveNow();
     return ws;
   },

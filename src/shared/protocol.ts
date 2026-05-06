@@ -12,6 +12,7 @@ export interface WorkspaceInfo {
   createdAt: number;
   testUrl?: string;            // URL the QA agent navigates to (e.g. http://localhost:5173)
   qaAgentId?: string;          // ID of the QA testing agent provisioned for this workspace (set lazily on first QA chat send)
+  atlasAgentId?: string;       // ID of the UI Atlas agent provisioned for this workspace (explicit user action via the "Create UI Atlas Agent" button)
 }
 
 export interface AgentInfo {
@@ -166,6 +167,7 @@ export type ServerMessage =
   // QA testing
   | { type: 'qa_results_ready'; workspaceId: string; sourceAgentId: string }
   | { type: 'qa_screenshot_taken'; workspaceId: string; path: string; timestamp: number }
+  | { type: 'qa_stuck_warning'; workspaceId: string; endpoint: string; repeatCount: number; argsPreview: string }
   // Terminals
   | { type: 'terminals_list'; terminals: TerminalSession[] }
   | { type: 'terminal_created'; terminal: TerminalSession }

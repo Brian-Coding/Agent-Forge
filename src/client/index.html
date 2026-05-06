@@ -401,6 +401,12 @@
     .workspace-atlas-btn { width: 100%; background: var(--bg-tertiary); border: 1px solid var(--border); color: var(--text-secondary); padding: 4px 8px; border-radius: 4px; font-size: 11px; cursor: pointer; transition: all 0.15s; }
     .workspace-atlas-btn:hover:not(:disabled) { background: rgba(86, 211, 100, 0.1); border-color: var(--qa-accent); color: var(--text-primary); }
     .workspace-atlas-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .workspace-atlas-running { padding: 4px 12px 6px; }
+    .workspace-atlas-status { display: flex; align-items: center; gap: 6px; padding: 5px 8px; background: rgba(86, 211, 100, 0.1); border: 1px solid var(--qa-accent-strong); border-radius: 4px; font-size: 11px; color: var(--qa-accent); font-weight: 500; }
+    .workspace-atlas-pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--qa-accent); flex-shrink: 0; box-shadow: 0 0 0 0 var(--qa-accent); animation: qa-pulse 2.5s infinite; }
+    .workspace-atlas-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .workspace-atlas-stop { background: none; border: 1px solid var(--qa-accent-strong); color: var(--qa-accent); cursor: pointer; padding: 0 6px; border-radius: 3px; font-size: 11px; flex-shrink: 0; }
+    .workspace-atlas-stop:hover { background: var(--error); color: white; border-color: var(--error); }
 
     /* QA testing button in panel header */
     .qa-header-btn.active { background: rgba(86, 211, 100, 0.18); color: var(--qa-accent); }
@@ -797,6 +803,16 @@
                   [msg.workspaceId]: [...(prev[msg.workspaceId] || []), { path: msg.path, timestamp: msg.timestamp }],
                 }));
                 break;
+              case 'qa_stuck_warning': {
+                const toastId = 'stuck-' + Date.now() + Math.random();
+                const text = '⚠️ QA agent looping: /' + msg.endpoint + ' called ' + msg.repeatCount + 'x with same args. Try /evaluate or skip this surface.';
+                setErrorToasts(prev => {
+                  const next = [...prev, { id: toastId, message: text }];
+                  return next.slice(-5);
+                });
+                setTimeout(() => setErrorToasts(prev => prev.filter(t => t.id !== toastId)), 12000);
+                break;
+              }
               // Terminals
               case 'terminals_list':
                 setTerminals(msg.terminals);
@@ -2136,7 +2152,7 @@
       );
     }
 
-    function WorkspacesSidebar({ workspaces, agents, activeWorkspaceId, onSelectWorkspace, onCreateWorkspace, onDeleteWorkspace, onRenameWorkspace, onUpdateWorkspaceTesting, onProvisionAtlas, onNewAgent, onEditAgent, onRemoveAgent, statusStartTimes }) {
+    function WorkspacesSidebar({ workspaces, agents, activeWorkspaceId, onSelectWorkspace, onCreateWorkspace, onDeleteWorkspace, onRenameWorkspace, onUpdateWorkspaceTesting, onProvisionAtlas, onStopAtlas, qaLiveShots, onNewAgent, onEditAgent, onRemoveAgent, statusStartTimes }) {
       const [showNewModal, setShowNewModal] = useState(false);
       const [renamingId, setRenamingId] = useState(null);
       const [renameValue, setRenameValue] = useState('');
@@ -2204,25 +2220,53 @@
                       onKeyDown: (ev) => { if (ev.key === 'Enter') ev.target.blur(); },
                     })
                   ),
-                  isActive && e('div', { className: 'workspace-atlas', onClick: (ev) => ev.stopPropagation() },
-                    e('button', {
-                      className: 'workspace-atlas-btn',
-                      disabled: !ws.testUrl,
-                      title: !ws.testUrl
-                        ? 'Set a Test URL first — the Atlas Agent walks the live app at that URL'
-                        : 'Create a UI Atlas Agent for this workspace. You will be prompted for the project repo path.',
-                      onClick: () => {
-                        if (!ws.testUrl) return;
-                        const firstAgent = wsAgents[0];
-                        const defaultCwd = firstAgent ? firstAgent.cwd : '';
-                        const cwd = window.prompt(
-                          'Path to the project repo for the Atlas Agent to read code from:\n\n(The agent will read source files in this directory and write the atlas to docs/ui-atlas/atlas.md inside it.)',
-                          defaultCwd
-                        );
-                        if (cwd && cwd.trim()) onProvisionAtlas(ws.id, cwd.trim());
-                      },
-                    }, '🗺️ Create UI Atlas Agent')
-                  ),
+                  isActive && (() => {
+                    const atlasAgent = ws.atlasAgentId ? agents.find(a => a.id === ws.atlasAgentId) : null;
+                    const atlasIsRunning = atlasAgent && (atlasAgent.status === 'working' || atlasAgent.status === 'thinking');
+                    const allShots = atlasIsRunning ? (qaLiveShots && qaLiveShots[ws.id]) || [] : [];
+                    // Filter shots since the agent's most recent run start (current 'working' streak)
+                    const runStartedAt = atlasIsRunning ? statusStartTimes[atlasAgent.id] : 0;
+                    const runShots = allShots.filter(s => !runStartedAt || s.timestamp >= runStartedAt);
+                    const elapsedMs = runStartedAt ? Date.now() - runStartedAt : 0;
+                    const fmtElapsed = (ms) => {
+                      if (ms < 60000) return Math.round(ms / 1000) + 's';
+                      const m = Math.floor(ms / 60000);
+                      const s = Math.round((ms % 60000) / 1000);
+                      return m + 'm' + (s ? ' ' + s + 's' : '');
+                    };
+                    if (atlasIsRunning) {
+                      return e('div', { className: 'workspace-atlas workspace-atlas-running', onClick: (ev) => ev.stopPropagation() },
+                        e('div', { className: 'workspace-atlas-status' },
+                          e('span', { className: 'workspace-atlas-pulse' }),
+                          e('span', { className: 'workspace-atlas-label' }, '🗺️ Atlas: ' + runShots.length + ' shots · ' + fmtElapsed(elapsedMs)),
+                          e('button', {
+                            className: 'workspace-atlas-stop',
+                            onClick: (ev) => { ev.stopPropagation(); if (confirm('Abort the in-flight Atlas scan? Partial output will remain.')) onStopAtlas(atlasAgent.id); },
+                            title: 'Abort the in-flight Atlas scan',
+                          }, '⏹')
+                        )
+                      );
+                    }
+                    return e('div', { className: 'workspace-atlas', onClick: (ev) => ev.stopPropagation() },
+                      e('button', {
+                        className: 'workspace-atlas-btn',
+                        disabled: !ws.testUrl,
+                        title: !ws.testUrl
+                          ? 'Set a Test URL first — the Atlas Agent walks the live app at that URL'
+                          : (atlasAgent ? 'Re-spawn the Atlas Agent for this workspace.' : 'Create a UI Atlas Agent for this workspace. You will be prompted for the project repo path.'),
+                        onClick: () => {
+                          if (!ws.testUrl) return;
+                          const firstAgent = wsAgents[0];
+                          const defaultCwd = atlasAgent ? atlasAgent.cwd : (firstAgent ? firstAgent.cwd : '');
+                          const cwd = window.prompt(
+                            'Path to the project repo for the Atlas Agent to read code from:\n\n(The agent will read source files in this directory and write the atlas to docs/ui-atlas/atlas.md inside it.)',
+                            defaultCwd
+                          );
+                          if (cwd && cwd.trim()) onProvisionAtlas(ws.id, cwd.trim());
+                        },
+                      }, atlasAgent ? '🗺️ Re-spawn Atlas Agent' : '🗺️ Create UI Atlas Agent')
+                    );
+                  })(),
                   isActive && wsAgents.length > 0 && e('div', { className: 'workspace-agents' },
                     wsAgents.map(agent =>
                       e('div', { key: agent.id, className: 'workspace-agent-chip' },
@@ -3059,6 +3103,8 @@
             onRenameWorkspace: (id, name) => ws.updateWorkspace(id, { name }),
             onUpdateWorkspaceTesting: (id, updates) => ws.updateWorkspace(id, updates),
             onProvisionAtlas: (workspaceId, projectCwd) => ws.provisionAtlasAgent(workspaceId, projectCwd),
+            onStopAtlas: (agentId) => ws.stopAgent(agentId),
+            qaLiveShots: ws.qaLiveShots,
             onNewAgent: () => { setEditingAgent(null); setShowModal(true); },
             onEditAgent: (agent) => { setEditingAgent(agent); setShowModal(true); },
             onRemoveAgent: ws.removeAgent,
