@@ -131,6 +131,29 @@ export async function handleBrowserStatus(req: Request): Promise<Response> {
 }
 
 /**
+ * Run an arbitrary JS expression in the page context. The Atlas Agent's primary
+ * escape hatch for canvas interactions and state mutation when click selectors
+ * don't work. Returns the JSON-serializable result of the expression.
+ *
+ * NOTE: this is powerful — arbitrary code in the page. We expose it because the
+ * Atlas Agent needs it to be exhaustive. If you ever ship this to a multi-tenant
+ * surface, gate it.
+ */
+export async function handleBrowserEvaluate(req: Request): Promise<Response> {
+  const body = await readJson(req);
+  const workspaceId = requireString(body, 'workspaceId');
+  const script = requireString(body, 'script');
+  if (!workspaceId) return err('workspaceId required');
+  if (!script) return err('script (non-empty string) required');
+  try {
+    const result = await browserService.evaluate(workspaceId, script);
+    return jsonResponse({ ok: true, result });
+  } catch (e: any) {
+    return err(e?.message || String(e), 500);
+  }
+}
+
+/**
  * Serve a QA screenshot from disk. Path validation: must be inside
  * os.tmpdir()/agent-forge-qa/, must end in .png. Used by the frontend
  * to render screenshots inline in the QA panel without base64-encoding

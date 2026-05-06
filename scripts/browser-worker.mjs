@@ -199,6 +199,21 @@ const handlers = {
     return { ok: true };
   },
 
+  'POST /evaluate': async (_req, body) => {
+    const wsCtx = await ensureContext(body.workspaceId);
+    if (typeof body.script !== 'string') throw new Error('script (string) required');
+    // page.evaluate runs the function in the page's window context. We wrap the
+    // user-supplied script in a function so it can use `return` if desired, and
+    // also handle bare expressions / statements transparently.
+    const wrapped = `(async () => { try { return (${body.script}); } catch (e) { try { ${body.script}; return undefined; } catch (e2) { throw e2; } } })()`;
+    const raw = await wsCtx.page.evaluate(wrapped);
+    // Make sure result is JSON-serializable. Stringify-then-parse to coerce.
+    let result;
+    try { result = JSON.parse(JSON.stringify(raw === undefined ? null : raw)); }
+    catch { result = String(raw); }
+    return { ok: true, result };
+  },
+
   'POST /shutdown': async () => {
     setImmediate(async () => {
       await shutdown();

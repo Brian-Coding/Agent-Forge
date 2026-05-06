@@ -30,6 +30,15 @@ async function main() {
 
   console.log('[smoke] status:', await browserService.getStatus(WS));
 
+  console.log('[smoke] evaluate page.title via page.evaluate...');
+  const title = await browserService.evaluate(WS, 'document.title');
+  console.log('[smoke] evaluate result:', title);
+
+  console.log('[smoke] evaluate state-style mutation (does it round-trip?)');
+  await browserService.evaluate(WS, "window.__smokeFlag = 'hello-from-evaluate'");
+  const readBack = await browserService.evaluate(WS, 'window.__smokeFlag');
+  console.log('[smoke] readBack:', readBack);
+
   console.log('[smoke] console output:', (await browserService.getConsoleOutput(WS)).slice(0, 5));
 
   console.log('[smoke] closing...');

@@ -225,4 +225,12 @@ export const browserService = {
     if (!this.isRunning()) return;
     await workerFetch('POST', '/console/clear', { workspaceId });
   },
+
+  // ============== Arbitrary script evaluation (powerful — Atlas use) ==============
+
+  async evaluate(workspaceId: string, script: string): Promise<any> {
+    await this.launch();
+    const r = await workerFetch('POST', '/evaluate', { workspaceId, script });
+    return r.result;
+  },
 };

@@ -207,12 +207,23 @@ Always include "workspaceId": "{WORKSPACE_ID}" in the JSON body or query string.
 - POST /wait-for-ready {"workspaceId":"{WORKSPACE_ID}"}
 - GET  /console?workspaceId={WORKSPACE_ID}
 - POST /console/clear {"workspaceId":"{WORKSPACE_ID}"}
+- POST /evaluate {"workspaceId":"{WORKSPACE_ID}","script":"..."}
+  -> Runs an arbitrary JavaScript expression in the page's context and returns the JSON-serializable result.
+  -> THIS IS YOUR PRIMARY ESCAPE HATCH for canvas interactions, state mutation, and reaching surfaces that don't have clickable selectors.
+  -> Examples:
+     - Read state: \`script: "JSON.stringify(window.__APP_STATE__?.selectedPlanetId)"\`
+     - Mutate state directly: \`script: "window.__store.setState({ selectedPlanetId: 'mars' })"\`
+     - Dispatch a synthetic event: \`script: "document.querySelector('canvas').dispatchEvent(new MouseEvent('dblclick', { clientX: 480, clientY: 320, bubbles: true }))"\`
+     - Invoke a debug hook: \`script: "window.debug?.skipTime?.(168)"\` (one week)
+  -> When standard /click fails twice on a surface, switch to /evaluate. Read the relevant component's source code to find the exposed store / handler / action, then call it directly.
 
 The application under test is at: {TEST_URL}
 
 ## Initial discovery workflow
 
-When the user asks you to build the initial atlas:
+When the user asks you to build the initial atlas, you will work through the
+following passes IN ORDER. There is NO time pressure — quality and
+exhaustiveness are the goals. Do not skip ahead. Do not satisfice.
 
 ### Pass 1 — Project structure (code only)
 1. \`ls\` the project root, identify the framework (React, Vue, etc.) and primary language.
@@ -222,7 +233,7 @@ When the user asks you to build the initial atlas:
 5. Identify state stores (Redux, Zustand, MobX, plain context, etc.) and the data types they hold.
 
 ### Pass 2 — Code-derived data entities
-6. For each significant data type (Fleet, Planet, User, Order — whatever your project has), read its full type definition. Note: schema fields, where it's defined, where it's mutated, services that produce/consume it.
+6. For each significant data type, read its full type definition. Note: schema fields, where it's defined, where it's mutated, services that produce/consume it.
 7. For each major UI component, read its full source. Note: what props it takes, what data it renders, what actions it triggers, what other components it composes.
 8. Build a tentative graph of "data X appears in component Y" relationships. This is a draft — it'll be refined by Pass 3.
 
@@ -241,10 +252,34 @@ When the user asks you to build the initial atlas:
 14. For each surface from Pass 3, identify which code component renders it (cross-reference \`grep\` if needed).
 15. Note any mismatches: entities defined in code but never observed, surfaces observed but you can't find the code that renders them, etc.
 
-### Pass 5 — Atlas document
-16. Write \`docs/ui-atlas/atlas.md\` per the schema below.
-17. Write \`docs/ui-atlas/changelog.md\` with one entry: "<DATE>: Initial scan. <N> surfaces, <M> entities."
-18. If you have time, write \`docs/ui-atlas/README.md\` with: schema version, last scan date, brief guide to other agents on how to query the atlas.
+### Pass 5 — State construction (cover the hard-to-reach surfaces)
+You will have a list of surfaces you couldn't reach in Pass 3 — modals that need a fleet selected, panels that need multiple owned systems, battle viewers that need an active battle, planet views that need canvas double-clicks that don't reliably fire from outside, etc. **You do not skip these.** Construct the state directly:
+
+16. For each surface still marked \`?\`:
+    - Read the relevant component code to identify exactly what state triggers the surface.
+    - Use the \`/api/browser/evaluate\` endpoint to construct that state — typically by mutating the app's store directly. Examples (project-specific; adapt to what you find in the code):
+      - Multi-system empire: locate the store, mutate \`state.factions[playerId].ownedSystemIds\` to add a second system. Then verify the Empire panel renders.
+      - Combat in progress: dispatch the start-battle action with a synthetic fleet pair. Verify the Battle Viewer modal opens.
+      - Planet view: set \`selectedPlanetId\` directly in the store. Then verify each of the planet view tabs renders.
+    - Take the screenshot. Update the entry's \`Last verified\` to today.
+    - Reset the state if subsequent surfaces depend on a clean slate.
+17. **State construction is for visibility purposes only.** It does NOT need to be "valid gameplay" — the atlas's job is to document the UI. A constructed state that produces a real-rendering surface is enough.
+
+### Pass 6 — Self-verification (DO NOT SKIP)
+Before you write the final atlas, run an explicit completion check:
+
+18. Count every surface ID you've identified. Call this N.
+19. For each surface, confirm it has a screenshot AND a \`Last verified\` date that is today (not \`?\`). Track exceptions in a list.
+20. For each entity in §1, confirm it appears in at least one surface entry that has been verified.
+21. If the exceptions list is non-empty:
+    - Go back to Pass 3 or Pass 5 and try again. Use \`/api/browser/evaluate\` more aggressively. Try alternate selectors. Try mutating different state shapes.
+    - **Only** put a surface in §7 (Open questions) with a \`?\` if you have made an honest, scripted attempt and documented exactly what you tried and what failed.
+22. Repeat steps 18-21 until either: every surface is verified, OR every exception has a specific documented attempt + failure reason.
+
+### Pass 7 — Write the atlas
+23. Write \`docs/ui-atlas/atlas.md\` per the schema below.
+24. Write \`docs/ui-atlas/changelog.md\` with one entry: "<DATE>: Initial scan. <N> surfaces (<verified>/<N> verified), <M> entities."
+25. Write \`docs/ui-atlas/README.md\` with: schema version, last scan date, brief guide to other agents on how to query the atlas, and a "Limitations of this scan" section listing the surfaces that genuinely couldn't be reached and why.
 
 ## Schema for atlas.md
 
@@ -309,17 +344,20 @@ ID: \`entity.<slug>\`
 
 ## 2. Visual surfaces (reverse index)
 
-(For each surface, summarize what data it shows. Useful for "given this screen, what data does it cover?".)
+(For each surface, EVERY field below is required. This is a true reverse index — given a surface, the user must be able to learn everything about it without jumping to §1. Do NOT use the "see surface.X" pointer pattern; spell out the data each surface displays.)
 
 ### <Surface name>
 - ID: \`surface.<slug>\`
-- Code: \`path/to/component.tsx\`
-- Mode availability: which modes this is visible in
-- Data shown: list of entities/fields
-- Sub-surfaces: nested surfaces (modal tabs, accordion sections)
-- Reachable modals/views from here: ...
-- Last verified: <date>
-- Known issues: free-form notes, link to §5 if applicable
+- Code: \`path/to/component.tsx:start-end\`
+- Mode availability: which game modes / app states show this surface
+- Path to reach: human-readable click sequence from app launch
+- Data shown: enumerated list of which entities (and which specific fields) are visible here. Be specific: "Fleet.name, Fleet.ships.length, Fleet.status (as colored dot)" not "Fleet stuff".
+- Sub-surfaces embedded: child surfaces nested inside this one (modal tabs, accordion sections, embedded panels)
+- Reachable from: which other surfaces / actions lead to this one
+- Reaches: which other surfaces this one leads to (modals it opens, views it triggers)
+- Screenshot: \`shots/<filename>.png\`
+- Last verified: <ISO date> (or \`?\` only with a specific failure note in §7)
+- Known issues: free-form notes; link to §5 if applicable
 
 ## 3. Mode states
 
@@ -362,17 +400,37 @@ The user has explicitly asked for HIGH granularity. Track every visible data ele
 
 When in doubt: if a user could click it, hover it, see it, or read it — it goes in the atlas.
 
-## Time budget
+## Completion criteria — when you are actually done
 
-The hard-kill timer is 30 minutes. For initial discovery, expect to use most of it. Pace yourself:
+There is NO time limit on this work. Take as long as it takes. The completion criteria are:
 
-- Minutes 0-3: project orientation (Pass 1)
-- Minutes 3-10: code reading (Pass 2)
-- Minutes 10-22: browser walkthrough (Pass 3)
-- Minutes 22-25: reconciliation (Pass 4)
-- Minutes 25-30: write the atlas (Pass 5) — STOP exploring, START writing
+1. **Every surface in §2 has at least one screenshot referenced.**
+2. **Every surface in §2 has \`Last verified: <today's date>\`** (not \`?\`).
+3. **Every entity in §1 has at least one screenshot reference somewhere in its surface entries.**
+4. **You have run Pass 6 (self-verification) and the exceptions list is empty** OR every exception is documented with a specific, scripted attempt that failed.
 
-A complete atlas at 28 minutes beats a partial one at 30. If you find yourself nearing minute 25 with significant code or browser work remaining, abandon the unfinished work, write what you have, note the gap in §7 (Open questions).
+Until ALL FOUR are true, you are NOT done. Don't write the final atlas; go back to Pass 3 / Pass 5 and try harder.
+
+Common patterns that look like "done" but aren't:
+- "I think I've covered the main surfaces." → Insufficient. Count them. List them. Verify each one.
+- "This surface needs state I can't construct." → Try \`/api/browser/evaluate\` first. The store is in the page's window scope; you can mutate it directly.
+- "This took longer than I expected." → Keep going. There's no clock.
+- "The user probably wants me to wrap up." → No. The user explicitly asked for exhaustive coverage. Wrapping up early is the failure mode they want you to avoid.
+
+The only legitimate reason to mark a surface unverified (\`?\`) is when you have:
+- (a) Read the relevant code and identified what state/event triggers the surface
+- (b) Attempted to construct that state via \`/api/browser/evaluate\` (or scripted clicks)
+- (c) Documented in §7 exactly what you tried and exactly why it failed (specific JS error, specific store path that didn't exist, etc.)
+
+A surface marked \`?\` with the comment "couldn't reach" is INSUFFICIENT. It must have specific failed attempts documented.
+
+## Anti-fixation guidance
+
+If you find yourself making the same browser call 3 times in a row without progress (e.g. clicking a selector that doesn't match, or looking for an element that won't appear), STOP that approach. Either:
+- Switch tactics: try a different selector, use \`/api/browser/evaluate\` to invoke the underlying handler directly, read more of the code to understand what's actually happening
+- Skip this specific element for now and continue with other work; come back to it later
+
+Do not loop forever on a single stuck point. But also: do not give up on the surface entirely without having tried multiple approaches.
 
 ## Update workflow (subsequent scans, not initial discovery)
 
