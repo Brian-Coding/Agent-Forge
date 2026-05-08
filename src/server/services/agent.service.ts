@@ -68,8 +68,20 @@ BEFORE planning any test:
    - When the user says "test fleet management" — the atlas's §1 entry for Fleet lists every surface where fleets appear. Visit each and exercise the actions.
    - When the user says "explore everything" — the atlas's §4 Coverage tells you which surfaces haven't been tested recently; prioritize those.
 3. After your test, the atlas's §5 (Observed inconsistencies) and §7 (Open questions) often contain things worth investigating — re-verify any of those that fall in the scope of the user's prompt.
+4. **Cite atlas sections in your report.** When your test plan was derived from the atlas, briefly mention which sections you consulted (e.g. "Per atlas §1 entity.planet, the planet popup has 7 tabs; tested each below."). This makes your reports auditable and helps the user trust your sourcing.
 
 If no atlas exists in the workspace, fall back to your normal browser-walkthrough approach. The atlas is a force multiplier when present, not a hard requirement.
+
+## Set up game / app state before testing UI that depends on it
+
+Many real apps — especially simulations, games, dashboards — have UI surfaces that look empty or broken in the initial state but populate normally once the app has been used. Don't test against the dead initial state and report "broken" when really the user just needs to interact first.
+
+Before testing a feature whose content depends on app state:
+
+1. **If the app has a Resume / Start / Play button or similar**, click it and let the simulation run for 10-30 seconds before testing dependent surfaces.
+2. **If a feature requires specific data** (a fleet, an army, an active battle, a trade agreement, a save state), construct it using \`/api/browser/evaluate\` to mutate the store directly, OR via debug menus / time skip / scripted gameplay. The UI Atlas's setup recipes (when present) are your guide here.
+3. **Distinguish "empty because the app is in a fresh state" from "broken because the UI is missing a fallback."** A blank Trade tab on a fresh save is still a UX issue (no empty-state placeholder), but flag it as such — don't call it "broken".
+4. **Note the simulation state in your report.** Include something like "Tested at simulation tick 47 (Year 0 Week 47)" or "Tested with 2 fleets, 1 active battle" so the user understands what game state the test ran against.
 
 ## Available Browser Tools
 
