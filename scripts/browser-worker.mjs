@@ -19,8 +19,16 @@ const READY_TIMEOUT_MS = 5000;
 const READY_DOM_QUIET_MS = 500;
 const READY_POST_FILE_CHANGE_DELAY_MS = 500;
 
+// Idle cleanup: contexts unused for longer than CONTEXT_IDLE_MS get closed
+// during the periodic sweep. Prevents BrowserContexts from accumulating
+// game state, retained DOM, WebGL textures, etc. across long sessions.
+const CONTEXT_IDLE_MS = 10 * 60 * 1000;     // 10 minutes
+const CONTEXT_SWEEP_INTERVAL_MS = 60 * 1000; // check every 1 minute
+const MEMORY_WARN_RSS_MB = 2048;             // warn if worker RSS exceeds 2 GB
+const MEMORY_CHECK_INTERVAL_MS = 60 * 1000;
+
 let browser = null;
-const contexts = new Map(); // workspaceId -> { context, page, consoleEntries, lastFileChangeAt }
+const contexts = new Map(); // workspaceId -> { context, page, consoleEntries, lastFileChangeAt, lastUsedAt }
 
 function screenshotsDir(workspaceId) {
   return path.join(os.tmpdir(), 'agent-forge-qa', workspaceId, 'screenshots');
@@ -64,16 +72,47 @@ async function ensureBrowser() {
 }
 
 async function ensureContext(workspaceId) {
-  if (contexts.has(workspaceId)) return contexts.get(workspaceId);
+  const existing = contexts.get(workspaceId);
+  if (existing) {
+    existing.lastUsedAt = Date.now();
+    return existing;
+  }
   await ensureBrowser();
   const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
   const page = await context.newPage();
-  const wsCtx = { context, page, consoleEntries: [], lastFileChangeAt: 0 };
+  const wsCtx = { context, page, consoleEntries: [], lastFileChangeAt: 0, lastUsedAt: Date.now() };
   page.on('console', (msg) => recordConsole(wsCtx, msg.type() || 'log', msg.text()));
   page.on('pageerror', (err) => recordConsole(wsCtx, 'error', err.message));
   contexts.set(workspaceId, wsCtx);
   return wsCtx;
 }
+
+// Periodic sweep: close contexts that haven't been used in a while. Prevents
+// memory creep from idle workspaces that opened a context once + never came
+// back. Runs forever while the worker is alive.
+const idleSweepTimer = setInterval(async () => {
+  const now = Date.now();
+  for (const [wsId, wsCtx] of contexts.entries()) {
+    if (now - wsCtx.lastUsedAt > CONTEXT_IDLE_MS) {
+      console.warn(`[browser-worker] closing idle context for workspace ${wsId} (idle ${Math.round((now - wsCtx.lastUsedAt) / 60000)}m)`);
+      try { await wsCtx.context.close(); } catch {}
+      contexts.delete(wsId);
+    }
+  }
+}, CONTEXT_SWEEP_INTERVAL_MS);
+idleSweepTimer.unref?.();
+
+// Periodic memory check. Worker should not exceed a few hundred MB normally.
+// 2 GB indicates a leak or accumulated state. Warn loudly so the operator
+// notices in stdout and can choose to recycle the worker manually.
+const memoryCheckTimer = setInterval(() => {
+  const rss = process.memoryUsage().rss;
+  const rssMb = Math.round(rss / 1024 / 1024);
+  if (rssMb > MEMORY_WARN_RSS_MB) {
+    console.warn(`[browser-worker] memory warning: RSS ${rssMb} MB exceeds ${MEMORY_WARN_RSS_MB} MB threshold (${contexts.size} active contexts). Consider recycling the worker.`);
+  }
+}, MEMORY_CHECK_INTERVAL_MS);
+memoryCheckTimer.unref?.();
 
 async function closeContext(workspaceId) {
   const wsCtx = contexts.get(workspaceId);

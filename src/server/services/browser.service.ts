@@ -151,6 +151,20 @@ export const browserService = {
     return state.proc !== null && state.port !== null;
   },
 
+  /**
+   * Recycle the worker — fully shut it down so the next operation spawns a
+   * fresh process. Use this between heavy long-running operations (atlas
+   * rebuilds, etc.) to release accumulated state from BrowserContexts,
+   * Chromium GPU/texture caches, retained DOM, etc.
+   *
+   * No-op if the worker isn't currently running.
+   */
+  async recycle(): Promise<void> {
+    if (!state.proc) return;
+    console.log('[browser] recycling worker — releasing accumulated state');
+    await this.close();
+  },
+
   // ============== Per-workspace context ==============
 
   async ensureContext(workspaceId: string): Promise<void> {

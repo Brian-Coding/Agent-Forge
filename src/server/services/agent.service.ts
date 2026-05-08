@@ -1513,6 +1513,14 @@ export const agentService = {
     if (!ws.testUrl) throw new Error('Workspace has no Test URL set — set one in the sidebar before provisioning the Atlas Agent');
     if (!existsSync(projectCwd)) throw new Error(`Project directory does not exist: ${projectCwd}`);
 
+    // Recycle the browser worker before a long atlas scan. The Playwright
+    // worker process accumulates state across operations (BrowserContexts,
+    // Chromium GPU caches, retained DOM, /api/browser/evaluate closures).
+    // For atlas builds — which run thousands of operations over an hour —
+    // starting from a clean worker reliably keeps memory in check.
+    const { browserService } = await import('./browser.service');
+    await browserService.recycle().catch(e => console.warn('[atlas] worker recycle failed (continuing):', e));
+
     // If an atlas already exists at the target path, archive it before
     // proceeding so the new run starts from a clean slate. This unifies
     // Build vs Re-scan UX — the only real difference is whether the user
