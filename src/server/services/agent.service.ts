@@ -407,6 +407,8 @@ ID: \`entity.<slug>\`
 
 - <DATE>: <change>
 
+CRITICAL for §6: when summarizing prior scans (e.g. "previous scan had X surfaces, Y entities"), READ THE NUMBERS FROM THE ARCHIVE'S FRONTMATTER. Look for prior atlas.md files under \`docs/ui-atlas/.history/<date>/atlas.md\` and read the YAML frontmatter (total_surfaces, total_entities) directly. Do NOT summarize from memory or guess — historical numbers must match the archived files exactly. If no archive exists, just write "Initial scan" without inventing prior counts.
+
 ## 7. Open questions
 
 - Things you weren't sure about; design choices that may be intentional but seem unusual; bugs you suspect but can't confirm.
@@ -1498,6 +1500,29 @@ export const agentService = {
     if (!ws) throw new Error(`Workspace not found: ${workspaceId}`);
     if (!ws.testUrl) throw new Error('Workspace has no Test URL set — set one in the sidebar before provisioning the Atlas Agent');
     if (!existsSync(projectCwd)) throw new Error(`Project directory does not exist: ${projectCwd}`);
+
+    // If an atlas already exists at the target path, archive it before
+    // proceeding so the new run starts from a clean slate. This unifies
+    // Build vs Re-scan UX — the only real difference is whether the user
+    // had to enter the cwd via prompt (Build) or used the saved one
+    // (Re-scan). Either way the prior output is preserved under .history/.
+    const atlasMdPath = join(projectCwd, 'docs', 'ui-atlas', 'atlas.md');
+    if (existsSync(atlasMdPath)) {
+      try {
+        const fs = await import('node:fs/promises');
+        const path = await import('node:path');
+        const atlasDir = path.join(projectCwd, 'docs', 'ui-atlas');
+        const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const archiveDir = path.join(atlasDir, '.history', stamp);
+        await fs.mkdir(archiveDir, { recursive: true });
+        try { await fs.rename(path.join(atlasDir, 'atlas.md'), path.join(archiveDir, 'atlas.md')); } catch {}
+        try { await fs.copyFile(path.join(atlasDir, 'changelog.md'), path.join(archiveDir, 'changelog.md')); } catch {}
+        try { await fs.rename(path.join(atlasDir, 'shots'), path.join(archiveDir, 'shots')); } catch {}
+        console.log(`[atlas] Build detected existing atlas — archived to ${archiveDir}`);
+      } catch (e) {
+        console.warn('[atlas] archive step failed during Build (continuing):', e);
+      }
+    }
 
     const port = guiPort > 0 ? guiPort : 3333;
     const systemPrompt = UI_ATLAS_SYSTEM_PROMPT_TEMPLATE

@@ -141,8 +141,25 @@ export const workspaceService = {
     setAgentWorkspace: (agentId: string, wsId: string) => void,
   ): Promise<void> {
     if (workspacesList && workspacesList.length > 0) {
+      // Lazy import — workspace.service runs at boot before any node:fs use.
+      const { existsSync, statSync } = await import('node:fs');
+      const { join } = await import('node:path');
       for (const ws of workspacesList) {
         ws.lockedAgentIds = ws.lockedAgentIds || [];
+        // If an atlas.md exists at the workspace's atlasProjectCwd but
+        // atlasLastScanAt is unset (e.g. the user manually deleted the
+        // previous atlas agent), stamp it from the file's mtime so the
+        // workspace tab pill correctly shows State B (idle, atlas exists)
+        // instead of State A (not built yet).
+        if (ws.atlasProjectCwd && !ws.atlasLastScanAt) {
+          const atlasMd = join(ws.atlasProjectCwd, 'docs', 'ui-atlas', 'atlas.md');
+          if (existsSync(atlasMd)) {
+            try {
+              ws.atlasLastScanAt = statSync(atlasMd).mtimeMs;
+              console.log(`[workspace] retroactively stamped atlasLastScanAt for ${ws.name} from atlas.md mtime`);
+            } catch {}
+          }
+        }
         workspaces.set(ws.id, ws);
       }
     }
