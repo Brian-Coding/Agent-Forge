@@ -50,7 +50,7 @@ export const workspaceService = {
     return ws;
   },
 
-  async update(id: string, updates: { name?: string; gridColumns?: number; gridRows?: number; selectedAgentIds?: string[]; lockedAgentIds?: string[] }): Promise<WorkspaceInfo | null> {
+  async update(id: string, updates: { name?: string; gridColumns?: number; gridRows?: number; selectedAgentIds?: string[]; lockedAgentIds?: string[]; testUrl?: string; qaAgentId?: string; atlasAgentId?: string; atlasProjectCwd?: string; atlasLastScanAt?: number; qaSurfaceVerifications?: Record<string, number> }): Promise<WorkspaceInfo | null> {
     const ws = workspaces.get(id);
     if (!ws) return null;
     if (updates.name !== undefined) ws.name = updates.name;
@@ -58,6 +58,12 @@ export const workspaceService = {
     if (updates.gridRows !== undefined) ws.gridRows = updates.gridRows;
     if (updates.selectedAgentIds !== undefined) ws.selectedAgentIds = updates.selectedAgentIds;
     if (updates.lockedAgentIds !== undefined) ws.lockedAgentIds = updates.lockedAgentIds;
+    if (updates.testUrl !== undefined) ws.testUrl = updates.testUrl;
+    if (updates.qaAgentId !== undefined) ws.qaAgentId = updates.qaAgentId;
+    if (updates.atlasAgentId !== undefined) ws.atlasAgentId = updates.atlasAgentId;
+    if (updates.atlasProjectCwd !== undefined) ws.atlasProjectCwd = updates.atlasProjectCwd;
+    if (updates.atlasLastScanAt !== undefined) ws.atlasLastScanAt = updates.atlasLastScanAt;
+    if (updates.qaSurfaceVerifications !== undefined) ws.qaSurfaceVerifications = updates.qaSurfaceVerifications;
     await persistenceService.saveNow();
     return ws;
   },
@@ -92,8 +98,13 @@ export const workspaceService = {
     return true;
   },
 
-  /** Add agent to workspace's selectedAgentIds in the first empty slot */
-  addAgentToWorkspace(wsId: string, agentId: string): void {
+  /**
+   * Add agent to workspace's selectedAgentIds in the first empty slot.
+   * If hideFromGrid is true, skip — the agent is workspace-scoped but not
+   * supposed to appear in the grid (e.g. UI Atlas Agent, QA Tester).
+   */
+  addAgentToWorkspace(wsId: string, agentId: string, hideFromGrid?: boolean): void {
+    if (hideFromGrid) return;
     const ws = workspaces.get(wsId);
     if (!ws) return;
     const totalSlots = ws.gridColumns * ws.gridRows;
@@ -131,8 +142,28 @@ export const workspaceService = {
     setAgentWorkspace: (agentId: string, wsId: string) => void,
   ): Promise<void> {
     if (workspacesList && workspacesList.length > 0) {
+      // Lazy import — workspace.service runs at boot before any node:fs use.
+      const { existsSync, statSync } = await import('node:fs');
+      const { join } = await import('node:path');
       for (const ws of workspacesList) {
         ws.lockedAgentIds = ws.lockedAgentIds || [];
+        // Reconcile atlasLastScanAt against atlas.md mtime. Stamps when unset
+        // (user manually deleted the agent before we shipped the timestamp
+        // tracking) and also bumps a stale stamp forward when the file is
+        // newer (run errored / timed out after writing the atlas, leaving
+        // the in-memory stamp behind on-disk reality).
+        if (ws.atlasProjectCwd) {
+          const atlasMd = join(ws.atlasProjectCwd, 'docs', 'ui-atlas', 'atlas.md');
+          if (existsSync(atlasMd)) {
+            try {
+              const mtime = statSync(atlasMd).mtimeMs;
+              if ((ws.atlasLastScanAt ?? 0) < mtime) {
+                ws.atlasLastScanAt = mtime;
+                console.log(`[workspace] reconciled atlasLastScanAt for ${ws.name} from atlas.md mtime`);
+              }
+            } catch {}
+          }
+        }
         workspaces.set(ws.id, ws);
       }
     }

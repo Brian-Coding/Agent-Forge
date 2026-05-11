@@ -64,6 +64,60 @@ async function handleMessage(ws: ServerWebSocket<unknown>, message: ClientMessag
       break;
     }
 
+    case 'send_qa_message': {
+      try {
+        console.log(`[qa] send_qa_message ws=${message.workspaceId} src=${message.sourceAgentId} content="${message.content.slice(0, 80)}..."`);
+        await agentService.sendQaMessage(message.workspaceId, message.sourceAgentId, message.content);
+        console.log(`[qa] send_qa_message dispatched ok`);
+      } catch (e: any) {
+        console.error(`[qa] send_qa_message failed:`, e);
+        sendTo(ws, { type: 'error', message: e?.message || 'QA send failed' });
+      }
+      break;
+    }
+
+    case 'abort_qa_test': {
+      try {
+        const wsInfo = workspaceService.get(message.workspaceId);
+        if (!wsInfo) throw new Error('Workspace not found');
+        if (!wsInfo.qaAgentId) throw new Error('No QA agent provisioned');
+        console.log(`[qa] abort_qa_test ws=${message.workspaceId} qa=${wsInfo.qaAgentId}`);
+        await agentService.stopAgent(wsInfo.qaAgentId);
+      } catch (e: any) {
+        console.error(`[qa] abort_qa_test failed:`, e);
+        sendTo(ws, { type: 'error', message: e?.message || 'QA abort failed' });
+      }
+      break;
+    }
+
+    case 'provision_atlas_agent': {
+      try {
+        console.log(`[atlas] provision ws=${message.workspaceId} cwd=${message.projectCwd}`);
+        const created = await agentService.provisionAtlasAgent(message.workspaceId, message.projectCwd);
+        broadcast({ type: 'agent_created', agent: created });
+        broadcast({ type: 'agents_list', agents: agentService.getAgents() });
+        console.log(`[atlas] agent created id=${created.id}`);
+      } catch (e: any) {
+        console.error(`[atlas] provision failed:`, e);
+        sendTo(ws, { type: 'error', message: e?.message || 'Atlas provisioning failed' });
+      }
+      break;
+    }
+
+    case 'rescan_atlas': {
+      try {
+        console.log(`[atlas] rescan ws=${message.workspaceId}`);
+        const created = await agentService.rescanAtlas(message.workspaceId);
+        broadcast({ type: 'agent_created', agent: created });
+        broadcast({ type: 'agents_list', agents: agentService.getAgents() });
+        console.log(`[atlas] rescan agent created id=${created.id}`);
+      } catch (e: any) {
+        console.error(`[atlas] rescan failed:`, e);
+        sendTo(ws, { type: 'error', message: e?.message || 'Atlas rescan failed' });
+      }
+      break;
+    }
+
     case 'stop_agent': {
       const success = await agentService.stopAgent(message.agentId);
       if (!success) {

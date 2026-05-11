@@ -10,6 +10,12 @@ export interface WorkspaceInfo {
   selectedAgentIds: string[];
   lockedAgentIds: string[];    // Agents locked to their current grid slot
   createdAt: number;
+  testUrl?: string;            // URL the QA agent navigates to (e.g. http://localhost:5173)
+  qaAgentId?: string;          // ID of the QA testing agent provisioned for this workspace (set lazily on first QA chat send)
+  atlasAgentId?: string;       // ID of the UI Atlas agent provisioned for this workspace (explicit user action via the "Create UI Atlas Agent" button)
+  atlasProjectCwd?: string;    // Project directory the Atlas agent reads from (and writes docs/ui-atlas/ into). Persisted so re-scans don't re-prompt.
+  atlasLastScanAt?: number;    // Timestamp of last completed atlas scan (when atlas agent transitioned working → idle).
+  qaSurfaceVerifications?: Record<string, number>; // surface slug -> last QA-verification timestamp. Stamped when a QA report references surface.<slug>.
 }
 
 export interface AgentInfo {
@@ -21,6 +27,7 @@ export interface AgentInfo {
   status: AgentStatus;
   createdAt: number;
   workspaceId: string;        // Workspace this agent belongs to
+  hideFromGrid?: boolean;     // True for special-purpose agents (UI Atlas, QA Tester) that shouldn't take grid slots or appear in chip lists
 }
 
 export interface ChatMessage {
@@ -31,6 +38,7 @@ export interface ChatMessage {
   timestamp: number;
   imageData?: string;         // Base64 encoded image data
   imageMimeType?: string;     // e.g. 'image/png', 'image/jpeg'
+  source?: 'qa';              // QA-originated message (for visual styling)
 }
 
 export interface ProjectNote {
@@ -111,9 +119,15 @@ export type ClientMessage =
   // Workspaces
   | { type: 'get_workspaces' }
   | { type: 'create_workspace'; name: string }
-  | { type: 'update_workspace'; id: string; name?: string; gridColumns?: number; gridRows?: number; selectedAgentIds?: string[]; lockedAgentIds?: string[] }
+  | { type: 'update_workspace'; id: string; name?: string; gridColumns?: number; gridRows?: number; selectedAgentIds?: string[]; lockedAgentIds?: string[]; testUrl?: string }
   | { type: 'delete_workspace'; id: string }
   | { type: 'set_active_workspace'; id: string }
+  // QA testing
+  | { type: 'send_qa_message'; workspaceId: string; sourceAgentId: string; content: string }
+  | { type: 'abort_qa_test'; workspaceId: string }
+  // UI Atlas
+  | { type: 'provision_atlas_agent'; workspaceId: string; projectCwd: string }
+  | { type: 'rescan_atlas'; workspaceId: string }
   // Terminals
   | { type: 'create_terminal'; agentId: string; command: string }
   | { type: 'kill_terminal'; id: string }
@@ -155,6 +169,10 @@ export type ServerMessage =
   | { type: 'workspace_created'; workspace: WorkspaceInfo }
   | { type: 'workspace_updated'; workspace: WorkspaceInfo }
   | { type: 'workspace_deleted'; id: string }
+  // QA testing
+  | { type: 'qa_results_ready'; workspaceId: string; sourceAgentId: string }
+  | { type: 'qa_screenshot_taken'; workspaceId: string; path: string; timestamp: number }
+  | { type: 'qa_stuck_warning'; workspaceId: string; endpoint: string; repeatCount: number; argsPreview: string }
   // Terminals
   | { type: 'terminals_list'; terminals: TerminalSession[] }
   | { type: 'terminal_created'; terminal: TerminalSession }

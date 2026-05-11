@@ -8,6 +8,7 @@ import { workspaceService } from './services/workspace.service';
 import { documentService } from './services/document.service';
 import { agentService, initAgentService } from './services/agent.service';
 import { terminalService } from './services/terminal.service';
+import { browserService } from './services/browser.service';
 
 import { websocketHandlers } from './ws';
 
@@ -15,6 +16,7 @@ import { handleDirectories } from './routes/directories.routes';
 import { handleGetPorts, handleKillPort } from './routes/ports.routes';
 import { handleGitBranch } from './routes/git.routes';
 import { handleListSimulators, handleBootSimulator, handleShutdownSimulator, handleEraseSimulator, handleCleanDerivedData } from './routes/simulator.routes';
+import { handleBrowserNavigate, handleBrowserScreenshot, handleBrowserClick, handleBrowserType, handleBrowserWaitForReady, handleBrowserConsoleGet, handleBrowserConsoleClear, handleBrowserStatus, handleBrowserEvaluate, handleQaScreenshot, handleAtlasFile } from './routes/browser.routes';
 
 // Catch unhandled promise rejections to prevent silent crashes
 process.on('unhandledRejection', (reason, promise) => {
@@ -87,6 +89,17 @@ const server = Bun.serve({
     if (url.pathname === '/api/simulators/shutdown' && req.method === 'POST') return handleShutdownSimulator(req);
     if (url.pathname === '/api/simulators/erase' && req.method === 'POST') return handleEraseSimulator(req);
     if (url.pathname === '/api/simulators/clean-derived-data' && req.method === 'POST') return handleCleanDerivedData(req);
+    if (url.pathname === '/api/browser/navigate' && req.method === 'POST') return handleBrowserNavigate(req);
+    if (url.pathname === '/api/browser/screenshot' && req.method === 'POST') return handleBrowserScreenshot(req);
+    if (url.pathname === '/api/browser/click' && req.method === 'POST') return handleBrowserClick(req);
+    if (url.pathname === '/api/browser/type' && req.method === 'POST') return handleBrowserType(req);
+    if (url.pathname === '/api/browser/wait-for-ready' && req.method === 'POST') return handleBrowserWaitForReady(req);
+    if (url.pathname === '/api/browser/console' && req.method === 'GET') return handleBrowserConsoleGet(req);
+    if (url.pathname === '/api/browser/console/clear' && req.method === 'POST') return handleBrowserConsoleClear(req);
+    if (url.pathname === '/api/browser/status' && req.method === 'GET') return handleBrowserStatus(req);
+    if (url.pathname === '/api/browser/evaluate' && req.method === 'POST') return handleBrowserEvaluate(req);
+    if (url.pathname === '/api/qa/screenshot' && req.method === 'GET') return handleQaScreenshot(req);
+    if (url.pathname === '/api/atlas/file' && req.method === 'GET') return handleAtlasFile(req);
 
     return new Response('Not Found', { status: 404 });
   },
@@ -99,6 +112,7 @@ const server = Bun.serve({
   },
 });
 
+agentService.setGuiPort(server.port ?? 0);
 console.log(`Server running at http://localhost:${server.port}`);
 
 // --- Graceful shutdown ---
@@ -108,6 +122,7 @@ async function shutdown() {
     (async () => {
       await agentService.shutdownAll();
       await terminalService.killAll();
+      await browserService.close();
     })(),
     new Promise<void>(resolve => setTimeout(() => {
       console.warn('Shutdown timeout — force killing all processes...');
