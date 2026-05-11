@@ -201,7 +201,7 @@ export const browserService = {
 
   // ============== Screenshots ==============
 
-  async screenshot(workspaceId: string, opts: { selector?: string; fullPage?: boolean; name?: string } = {}): Promise<string> {
+  async screenshot(workspaceId: string, opts: { selector?: string; fullPage?: boolean; name?: string; outDir?: string } = {}): Promise<string> {
     await this.launch();
     const r = await workerFetch('POST', '/screenshot', { workspaceId, ...opts });
     return r.path;

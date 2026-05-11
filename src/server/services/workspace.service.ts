@@ -50,7 +50,7 @@ export const workspaceService = {
     return ws;
   },
 
-  async update(id: string, updates: { name?: string; gridColumns?: number; gridRows?: number; selectedAgentIds?: string[]; lockedAgentIds?: string[]; testUrl?: string; qaAgentId?: string; atlasAgentId?: string; atlasProjectCwd?: string; atlasLastScanAt?: number }): Promise<WorkspaceInfo | null> {
+  async update(id: string, updates: { name?: string; gridColumns?: number; gridRows?: number; selectedAgentIds?: string[]; lockedAgentIds?: string[]; testUrl?: string; qaAgentId?: string; atlasAgentId?: string; atlasProjectCwd?: string; atlasLastScanAt?: number; qaSurfaceVerifications?: Record<string, number> }): Promise<WorkspaceInfo | null> {
     const ws = workspaces.get(id);
     if (!ws) return null;
     if (updates.name !== undefined) ws.name = updates.name;
@@ -63,6 +63,7 @@ export const workspaceService = {
     if (updates.atlasAgentId !== undefined) ws.atlasAgentId = updates.atlasAgentId;
     if (updates.atlasProjectCwd !== undefined) ws.atlasProjectCwd = updates.atlasProjectCwd;
     if (updates.atlasLastScanAt !== undefined) ws.atlasLastScanAt = updates.atlasLastScanAt;
+    if (updates.qaSurfaceVerifications !== undefined) ws.qaSurfaceVerifications = updates.qaSurfaceVerifications;
     await persistenceService.saveNow();
     return ws;
   },
@@ -146,17 +147,20 @@ export const workspaceService = {
       const { join } = await import('node:path');
       for (const ws of workspacesList) {
         ws.lockedAgentIds = ws.lockedAgentIds || [];
-        // If an atlas.md exists at the workspace's atlasProjectCwd but
-        // atlasLastScanAt is unset (e.g. the user manually deleted the
-        // previous atlas agent), stamp it from the file's mtime so the
-        // workspace tab pill correctly shows State B (idle, atlas exists)
-        // instead of State A (not built yet).
-        if (ws.atlasProjectCwd && !ws.atlasLastScanAt) {
+        // Reconcile atlasLastScanAt against atlas.md mtime. Stamps when unset
+        // (user manually deleted the agent before we shipped the timestamp
+        // tracking) and also bumps a stale stamp forward when the file is
+        // newer (run errored / timed out after writing the atlas, leaving
+        // the in-memory stamp behind on-disk reality).
+        if (ws.atlasProjectCwd) {
           const atlasMd = join(ws.atlasProjectCwd, 'docs', 'ui-atlas', 'atlas.md');
           if (existsSync(atlasMd)) {
             try {
-              ws.atlasLastScanAt = statSync(atlasMd).mtimeMs;
-              console.log(`[workspace] retroactively stamped atlasLastScanAt for ${ws.name} from atlas.md mtime`);
+              const mtime = statSync(atlasMd).mtimeMs;
+              if ((ws.atlasLastScanAt ?? 0) < mtime) {
+                ws.atlasLastScanAt = mtime;
+                console.log(`[workspace] reconciled atlasLastScanAt for ${ws.name} from atlas.md mtime`);
+              }
             } catch {}
           }
         }

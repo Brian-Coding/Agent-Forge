@@ -15,6 +15,7 @@ export interface WorkspaceInfo {
   atlasAgentId?: string;       // ID of the UI Atlas agent provisioned for this workspace (explicit user action via the "Create UI Atlas Agent" button)
   atlasProjectCwd?: string;    // Project directory the Atlas agent reads from (and writes docs/ui-atlas/ into). Persisted so re-scans don't re-prompt.
   atlasLastScanAt?: number;    // Timestamp of last completed atlas scan (when atlas agent transitioned working → idle).
+  qaSurfaceVerifications?: Record<string, number>; // surface slug -> last QA-verification timestamp. Stamped when a QA report references surface.<slug>.
 }
 
 export interface AgentInfo {

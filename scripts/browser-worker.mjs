@@ -166,13 +166,22 @@ const handlers = {
 
   'POST /screenshot': async (_req, body) => {
     const wsCtx = await ensureContext(body.workspaceId);
-    const dir = screenshotsDir(body.workspaceId);
-    await ensureDir(dir);
-    pruneOldScreenshots(dir).catch(() => {});
-    // Two filename modes:
-    //   - body.name: stable per-surface name. Sanitized + ".png" appended if missing.
-    //                Re-runs overwrite the existing file. This is what the Atlas Agent uses.
-    //   - default:   timestamp + random suffix. Used by ad-hoc screenshots (QA Tester etc).
+    // Two destination modes:
+    //   - body.outDir (absolute path): write directly to this directory.
+    //     Used by the Atlas Agent so screenshots land in
+    //     <projectCwd>/docs/ui-atlas/shots/ with no tmpdir round-trip.
+    //     The Bun server validates this path before forwarding.
+    //   - default: tmpdir under <os.tmpdir()>/agent-forge-qa/<wsId>/screenshots/.
+    //     Used by the QA Tester (transient).
+    let dir;
+    if (typeof body.outDir === 'string' && body.outDir.trim()) {
+      dir = body.outDir.trim();
+      await ensureDir(dir);
+    } else {
+      dir = screenshotsDir(body.workspaceId);
+      await ensureDir(dir);
+      pruneOldScreenshots(dir).catch(() => {});
+    }
     let filename;
     if (typeof body.name === 'string' && body.name.trim()) {
       const safe = body.name.trim().replace(/[\\/:*?"<>|]/g, '-').replace(/\.png$/i, '');

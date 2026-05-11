@@ -88,16 +88,34 @@ export async function handleBrowserScreenshot(req: Request): Promise<Response> {
   const body = await readJson(req);
   const workspaceId = requireString(body, 'workspaceId');
   if (!workspaceId) return err('workspaceId required');
-  trackBrowserCall(workspaceId, 'screenshot', { selector: body.selector, fullPage: body.fullPage === true, name: body.name });
+  trackBrowserCall(workspaceId, 'screenshot', { selector: body.selector, fullPage: body.fullPage === true, name: body.name, outDir: body.outDir });
+
+  // Validate outDir (atlas-mode direct write): must resolve under
+  // <workspace.atlasProjectCwd>/docs/ui-atlas/. Anything else is rejected so
+  // the agent can't write screenshots into arbitrary project locations.
+  let outDir: string | undefined;
+  if (typeof body.outDir === 'string' && body.outDir.trim()) {
+    const { workspaceService } = await import('../services/workspace.service');
+    const ws = workspaceService.get(workspaceId);
+    if (!ws?.atlasProjectCwd) return err('outDir requires workspace.atlasProjectCwd', 400);
+    const atlasRoot = path.resolve(path.join(ws.atlasProjectCwd, 'docs', 'ui-atlas'));
+    const requested = path.resolve(body.outDir.trim());
+    if (!requested.startsWith(atlasRoot + path.sep) && requested !== atlasRoot) {
+      return err('outDir must be inside <workspace>/docs/ui-atlas/', 403);
+    }
+    outDir = requested;
+  }
+
   try {
-    const path = await browserService.screenshot(workspaceId, {
+    const screenshotPath = await browserService.screenshot(workspaceId, {
       selector: typeof body.selector === 'string' ? body.selector : undefined,
       fullPage: body.fullPage === true,
       name: typeof body.name === 'string' ? body.name : undefined,
+      outDir,
     });
     // Stream to clients so the QA panel can show screenshots live as they're taken.
-    broadcast({ type: 'qa_screenshot_taken', workspaceId, path, timestamp: Date.now() });
-    return jsonResponse({ ok: true, path });
+    broadcast({ type: 'qa_screenshot_taken', workspaceId, path: screenshotPath, timestamp: Date.now() });
+    return jsonResponse({ ok: true, path: screenshotPath });
   } catch (e: any) {
     return err(e?.message || String(e), 500);
   }
@@ -250,24 +268,35 @@ export async function handleAtlasFile(req: Request): Promise<Response> {
 }
 
 /**
- * Serve a QA screenshot from disk. Path validation: must be inside
- * os.tmpdir()/agent-forge-qa/, must end in .png. Used by the frontend
- * to render screenshots inline in the QA panel without base64-encoding
- * megabytes of image data over the WS.
+ * Serve a QA screenshot from disk. Allowed roots:
+ *   - os.tmpdir()/agent-forge-qa/  (QA Tester transient screenshots)
+ *   - <ws.atlasProjectCwd>/docs/ui-atlas/  (Atlas Agent direct-write shots)
+ * Must end in .png. Used by the frontend to render screenshots inline
+ * without base64-encoding megabytes of image data over the WS.
  */
 export async function handleQaScreenshot(req: Request): Promise<Response> {
   const url = new URL(req.url);
   const requested = url.searchParams.get('path');
   if (!requested) return err('path required');
 
-  const allowedRoot = path.resolve(path.join(os.tmpdir(), 'agent-forge-qa'));
   const resolved = path.resolve(requested);
-  if (!resolved.startsWith(allowedRoot + path.sep) && resolved !== allowedRoot) {
-    return err('path outside allowed root', 403);
-  }
   if (!resolved.toLowerCase().endsWith('.png')) {
     return err('only .png files allowed', 400);
   }
+
+  const tmpRoot = path.resolve(path.join(os.tmpdir(), 'agent-forge-qa'));
+  const inTmp = resolved.startsWith(tmpRoot + path.sep) || resolved === tmpRoot;
+
+  let inAtlas = false;
+  if (!inTmp) {
+    const { workspaceService } = await import('../services/workspace.service');
+    for (const ws of workspaceService.values()) {
+      if (!ws.atlasProjectCwd) continue;
+      const atlasRoot = path.resolve(path.join(ws.atlasProjectCwd, 'docs', 'ui-atlas'));
+      if (resolved.startsWith(atlasRoot + path.sep)) { inAtlas = true; break; }
+    }
+  }
+  if (!inTmp && !inAtlas) return err('path outside allowed root', 403);
 
   const file = Bun.file(resolved);
   if (!(await file.exists())) return err('not found', 404);

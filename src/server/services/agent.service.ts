@@ -227,9 +227,10 @@ The same Playwright-backed REST endpoints the QA Tester uses. Call via curl to h
 Always include "workspaceId": "{WORKSPACE_ID}" in the JSON body or query string.
 
 - POST /navigate {"workspaceId":"{WORKSPACE_ID}","url":"..."}
-- POST /screenshot {"workspaceId":"{WORKSPACE_ID}","name":"surface-<slug>","selector":"..." (optional),"fullPage":true (optional)}
+- POST /screenshot {"workspaceId":"{WORKSPACE_ID}","name":"surface-<slug>","outDir":"<absolute path to docs/ui-atlas/shots>","selector":"..." (optional),"fullPage":true (optional)}
   -> Returns {"path":"/path/to/screenshot.png"}. Use the Read tool on the path to see the rendered UI.
-  -> ALWAYS pass "name" with the matching surface ID slug (e.g. "surface-galaxy-canvas" for surface.galaxy-canvas). The server saves to <screenshots-dir>/<name>.png OVERWRITING any existing file with that name.
+  -> ALWAYS pass "name" with the matching surface ID slug (e.g. "surface-galaxy-canvas" for surface.galaxy-canvas). The server saves to <outDir>/<name>.png OVERWRITING any existing file with that name.
+  -> ALWAYS pass "outDir" set to the absolute path of \`<your cwd>/docs/ui-atlas/shots\`. This writes the screenshot directly into the atlas folder so the relative \`shots/<name>.png\` references in the atlas markdown resolve immediately — no manual cp step. The server validates the path is inside your atlas dir; anything else is rejected.
   -> This means re-scans cleanly replace prior screenshots without filling the repo with timestamped duplicates. One screenshot file per surface is the goal.
   -> If you want multiple screenshots for one surface (e.g. tabs), use a sub-suffix: name="surface-fleet-mgmt-modal-split", "surface-fleet-mgmt-modal-merge", etc.
 - POST /click {"workspaceId":"{WORKSPACE_ID}","selector":"..."}
@@ -271,9 +272,8 @@ exhaustiveness are the goals. Do not skip ahead. Do not satisfice.
 9. Call /wait-for-ready, then /navigate to {TEST_URL}. Take an initial screenshot.
 10. For every visible UI element (header buttons, tab strips, sidebars, map controls, etc.), in turn:
     - Click it (or hover, etc.) to see what it reveals.
-    - Take a screenshot of the resulting state.
+    - Take a screenshot of the resulting state — pass \`outDir: "<cwd>/docs/ui-atlas/shots"\` and \`name: "surface-<slug>"\` so the file lands at \`docs/ui-atlas/shots/<slug>.png\` directly, with no manual cp step.
     - Note: which data fields are visible, which interactions are available, how to get back to the previous state.
-    - Save the screenshot under \`docs/ui-atlas/shots/<descriptive-name>.png\`.
 11. For every modal or sub-view that opens, exhaustively visit each tab/sub-area.
 12. For any mode toggles (e.g., TAC/OPS/STR), cycle through and document which surfaces change.
 
@@ -646,6 +646,29 @@ When asked to create or update a plan, use the Write tool to write a markdown fi
       appendParts.push(`Reference Directories (read-only context — you have full access to browse these):\n${refNames}\n\nIMPORTANT: These reference directories were explicitly added by the user as additional context for your work. You should be aware of them and use them when relevant. Your primary working directory is: ${agent.info.cwd}`);
     }
 
+    // Atlas-aware coding agents: when this workspace has a built UI Atlas and
+    // this agent isn't itself a special workspace tool (QA Tester, Atlas Agent),
+    // append a citation requirement so design + UI work grounds itself in the
+    // atlas instead of the agent guessing or asking the user.
+    if (!agent.info.hideFromGrid) {
+      const ws = workspaceService.get(agent.info.workspaceId);
+      if (ws?.atlasProjectCwd) {
+        const atlasMd = join(ws.atlasProjectCwd, 'docs', 'ui-atlas', 'atlas.md');
+        if (existsSync(atlasMd)) {
+          appendParts.push(`UI Atlas — citation required for UI work
+This workspace has a UI Atlas at \`${atlasMd}\` (already in your reference directories). It is a comprehensive map of every UI surface, every entity rendered, and the click paths to each one.
+
+When the user's request involves UI/UX, components, screens, panels, modals, or game/app surfaces:
+1. READ the relevant section of the atlas FIRST. The atlas is the source of truth for what surfaces exist and what they show.
+2. CITE specific surface IDs (\`surface.<slug>\`) and entity IDs (\`entity.<slug>\`) when proposing changes or answering questions. e.g. "Per atlas surface.fleet-management-modal-split, the split tab already shows ship counts; we'd add ..."
+3. PREFER the atlas over guessing. If the atlas's §5 (Observed inconsistencies) or §7 (Open questions) flags something relevant to the request, mention it.
+4. If the atlas seems out of date for the area you're touching, say so explicitly — don't silently work around stale data.
+
+This is a load-bearing instruction. Atlas-grounded answers are dramatically more useful than answers that ignore it.`);
+        }
+      }
+    }
+
     args.push('--append-system-prompt', appendParts.join('\n\n'));
 
     if (agent.sessionId) {
@@ -899,16 +922,11 @@ async function _sendMessageImpl(agentId: string, content: string, source?: 'qa')
       _processQaIdle(agentId).catch(e => console.error(`QA idle relay failed for ${agentId}:`, e));
     }
 
-    // If this is the workspace's UI Atlas Agent and the run completed
-    // successfully, stamp atlasLastScanAt on the workspace. The frontend
-    // uses this for the freshness indicator.
-    if (exitCode === 0 && agent.info.workspaceId) {
-      const ws = workspaceService.get(agent.info.workspaceId);
-      if (ws && ws.atlasAgentId === agentId) {
-        const updated = await workspaceService.update(agent.info.workspaceId, { atlasLastScanAt: Date.now() });
-        if (updated) broadcast({ type: 'workspace_updated', workspace: updated });
-      }
-    }
+    // Reconcile the workspace's atlasLastScanAt against the on-disk atlas.md
+    // mtime. Fires regardless of exit code so partial / errored runs that
+    // still wrote a fresh atlas.md (the common case for long scans that hit
+    // the stream-read timeout near the end) update the freshness pill too.
+    await reconcileAtlasFreshness(agentId);
   } catch (e) {
     console.error(`Error sending message to agent ${agentId}:`, e);
     if (proc.pid) persistenceService.untrackPid(proc.pid);
@@ -1108,10 +1126,55 @@ async function _processQaIdle(qaAgentId: string): Promise<void> {
   const workspaceId = sourceAgent?.info.workspaceId;
   if (workspaceId) {
     broadcast({ type: 'qa_results_ready', workspaceId, sourceAgentId: test.sourceAgentId });
+
+    // Stamp per-surface QA verifications. Atlas surfaces are referenced in
+    // reports as `surface.<slug>` (the convention encoded in the QA + Atlas
+    // system prompts). Each match becomes a freshness timestamp the atlas
+    // viewer can render alongside the surface entry.
+    const ws = workspaceService.get(workspaceId);
+    if (ws && ws.atlasProjectCwd) {
+      const slugRe = /\bsurface\.([a-z0-9][a-z0-9-]*)/gi;
+      const slugs = new Set<string>();
+      for (const m of reportText.matchAll(slugRe)) slugs.add(m[1]!.toLowerCase());
+      if (slugs.size > 0) {
+        const map = ws.qaSurfaceVerifications ?? {};
+        const now = Date.now();
+        for (const slug of slugs) map[slug] = now;
+        await workspaceService.update(workspaceId, { qaSurfaceVerifications: map });
+        broadcast({ type: 'workspace_updated', workspace: ws });
+        console.log(`[qa] stamped ${slugs.size} surface verification(s) for workspace ${workspaceId}: ${[...slugs].join(', ')}`);
+      }
+    }
   }
 
   // 4) If more pending tests are queued for this QA agent, the next one's
   //    sendMessage is already serialized via sendLocks — nothing more to do.
+}
+
+/**
+ * Reconcile the workspace's atlasLastScanAt with the on-disk atlas.md mtime
+ * whenever the atlas agent goes idle for any reason (clean exit, error, stop,
+ * timeout). Old logic only stamped on exitCode === 0 — runs that errored or
+ * timed out but still wrote atlas.md left the workspace stuck on a stale
+ * timestamp from the previous successful scan.
+ */
+async function reconcileAtlasFreshness(agentId: string): Promise<void> {
+  const agent = agents.get(agentId);
+  if (!agent?.info.workspaceId) return;
+  const ws = workspaceService.get(agent.info.workspaceId);
+  if (!ws || ws.atlasAgentId !== agentId || !ws.atlasProjectCwd) return;
+  const atlasMd = join(ws.atlasProjectCwd, 'docs', 'ui-atlas', 'atlas.md');
+  if (!existsSync(atlasMd)) return;
+  try {
+    const { statSync } = await import('node:fs');
+    const mtimeMs = statSync(atlasMd).mtimeMs;
+    if ((ws.atlasLastScanAt ?? 0) >= mtimeMs) return;
+    const updated = await workspaceService.update(agent.info.workspaceId, { atlasLastScanAt: mtimeMs });
+    if (updated) broadcast({ type: 'workspace_updated', workspace: updated });
+    console.log(`[atlas] stamped atlasLastScanAt for ${ws.name} from atlas.md mtime (${new Date(mtimeMs).toISOString()})`);
+  } catch (e) {
+    console.warn('[atlas] reconcileAtlasFreshness failed:', e);
+  }
 }
 
 async function _stopAgentImpl(agentId: string, reason: 'user' | 'timeout' | 'system' = 'user'): Promise<boolean> {
@@ -1148,6 +1211,11 @@ async function _stopAgentImpl(agentId: string, reason: 'user' | 'timeout' | 'sys
   if (pendingQaTests.has(agentId)) {
     _processQaIdle(agentId).catch(e => console.error(`QA partial relay failed for ${agentId}:`, e));
   }
+
+  // If this was the atlas agent, reconcile freshness from the on-disk
+  // atlas.md mtime in case the user stopped the agent after it had already
+  // written a fresh atlas.
+  await reconcileAtlasFreshness(agentId);
 
   return true;
 }

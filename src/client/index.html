@@ -434,9 +434,20 @@
     .atlas-search { flex: 1; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 4px; color: var(--text-primary); padding: 4px 8px; font-size: 12px; outline: none; }
     .atlas-search:focus { border-color: var(--accent); }
     .atlas-search-clear { background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 0 6px; font-size: 14px; }
-    .atlas-body { flex: 1; overflow-y: auto; padding: 12px; font-size: 13px; line-height: 1.55; }
+    .atlas-body { flex: 1; overflow-y: auto; padding: 12px; font-size: 13px; line-height: 1.55; scroll-behavior: smooth; }
     .atlas-body img { max-width: 100%; height: auto; border: 1px solid var(--qa-accent-strong); border-radius: 4px; margin: 4px 0; cursor: zoom-in; }
     .atlas-body img:hover { border-color: var(--qa-accent); }
+    .atlas-anchor { display: block; position: relative; top: -8px; visibility: hidden; height: 0; }
+    .atlas-coverage-strip { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px 12px; border-bottom: 1px solid var(--border); flex-shrink: 0; background: var(--bg-secondary); }
+    .atlas-coverage-pill { font-size: 10.5px; padding: 2px 8px; border-radius: 10px; background: var(--bg-tertiary); border: 1px solid var(--border); color: var(--text-secondary); white-space: nowrap; }
+    .atlas-toc { border-bottom: 1px solid var(--border); flex-shrink: 0; max-height: 220px; display: flex; flex-direction: column; }
+    .atlas-toc.collapsed { max-height: none; }
+    .atlas-toc-header { display: flex; align-items: center; gap: 6px; padding: 6px 12px; font-size: 10.5px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; cursor: pointer; user-select: none; }
+    .atlas-toc-header:hover { color: var(--text-secondary); }
+    .atlas-toc-chevron { font-size: 10px; }
+    .atlas-toc-list { display: flex; flex-direction: column; padding: 0 8px 6px; overflow-y: auto; }
+    .atlas-toc-link { background: none; border: none; color: var(--text-secondary); text-align: left; padding: 3px 8px; font-size: 12px; cursor: pointer; border-radius: 3px; }
+    .atlas-toc-link:hover { background: var(--bg-tertiary); color: var(--text-primary); }
     .atlas-empty { padding: 20px 12px; color: var(--text-muted); font-size: 12px; }
     .atlas-error { color: var(--error); }
     .atlas-running-body { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 12px; }
@@ -2424,11 +2435,75 @@
     }
 
     // Notes Panel
+    // Slug-ify heading text the same way Github / common-mark anchor schemes do —
+    // lowercase, alphanumerics + dashes only. Used to wire TOC links to anchors.
+    function atlasSlug(text) {
+      return String(text || '').toLowerCase().trim()
+        .replace(/[^\w\s-]/g, '')
+        .replace(/[\s_]+/g, '-')
+        .replace(/^-+|-+$/g, '');
+    }
+
+    // Parse atlas.md text for the coverage header + TOC. Pulls YAML frontmatter
+    // counts (total_surfaces, total_entities, last_full_scan), counts "Last
+    // verified" entries by freshness bucket, and extracts h2/h3 headings.
+    function parseAtlasOverview(text) {
+      const out = {
+        totalSurfaces: null, totalEntities: null, lastFullScan: null,
+        verifiedToday: 0, verified7d: 0, verifiedOlder: 0, verifiedUnknown: 0,
+        headings: [],
+      };
+      if (!text) return out;
+      const fmMatch = text.match(/^---\n([\s\S]*?)\n---/);
+      if (fmMatch) {
+        const fm = fmMatch[1];
+        const ts = fm.match(/^total_surfaces:\s*(\d+)/m); if (ts) out.totalSurfaces = parseInt(ts[1], 10);
+        const te = fm.match(/^total_entities:\s*(\d+)/m); if (te) out.totalEntities = parseInt(te[1], 10);
+        const ls = fm.match(/^last_full_scan:\s*(\S+)/m); if (ls) out.lastFullScan = ls[1];
+      }
+      const now = Date.now();
+      const oneDay = 24 * 60 * 60 * 1000;
+      const verifyRe = /^[ \t-]*Last verified:\s*([^\n]+)$/gim;
+      let vm;
+      while ((vm = verifyRe.exec(text))) {
+        const raw = (vm[1] || '').trim();
+        if (!raw || raw === '?') { out.verifiedUnknown++; continue; }
+        const dateMatch = raw.match(/(\d{4}-\d{2}-\d{2})/);
+        if (!dateMatch) { out.verifiedUnknown++; continue; }
+        const ageMs = now - new Date(dateMatch[1] + 'T00:00:00').getTime();
+        if (ageMs < oneDay * 1.5) out.verifiedToday++;
+        else if (ageMs < 7 * oneDay) out.verified7d++;
+        else out.verifiedOlder++;
+      }
+      // Skip headings inside frontmatter and code fences.
+      const body = fmMatch ? text.slice(fmMatch[0].length) : text;
+      const lines = body.split('\n');
+      let inFence = false;
+      const seen = new Map();
+      for (const line of lines) {
+        if (/^```/.test(line)) { inFence = !inFence; continue; }
+        if (inFence) continue;
+        const m = line.match(/^(##|###)\s+(.+?)\s*$/);
+        if (!m) continue;
+        const level = m[1].length;
+        const headingText = m[2].replace(/`/g, '').replace(/^\d+\.\s*/, '');
+        let slug = atlasSlug(headingText);
+        if (!slug) continue;
+        const n = (seen.get(slug) || 0) + 1;
+        seen.set(slug, n);
+        if (n > 1) slug = slug + '-' + n;
+        out.headings.push({ level, text: headingText, slug });
+      }
+      return out;
+    }
+
     function AtlasPanel({ activeWorkspace, agents, messages, statusStartTimes, qaLiveShots, onRescanAtlas, onProvisionAtlas }) {
       const [content, setContent] = useState('');
       const [loading, setLoading] = useState(false);
       const [error, setError] = useState(null);
       const [query, setQuery] = useState('');
+      const [tocOpen, setTocOpen] = useState(true);
+      const bodyRef = useRef(null);
 
       const wsId = activeWorkspace?.id;
       const wsHasAtlas = !!(activeWorkspace?.atlasLastScanAt && activeWorkspace?.atlasProjectCwd);
@@ -2461,13 +2536,51 @@
         });
       }, [content, wsId]);
 
+      const overview = useMemo(() => parseAtlasOverview(rewritten), [rewritten]);
+
+      // Inject HTML anchor tags before each ##/### heading so TOC links land
+      // precisely. We do this on the markdown text (not the parsed HTML)
+      // because marked passes inline HTML through unchanged.
+      const anchored = useMemo(() => {
+        if (!rewritten) return rewritten;
+        const slugCount = new Map();
+        const lines = rewritten.split('\n');
+        let inFence = false;
+        const out = [];
+        for (const line of lines) {
+          if (/^```/.test(line)) { inFence = !inFence; out.push(line); continue; }
+          if (!inFence) {
+            const m = line.match(/^(##|###)\s+(.+?)\s*$/);
+            if (m) {
+              const headingText = m[2].replace(/`/g, '').replace(/^\d+\.\s*/, '');
+              let slug = atlasSlug(headingText);
+              if (slug) {
+                const n = (slugCount.get(slug) || 0) + 1;
+                slugCount.set(slug, n);
+                if (n > 1) slug = slug + '-' + n;
+                out.push('<a id="' + slug + '" class="atlas-anchor"></a>');
+              }
+            }
+          }
+          out.push(line);
+        }
+        return out.join('\n');
+      }, [rewritten]);
+
       const filtered = useMemo(() => {
-        if (!query.trim()) return rewritten;
+        if (!query.trim()) return anchored;
         // Simple filter: keep only sections (h2/h3 + body) that contain the query.
         const q = query.toLowerCase();
-        const sections = rewritten.split(/\n(?=##? )/);
+        const sections = anchored.split(/\n(?=##? )/);
         return sections.filter(s => s.toLowerCase().includes(q)).join('\n\n');
-      }, [rewritten, query]);
+      }, [anchored, query]);
+
+      const scrollToSlug = useCallback((slug) => {
+        const root = bodyRef.current;
+        if (!root) return;
+        const el = root.querySelector('#' + CSS.escape(slug));
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, []);
 
       const fmtAgo = (ms) => {
         if (ms < 60_000) return 'just now';
@@ -2539,6 +2652,24 @@
         : ageMs < 7 * 24 * 60 * 60_000 ? 'aging'
         : 'stale';
 
+      const totalVerified = overview.verifiedToday + overview.verified7d + overview.verifiedOlder;
+      const totalCounted = totalVerified + overview.verifiedUnknown;
+      const qaTouchedCount = activeWorkspace.qaSurfaceVerifications
+        ? Object.keys(activeWorkspace.qaSurfaceVerifications).length
+        : 0;
+
+      const coverageBits = [];
+      if (overview.totalSurfaces != null) coverageBits.push(overview.totalSurfaces + ' surfaces');
+      if (overview.totalEntities != null) coverageBits.push(overview.totalEntities + ' entities');
+      if (totalCounted > 0) {
+        coverageBits.push(totalVerified + '/' + totalCounted + ' verified');
+      }
+      if (qaTouchedCount > 0) coverageBits.push(qaTouchedCount + ' QA-touched');
+
+      // Limit TOC to top-level sections (h2). h3 entries (per-entity, per-surface)
+      // would balloon the list — search handles that case.
+      const tocItems = overview.headings.filter(h => h.level === 2);
+
       return e('div', { className: 'atlas-panel' },
         e('div', { className: 'atlas-header' },
           e('div', { className: 'atlas-title' }, '🗺️ UI Atlas — ' + activeWorkspace.name),
@@ -2551,6 +2682,9 @@
             title: 'Archive current atlas and run a fresh scan',
           }, 'Re-scan')
         ),
+        coverageBits.length > 0 && e('div', { className: 'atlas-coverage-strip' },
+          coverageBits.map((b, i) => e('span', { key: i, className: 'atlas-coverage-pill' }, b))
+        ),
         e('div', { className: 'atlas-search-row' },
           e('input', {
             type: 'text',
@@ -2561,10 +2695,24 @@
           }),
           query && e('button', { className: 'atlas-search-clear', onClick: () => setQuery('') }, '×')
         ),
+        tocItems.length > 0 && !query && e('div', { className: 'atlas-toc' + (tocOpen ? '' : ' collapsed') },
+          e('div', { className: 'atlas-toc-header', onClick: () => setTocOpen(o => !o) },
+            e('span', { className: 'atlas-toc-chevron' }, tocOpen ? '▾' : '▸'),
+            e('span', null, 'Contents (' + tocItems.length + ')')
+          ),
+          tocOpen && e('div', { className: 'atlas-toc-list' },
+            tocItems.map(h => e('button', {
+              key: h.slug,
+              className: 'atlas-toc-link',
+              onClick: () => scrollToSlug(h.slug),
+              title: h.text,
+            }, h.text))
+          )
+        ),
         loading && e('div', { className: 'atlas-empty' }, 'Loading atlas.md...'),
         error && e('div', { className: 'atlas-empty atlas-error' }, 'Error: ' + error),
-        !loading && !error && rewritten && e('div', { className: 'atlas-body' },
-          e(MarkdownContent, { content: filtered || rewritten })
+        !loading && !error && rewritten && e('div', { className: 'atlas-body', ref: bodyRef },
+          e(MarkdownContent, { content: filtered || anchored })
         )
       );
     }
