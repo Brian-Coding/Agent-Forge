@@ -153,7 +153,7 @@
 
     /* Panel input */
     .panel-input-container { padding: 8px 12px; background: var(--bg-secondary); border-top: 1px solid var(--border); flex-shrink: 0; }
-    .panel-input-wrapper { display: flex; align-items: flex-end; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 6px; padding: 0 12px; }
+    .panel-input-wrapper { display: flex; align-items: flex-end; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 6px; padding: 0 12px; position: relative; }
     .panel-input-wrapper:focus-within { border-color: var(--accent); }
     .panel-textarea { flex: 1; background: transparent; border: none; color: var(--text-primary); font-family: 'SF Mono', Monaco, Consolas, monospace; font-size: 13px; padding: 8px 0; outline: none; resize: none; min-height: 20px; max-height: 120px; line-height: 1.4; }
     .panel-textarea::placeholder { color: var(--text-muted); }
@@ -211,6 +211,36 @@
     /* Keyboard shortcut hint */
     .shortcuts-hint { font-size: 10px; color: var(--text-muted); padding: 4px 16px 8px; }
     kbd { background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 3px; padding: 1px 5px; font-size: 10px; font-family: inherit; }
+
+    /* Slash Commands panel */
+    .commands-panel { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+    .commands-count { font-size: 10px; color: var(--text-muted); font-weight: 500; letter-spacing: 0; text-transform: none; }
+    .commands-search-row { padding: 8px; border-bottom: 1px solid var(--border); }
+    .commands-search { width: 100%; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 4px; color: var(--text-primary); font-size: 12px; padding: 6px 8px; box-sizing: border-box; }
+    .commands-search:focus { outline: none; border-color: var(--accent); }
+    .commands-categories { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+    .commands-cat-chip { background: var(--bg-primary); border: 1px solid var(--border); color: var(--text-muted); border-radius: 10px; padding: 2px 8px; font-size: 10px; cursor: pointer; text-transform: capitalize; }
+    .commands-cat-chip:hover { color: var(--text-primary); border-color: var(--text-muted); }
+    .commands-cat-chip.active { background: rgba(47, 129, 247, 0.15); color: var(--accent); border-color: var(--accent); }
+    .commands-list { flex: 1; overflow-y: auto; padding: 4px 8px; }
+    .commands-empty { padding: 16px 12px; color: var(--text-muted); font-size: 12px; text-align: center; }
+    .command-item { padding: 8px 10px; border-radius: 6px; margin-bottom: 4px; background: var(--bg-primary); border: 1px solid var(--border); cursor: pointer; position: relative; }
+    .command-item:hover { border-color: var(--accent); }
+    .command-item:hover .command-copy-state { opacity: 1; }
+    .command-item-row { display: flex; align-items: center; gap: 6px; }
+    .command-slug { font-family: var(--font-mono, ui-monospace, monospace); font-size: 11px; color: var(--accent); font-weight: 600; flex-shrink: 0; }
+    .command-name { font-size: 12px; font-weight: 600; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+    .command-copy-state { font-size: 10px; color: var(--text-muted); opacity: 0; transition: opacity 0.15s; flex-shrink: 0; }
+    .command-desc { font-size: 11px; color: var(--text-muted); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+
+    /* Slash autocomplete popup (chat input) */
+    .slash-autocomplete { position: absolute; bottom: 100%; left: 8px; right: 8px; max-height: 240px; overflow-y: auto; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 6px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3); margin-bottom: 4px; z-index: 50; }
+    .slash-autocomplete-item { padding: 6px 10px; cursor: pointer; display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--border); }
+    .slash-autocomplete-item:last-child { border-bottom: none; }
+    .slash-autocomplete-item.selected { background: rgba(47, 129, 247, 0.15); }
+    .slash-autocomplete-item:hover { background: rgba(47, 129, 247, 0.1); }
+    .slash-autocomplete-slug { font-family: var(--font-mono, ui-monospace, monospace); font-size: 11px; color: var(--accent); font-weight: 600; min-width: 80px; flex-shrink: 0; }
+    .slash-autocomplete-desc { font-size: 11px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
 
     /* Notes panel */
     .notes-panel { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
@@ -590,13 +620,16 @@
     .terminal-panel.locked { border-left: 2px solid var(--accent); }
 
     /* Scrollbars */
-    .panel-content::-webkit-scrollbar, .notes-list::-webkit-scrollbar, .emu-list::-webkit-scrollbar, .agent-list::-webkit-scrollbar, .docs-list::-webkit-scrollbar { width: 6px; }
+    .panel-content::-webkit-scrollbar, .notes-list::-webkit-scrollbar, .commands-list::-webkit-scrollbar, .slash-autocomplete::-webkit-scrollbar, .emu-list::-webkit-scrollbar, .agent-list::-webkit-scrollbar, .docs-list::-webkit-scrollbar { width: 6px; }
     .panel-content::-webkit-scrollbar-track, .notes-list::-webkit-scrollbar-track, .emu-list::-webkit-scrollbar-track, .agent-list::-webkit-scrollbar-track, .docs-list::-webkit-scrollbar-track { background: transparent; }
     .panel-content::-webkit-scrollbar-thumb, .notes-list::-webkit-scrollbar-thumb, .emu-list::-webkit-scrollbar-thumb, .agent-list::-webkit-scrollbar-thumb, .docs-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
   </style>
 </head>
 <body>
   <div id="root"></div>
+  <script type="application/json" id="slash-commands-data">
+[]
+  </script>
   <script>
     const { useState, useEffect, useRef, useCallback, useMemo } = React;
     const e = React.createElement;
@@ -629,7 +662,30 @@
       chevron: 'M6 9l6 6 6-6',
       plans: ['M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2', 'M15 2H9a1 1 0 0 0-1 1v2a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V3a1 1 0 0 0-1-1z', 'M9 12l2 2 4-4', 'M9 17h6'],
       image: ['M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4', 'M17 8l-5-5-5 5', 'M12 3v12'],
+      commands: ['M4 17l6-6-6-6', 'M12 19h8'],
     };
+
+    // Slash commands — loaded from <script type="application/json" id="slash-commands-data">
+    // at the top of the body. Each command has: id, name, command (slug), category,
+    // description, promptTemplate (with optional {args} placeholder).
+    const SLASH_COMMANDS = (() => {
+      try {
+        const el = document.getElementById('slash-commands-data');
+        return el ? JSON.parse(el.textContent) : [];
+      } catch (err) {
+        console.error('Failed to parse slash commands data:', err);
+        return [];
+      }
+    })();
+
+    // Default text substituted for {args} when the user applies a slash command
+    // without supplying their own arguments. Lets the agent fall back to either
+    // recent-conversation context or a general codebase pass.
+    const SLASH_DEFAULT_ARGS = 'If no specific target was provided here, infer one from our recent conversation; otherwise do a general pass over this codebase.';
+
+    function expandSlashTemplate(template) {
+      return (template || '').replace(/\{args\}/g, SLASH_DEFAULT_ARGS).trim();
+    }
 
     // ======================== HOOKS ========================
 
@@ -1328,6 +1384,24 @@
       const [showToolMessages, setShowToolMessages] = useState(false);
       const [dragging, setDragging] = useState(false);
       const [pendingImages, setPendingImages] = useState([]);
+      // Slash command autocomplete: matches when input starts with "/" and no space yet.
+      const slashMatches = useMemo(() => {
+        if (!input.startsWith('/') || input.includes(' ') || input.includes('\n')) return [];
+        const q = input.slice(1).toLowerCase();
+        return SLASH_COMMANDS
+          .filter(c => c.command.toLowerCase().startsWith(q))
+          .slice(0, 8);
+      }, [input]);
+      const slashOpen = slashMatches.length > 0;
+      const [slashIdx, setSlashIdx] = useState(0);
+      useEffect(() => { setSlashIdx(0); }, [slashMatches.length]);
+
+      const applySlashCommand = (cmd) => {
+        if (!cmd) return;
+        setInput(expandSlashTemplate(cmd.promptTemplate));
+        setHistoryIdx(-1);
+        requestAnimationFrame(() => inputRef.current?.focus());
+      };
       // QA panel open/close persists per-agent across page reloads via localStorage
       const qaOpenKey = agent ? `qa-panel-open-${agent.id}` : null;
       const [qaPanelOpen, setQaPanelOpen] = useState(() => {
@@ -1547,6 +1621,29 @@
       };
 
       const handleKeyDown = (ev) => {
+        // Slash autocomplete keys take precedence when the popup is open
+        if (slashOpen) {
+          if (ev.key === 'ArrowDown') {
+            ev.preventDefault();
+            setSlashIdx(i => Math.min(slashMatches.length - 1, i + 1));
+            return;
+          }
+          if (ev.key === 'ArrowUp') {
+            ev.preventDefault();
+            setSlashIdx(i => Math.max(0, i - 1));
+            return;
+          }
+          if (ev.key === 'Tab' || (ev.key === 'Enter' && !ev.shiftKey)) {
+            ev.preventDefault();
+            applySlashCommand(slashMatches[slashIdx]);
+            return;
+          }
+          if (ev.key === 'Escape') {
+            ev.preventDefault();
+            setInput('');
+            return;
+          }
+        }
         if (ev.key === 'Enter' && !ev.shiftKey) {
           ev.preventDefault();
           handleSubmit();
@@ -1861,7 +1958,19 @@
               rows: 1,
               autoFocus: true,
             }),
-            e('input', { ref: fileInputRef, type: 'file', accept: 'image/*', multiple: true, style: { display: 'none' }, onChange: (ev) => { for (let i = 0; i < ev.target.files.length; i++) handleImageUpload(ev.target.files[i]); ev.target.value = ''; } })
+            e('input', { ref: fileInputRef, type: 'file', accept: 'image/*', multiple: true, style: { display: 'none' }, onChange: (ev) => { for (let i = 0; i < ev.target.files.length; i++) handleImageUpload(ev.target.files[i]); ev.target.value = ''; } }),
+            slashOpen && e('div', { className: 'slash-autocomplete' },
+              slashMatches.map((cmd, i) => e('div', {
+                key: cmd._id,
+                className: 'slash-autocomplete-item' + (i === slashIdx ? ' selected' : ''),
+                onMouseEnter: () => setSlashIdx(i),
+                onMouseDown: (ev) => { ev.preventDefault(); applySlashCommand(cmd); },
+                title: cmd.description,
+              },
+                e('span', { className: 'slash-autocomplete-slug' }, '/' + cmd.command),
+                e('span', { className: 'slash-autocomplete-desc' }, cmd.description || cmd.name)
+              ))
+            )
           )
         )
           ),
@@ -2806,6 +2915,98 @@
       );
     }
 
+    // Slash Commands Panel — list of pre-made prompts. Click to copy.
+    function CommandsPanel({ commands }) {
+      const [query, setQuery] = useState('');
+      const [activeCategory, setActiveCategory] = useState('all');
+      const [copiedId, setCopiedId] = useState(null);
+
+      const categories = useMemo(() => {
+        const set = new Set(commands.map(c => c.category || 'other'));
+        return ['all', ...Array.from(set).sort()];
+      }, [commands]);
+
+      const filtered = useMemo(() => {
+        const q = query.trim().toLowerCase();
+        return commands.filter(c => {
+          if (activeCategory !== 'all' && (c.category || 'other') !== activeCategory) return false;
+          if (!q) return true;
+          return (
+            c.command.toLowerCase().includes(q) ||
+            c.name.toLowerCase().includes(q) ||
+            (c.description || '').toLowerCase().includes(q)
+          );
+        });
+      }, [commands, query, activeCategory]);
+
+      const copyToClipboard = (cmd) => {
+        const text = expandSlashTemplate(cmd.promptTemplate);
+        const showCopied = () => {
+          setCopiedId(cmd._id);
+          setTimeout(() => setCopiedId(prev => prev === cmd._id ? null : prev), 1500);
+        };
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).then(showCopied).catch(() => {
+            try {
+              const ta = document.createElement('textarea');
+              ta.value = text;
+              document.body.appendChild(ta);
+              ta.select();
+              document.execCommand('copy');
+              document.body.removeChild(ta);
+              showCopied();
+            } catch (err) {
+              console.error('Copy failed:', err);
+            }
+          });
+        }
+      };
+
+      return e('div', { className: 'commands-panel' },
+        e('div', { className: 'sidebar-header' },
+          e('span', null, 'Slash Commands'),
+          e('span', { className: 'commands-count' }, filtered.length + '/' + commands.length)
+        ),
+        e('div', { className: 'commands-search-row' },
+          e('input', {
+            className: 'commands-search',
+            value: query,
+            onChange: (ev) => setQuery(ev.target.value),
+            placeholder: 'Search commands...',
+          })
+        ),
+        e('div', { className: 'commands-categories' },
+          categories.map(cat =>
+            e('button', {
+              key: cat,
+              className: 'commands-cat-chip' + (activeCategory === cat ? ' active' : ''),
+              onClick: () => setActiveCategory(cat),
+              title: cat,
+            }, cat)
+          )
+        ),
+        e('div', { className: 'commands-list' },
+          filtered.length === 0
+            ? e('div', { className: 'commands-empty' }, 'No commands match your search.')
+            : filtered.map(cmd =>
+                e('div', {
+                  key: cmd._id,
+                  className: 'command-item',
+                  onClick: () => copyToClipboard(cmd),
+                  title: 'Click to copy the prompt',
+                },
+                  e('div', { className: 'command-item-row' },
+                    e('span', { className: 'command-slug' }, '/' + cmd.command),
+                    e('span', { className: 'command-name' }, cmd.name),
+                    e('span', { className: 'command-copy-state' }, copiedId === cmd._id ? 'Copied!' : 'Copy')
+                  ),
+                  e('div', { className: 'command-desc' }, cmd.description || '')
+                )
+              )
+        )
+      );
+    }
+
     // Emulators Panel — with default simulator setting (Feature 9)
     function EmulatorsPanel({ settings, onUpdateSettings }) {
       const [devices, setDevices] = useState({});
@@ -3442,6 +3643,7 @@
         { id: 'atlas', icon: null, emoji: '🗺️', label: 'UI Atlas' },
         { id: 'notes', icon: ICONS.notes, label: 'Notes' },
         { id: 'plans', icon: ICONS.plans, label: 'Plans' },
+        { id: 'commands', icon: ICONS.commands, label: 'Slash Commands' },
         { id: 'emulators', icon: ICONS.emulators, label: 'Emulators' },
       ];
 
@@ -3521,6 +3723,7 @@
             onDeleteDocument: ws.deleteDocument,
             onApproveDocument: ws.approveDocument,
           }),
+          sidebarTab === 'commands' && e(CommandsPanel, { commands: SLASH_COMMANDS }),
           sidebarTab === 'emulators' && e(EmulatorsPanel, { settings, onUpdateSettings: ws.updateSettings }),
           // Active ports always pinned to bottom of sidebar
           e(SidebarPorts),
