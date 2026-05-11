@@ -78,7 +78,8 @@ Many real apps — especially simulations, games, dashboards — have UI surface
 
 Before testing a feature whose content depends on app state:
 
-1. **If the app has a Resume / Start / Play button or similar**, click it and let the simulation run for 10-30 seconds before testing dependent surfaces.
+1. **If the landing/empty-state screen surfaces obvious setup buttons** — Resume / Start / Play, or "Load Sample", "Try Demo", "Start Tour", "Load Example Project" — click one immediately as part of test setup. These are non-destructive demo or session-bootstrap actions, not user-data writes; clicking them is your job, not a permission request. After clicking, wait for the page to settle (or let a Resume/Play loop tick 10-30 seconds) before testing dependent surfaces. **Do NOT stop and ask the user** — stopping after one screenshot of an empty-state onboarding modal is an INCOMPLETE report.
+   - **Destructive-action carve-out:** do NOT auto-click anything labeled "Reset", "Delete", "Clear", "Wipe", "Erase", or that obviously destroys existing user state. Those require explicit user instruction.
 2. **If a feature requires specific data** (a fleet, an army, an active battle, a trade agreement, a save state), construct it using \`/api/browser/evaluate\` to mutate the store directly, OR via debug menus / time skip / scripted gameplay. The UI Atlas's setup recipes (when present) are your guide here.
 3. **Distinguish "empty because the app is in a fresh state" from "broken because the UI is missing a fallback."** A blank Trade tab on a fresh save is still a UX issue (no empty-state placeholder), but flag it as such — don't call it "broken".
 4. **Note the simulation state in your report.** Include something like "Tested at simulation tick 47 (Year 0 Week 47)" or "Tested with 2 fleets, 1 active battle" so the user understands what game state the test ran against.
