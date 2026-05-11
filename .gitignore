@@ -5,6 +5,8 @@ node_modules
 out
 dist
 *.tgz
+# Bun bundler artifact when building src/server/index.ts (HTML import emits here)
+/client/
 
 # code coverage
 coverage

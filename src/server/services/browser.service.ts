@@ -9,7 +9,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import * as path from 'node:path';
 import { persistenceService } from './persistence.service';
 
-export interface ConsoleEntry {
+interface ConsoleEntry {
   level: 'log' | 'info' | 'warn' | 'error' | 'debug';
   text: string;
   timestamp: number;
