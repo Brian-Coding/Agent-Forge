@@ -23,6 +23,212 @@ process.on('unhandledRejection', (reason, promise) => {
   console.error('Unhandled rejection at:', promise, 'reason:', reason);
 });
 
+// Catch synchronous uncaught exceptions. Without this, anything thrown
+// outside an async context (a stray sync error in a hot path) takes the
+// whole server down and orphans port 3333 on Windows. Log and continue;
+// graceful shutdown is wired to SIGINT/SIGTERM/SIGHUP below.
+process.on('uncaughtException', (err, origin) => {
+  console.error(`Uncaught exception (${origin}):`, err);
+});
+
+// --- Process lock --------------------------------------------------------
+// Prevents two agent-forge bun.exe instances from clobbering the same
+// data.json. The lock is cwd-relative so two checkouts in different dirs
+// don't fight. At startup we read it; if it points at a live bun.exe that
+// is NOT one of our ancestors, we kill it before doing anything else. If
+// it IS our ancestor (an agent inside a running server tried to spawn its
+// own `bun run dev`), we refuse to start so we don't terminate our own
+// parent.
+
+const LOCK_FILE = './agent-forge.lock';
+
+async function isPidInOurAncestorChain(targetPid: number): Promise<boolean> {
+  if (process.platform !== 'win32') return false;
+  if (targetPid === process.pid) return true;
+  let current = process.pid;
+  const visited = new Set<number>();
+  for (let i = 0; i < 32; i++) {
+    if (visited.has(current)) return false;
+    visited.add(current);
+    try {
+      const proc = Bun.spawn(
+        [
+          'powershell', '-NoProfile', '-Command',
+          `(Get-CimInstance Win32_Process -Filter "ProcessId=${current}").ParentProcessId`,
+        ],
+        { stdout: 'pipe', stderr: 'pipe' },
+      );
+      await proc.exited;
+      const out = (await new Response(proc.stdout).text()).trim();
+      const parentPid = parseInt(out, 10);
+      if (!Number.isFinite(parentPid) || parentPid <= 0) return false;
+      if (parentPid === targetPid) return true;
+      current = parentPid;
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+
+async function acquireProcessLock(): Promise<void> {
+  const { readFileSync, writeFileSync, existsSync } = await import('fs');
+  let priorPid: number | null = null;
+  try {
+    if (existsSync(LOCK_FILE)) {
+      const raw = readFileSync(LOCK_FILE, 'utf8');
+      const parsed = JSON.parse(raw);
+      if (typeof parsed.pid === 'number' && parsed.pid !== process.pid) {
+        priorPid = parsed.pid;
+      }
+    }
+  } catch {
+    // Malformed lock file — overwrite below.
+  }
+
+  if (priorPid !== null && process.platform === 'win32') {
+    let isAliveBun = false;
+    try {
+      const proc = Bun.spawn(
+        [
+          'powershell', '-NoProfile', '-Command',
+          `(Get-Process -Id ${priorPid} -ErrorAction SilentlyContinue).ProcessName`,
+        ],
+        { stdout: 'pipe', stderr: 'pipe' },
+      );
+      await proc.exited;
+      const name = (await new Response(proc.stdout).text()).trim().toLowerCase();
+      if (name === 'bun') isAliveBun = true;
+    } catch {}
+
+    if (isAliveBun) {
+      if (await isPidInOurAncestorChain(priorPid)) {
+        console.error(
+          `\nRefusing to start: agent-forge.lock is owned by our ancestor process (PID ${priorPid}).\n` +
+          `This usually means an agent (Claude/Codex) inside a running agent-forge tried to spawn its own \`bun run dev\`.\n` +
+          `Exiting so the parent server stays alive.\n`,
+        );
+        process.exit(1);
+      }
+      console.log(`Another agent-forge bun.exe is running (PID ${priorPid}); killing it to free data.json + ports.`);
+      try {
+        const proc = Bun.spawn(['taskkill', '/F', '/T', '/PID', String(priorPid)], { stdout: 'pipe', stderr: 'pipe' });
+        await proc.exited;
+        // Brief pause so Windows finishes releasing file handles + sockets.
+        await new Promise(r => setTimeout(r, 500));
+      } catch (e) {
+        console.warn(`Failed to kill prior bun.exe ${priorPid}:`, e);
+      }
+    } else {
+      console.log(`Stale agent-forge.lock (PID ${priorPid} no longer running); overwriting.`);
+    }
+  }
+
+  try {
+    writeFileSync(LOCK_FILE, JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }, null, 2));
+  } catch (e) {
+    console.warn('Could not write agent-forge.lock:', e);
+  }
+}
+
+async function releaseProcessLock(): Promise<void> {
+  try {
+    const { readFileSync, unlinkSync, existsSync } = await import('fs');
+    if (existsSync(LOCK_FILE)) {
+      const parsed = JSON.parse(readFileSync(LOCK_FILE, 'utf8'));
+      if (parsed.pid === process.pid) unlinkSync(LOCK_FILE);
+    }
+  } catch {
+    // Best-effort cleanup; never block shutdown for this.
+  }
+}
+
+// --- Orphan-port cleanup -------------------------------------------------
+// Previous server runs sometimes don't release their port (Bun killed mid-
+// stream, parent shell closed, uncaught exception that left a zombie).
+// Before binding, scan for bun.exe processes LISTENING on our port range
+// and taskkill them. Conservative: only kills `bun.exe`, never our own
+// PID, and never any ancestor. Range is preferredPort..preferredPort+7 so
+// a second agent-forge instance running on a different port (e.g. 4000
+// when we're on 3333) is outside the range and stays untouched.
+
+async function killOrphanBunOnPortRange(preferredPort: number): Promise<void> {
+  if (process.platform !== 'win32') return;
+  const ourPid = process.pid;
+  const rangeStart = preferredPort;
+  const rangeEnd = preferredPort + 7;
+
+  let netstatOut = '';
+  try {
+    const proc = Bun.spawn(['netstat', '-ano'], { stdout: 'pipe', stderr: 'pipe' });
+    await proc.exited;
+    netstatOut = await new Response(proc.stdout).text();
+  } catch (e) {
+    console.warn('Orphan-port scan: netstat failed, skipping cleanup:', e);
+    return;
+  }
+
+  const orphanPids = new Set<number>();
+  for (const line of netstatOut.split('\n')) {
+    const parts = line.trim().split(/\s+/);
+    if (parts.length < 5 || parts[3] !== 'LISTENING') continue;
+    const m = parts[1]!.match(/:(\d+)$/);
+    if (!m) continue;
+    const port = parseInt(m[1]!, 10);
+    if (port < rangeStart || port > rangeEnd) continue;
+    const pid = parseInt(parts[4]!, 10);
+    if (!Number.isFinite(pid) || pid === 0 || pid === ourPid) continue;
+    orphanPids.add(pid);
+  }
+
+  if (orphanPids.size === 0) return;
+
+  // Confirm each candidate PID is actually a bun.exe before killing — other
+  // processes (Node dev servers, Vite, a browser using QUIC) can hold these
+  // ports and we must leave them alone.
+  const bunPids: number[] = [];
+  for (const pid of orphanPids) {
+    try {
+      const proc = Bun.spawn(
+        [
+          'powershell', '-NoProfile', '-Command',
+          `(Get-Process -Id ${pid} -ErrorAction SilentlyContinue).ProcessName`,
+        ],
+        { stdout: 'pipe', stderr: 'pipe' },
+      );
+      await proc.exited;
+      const name = (await new Response(proc.stdout).text()).trim().toLowerCase();
+      if (name === 'bun') bunPids.push(pid);
+      else if (name) console.log(`Orphan-port scan: PID ${pid} is ${name}, leaving alone.`);
+    } catch {}
+  }
+
+  // Filter out ancestors — same protection as the lock.
+  const safeToKill: number[] = [];
+  for (const pid of bunPids) {
+    if (await isPidInOurAncestorChain(pid)) {
+      console.log(`Orphan-port scan: PID ${pid} is our ancestor — skipping.`);
+      continue;
+    }
+    safeToKill.push(pid);
+  }
+  if (safeToKill.length === 0) return;
+
+  console.log(`Orphan-port scan: killing ${safeToKill.length} stale bun.exe process(es) on ports ${rangeStart}-${rangeEnd}:`, safeToKill);
+  await Promise.all(
+    safeToKill.map(async pid => {
+      try {
+        const proc = Bun.spawn(['taskkill', '/F', '/T', '/PID', String(pid)], { stdout: 'pipe', stderr: 'pipe' });
+        await proc.exited;
+      } catch (e) {
+        console.warn(`Orphan-port scan: taskkill PID ${pid} failed:`, e);
+      }
+    }),
+  );
+  // Brief pause so Windows releases the socket before we try to bind.
+  await new Promise(r => setTimeout(r, 300));
+}
+
 // --- Startup: load persisted data and wire up services ---
 async function init() {
   const data = await persistenceService.load();
@@ -60,64 +266,107 @@ async function init() {
   }));
 }
 
+// Lock FIRST — kill any prior bun.exe — THEN load data.json. If we load
+// first, a still-running prior instance could mutate data.json between
+// our read and our kill, and we'd save our older state on top of it.
+await acquireProcessLock();
+
 await init();
 
-// --- Server ---
-const server = Bun.serve({
-  port: parseInt(process.env.PORT || '3333'),
+// --- Server bind with port fallback -------------------------------------
+// Try preferredPort first; if Windows has the socket locked (typically an
+// orphan our scan missed, or a non-bun process), walk forward through
+// preferredPort+1..+7 instead of failing startup. agentService.setGuiPort
+// below uses whichever port we actually bound so the QA system prompt
+// references the right URL even on the fallback.
+function startServer(preferredPort: number) {
+  const maxAttempts = 8;
+  let lastErr: unknown = null;
+  for (let i = 0; i < maxAttempts; i++) {
+    const port = preferredPort + i;
+    try {
+      return Bun.serve({
+        port,
+        routes: {
+          '/': index,
+        },
+        fetch(req, server) {
+          const url = new URL(req.url);
 
-  routes: {
-    '/': index,
-  },
+          if (req.headers.get('upgrade') === 'websocket') {
+            const success = server.upgrade(req, { data: {} });
+            if (success) return undefined;
+            return new Response('WebSocket upgrade failed', { status: 500 });
+          }
 
-  fetch(req, server) {
-    const url = new URL(req.url);
+          // REST routes
+          if (url.pathname === '/api/directories') return handleDirectories(req);
+          if (url.pathname === '/api/ports' && req.method === 'GET') return handleGetPorts(req);
+          if (url.pathname === '/api/ports/kill' && req.method === 'POST') return handleKillPort(req);
+          if (url.pathname === '/api/git-branch' && req.method === 'GET') return handleGitBranch(req);
+          if (url.pathname === '/api/simulators' && req.method === 'GET') return handleListSimulators(req);
+          if (url.pathname === '/api/simulators/boot' && req.method === 'POST') return handleBootSimulator(req);
+          if (url.pathname === '/api/simulators/shutdown' && req.method === 'POST') return handleShutdownSimulator(req);
+          if (url.pathname === '/api/simulators/erase' && req.method === 'POST') return handleEraseSimulator(req);
+          if (url.pathname === '/api/simulators/clean-derived-data' && req.method === 'POST') return handleCleanDerivedData(req);
+          if (url.pathname === '/api/browser/navigate' && req.method === 'POST') return handleBrowserNavigate(req);
+          if (url.pathname === '/api/browser/screenshot' && req.method === 'POST') return handleBrowserScreenshot(req);
+          if (url.pathname === '/api/browser/click' && req.method === 'POST') return handleBrowserClick(req);
+          if (url.pathname === '/api/browser/type' && req.method === 'POST') return handleBrowserType(req);
+          if (url.pathname === '/api/browser/wait-for-ready' && req.method === 'POST') return handleBrowserWaitForReady(req);
+          if (url.pathname === '/api/browser/console' && req.method === 'GET') return handleBrowserConsoleGet(req);
+          if (url.pathname === '/api/browser/console/clear' && req.method === 'POST') return handleBrowserConsoleClear(req);
+          if (url.pathname === '/api/browser/status' && req.method === 'GET') return handleBrowserStatus(req);
+          if (url.pathname === '/api/browser/evaluate' && req.method === 'POST') return handleBrowserEvaluate(req);
+          if (url.pathname === '/api/qa/screenshot' && req.method === 'GET') return handleQaScreenshot(req);
+          if (url.pathname === '/api/atlas/file' && req.method === 'GET') return handleAtlasFile(req);
 
-    if (req.headers.get('upgrade') === 'websocket') {
-      const success = server.upgrade(req, { data: {} });
-      if (success) return undefined;
-      return new Response('WebSocket upgrade failed', { status: 500 });
+          return new Response('Not Found', { status: 404 });
+        },
+        websocket: websocketHandlers,
+        development: {
+          hmr: true,
+          console: true,
+        },
+        error(err) {
+          console.error('Server error:', err);
+          return new Response('Internal error', { status: 500 });
+        },
+      });
+    } catch (e) {
+      lastErr = e;
+      console.warn(`Port ${port} unavailable, trying ${port + 1}...`);
     }
+  }
+  console.error(`Failed to bind any port in ${preferredPort}-${preferredPort + maxAttempts - 1}:`, lastErr);
+  throw lastErr;
+}
 
-    // REST routes
-    if (url.pathname === '/api/directories') return handleDirectories(req);
-    if (url.pathname === '/api/ports' && req.method === 'GET') return handleGetPorts(req);
-    if (url.pathname === '/api/ports/kill' && req.method === 'POST') return handleKillPort(req);
-    if (url.pathname === '/api/git-branch' && req.method === 'GET') return handleGitBranch(req);
-    if (url.pathname === '/api/simulators' && req.method === 'GET') return handleListSimulators(req);
-    if (url.pathname === '/api/simulators/boot' && req.method === 'POST') return handleBootSimulator(req);
-    if (url.pathname === '/api/simulators/shutdown' && req.method === 'POST') return handleShutdownSimulator(req);
-    if (url.pathname === '/api/simulators/erase' && req.method === 'POST') return handleEraseSimulator(req);
-    if (url.pathname === '/api/simulators/clean-derived-data' && req.method === 'POST') return handleCleanDerivedData(req);
-    if (url.pathname === '/api/browser/navigate' && req.method === 'POST') return handleBrowserNavigate(req);
-    if (url.pathname === '/api/browser/screenshot' && req.method === 'POST') return handleBrowserScreenshot(req);
-    if (url.pathname === '/api/browser/click' && req.method === 'POST') return handleBrowserClick(req);
-    if (url.pathname === '/api/browser/type' && req.method === 'POST') return handleBrowserType(req);
-    if (url.pathname === '/api/browser/wait-for-ready' && req.method === 'POST') return handleBrowserWaitForReady(req);
-    if (url.pathname === '/api/browser/console' && req.method === 'GET') return handleBrowserConsoleGet(req);
-    if (url.pathname === '/api/browser/console/clear' && req.method === 'POST') return handleBrowserConsoleClear(req);
-    if (url.pathname === '/api/browser/status' && req.method === 'GET') return handleBrowserStatus(req);
-    if (url.pathname === '/api/browser/evaluate' && req.method === 'POST') return handleBrowserEvaluate(req);
-    if (url.pathname === '/api/qa/screenshot' && req.method === 'GET') return handleQaScreenshot(req);
-    if (url.pathname === '/api/atlas/file' && req.method === 'GET') return handleAtlasFile(req);
+const preferredPort = parseInt(process.env.PORT || '3333');
+await killOrphanBunOnPortRange(preferredPort);
 
-    return new Response('Not Found', { status: 404 });
-  },
-
-  websocket: websocketHandlers,
-
-  development: {
-    hmr: true,
-    console: true,
-  },
-});
+const server = startServer(preferredPort);
+if (server.port !== preferredPort) {
+  console.warn(`NOTE: Preferred port ${preferredPort} was busy; bound to ${server.port} instead.`);
+}
 
 agentService.setGuiPort(server.port ?? 0);
 console.log(`Server running at http://localhost:${server.port}`);
 
 // --- Graceful shutdown ---
+// CRITICAL: persistenceService.save() is debounced 200ms. If the user types
+// a message and Ctrl+Cs within that window, process.exit kills the event
+// loop before the timer fires and the message is dropped from data.json.
+// The saveNow() race below flushes pending mutations BEFORE exit. Wrapped
+// in its own timeout so a hung disk write can't block shutdown forever —
+// losing pending data is bad, but a stuck shutdown that orphans the port
+// is also bad.
+let shuttingDown = false;
 async function shutdown() {
+  if (shuttingDown) return; // Second Ctrl+C while already shutting down — ignore.
+  shuttingDown = true;
   console.log('\nShutting down...');
+
   await Promise.race([
     (async () => {
       await agentService.shutdownAll();
@@ -130,10 +379,26 @@ async function shutdown() {
       resolve();
     }, 5000)),
   ]);
+
+  // Flush pending data.json writes BEFORE clearing PIDs / stopping the
+  // server. 2s timeout so a stuck save can't prevent shutdown.
+  await Promise.race([
+    persistenceService.saveNow().catch(e => console.error('Final saveNow failed:', e)),
+    new Promise<void>(resolve => setTimeout(() => {
+      console.warn('Final data save timed out after 2s — proceeding to exit.');
+      resolve();
+    }, 2000)),
+  ]);
+
   persistenceService.clearAllPids();
   await persistenceService.savePidsNow();
+  await releaseProcessLock();
   server.stop(true);
   process.exit(0);
 }
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
+// SIGHUP fires on terminal close on Windows when the parent shell exits.
+// Same flush-then-die path so data isn't lost if you close the PowerShell
+// window instead of Ctrl+C-ing.
+process.on('SIGHUP', shutdown);
