@@ -96,6 +96,7 @@ export interface ChatMessage {
   imageData?: string;         // Base64 encoded image data
   imageMimeType?: string;     // e.g. 'image/png', 'image/jpeg'
   source?: 'qa';              // QA-originated message (for visual styling)
+  provider?: AgentProvider;   // Which provider produced this turn (assistant messages only). Stamped at turn-finalize. Legacy messages without this field display as 'Claude' for backward compat.
 }
 
 export interface ProjectNote {

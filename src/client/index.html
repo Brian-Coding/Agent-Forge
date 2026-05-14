@@ -1362,10 +1362,15 @@
       return { verdict: { kind, summary, raw: m[1].trim() }, body };
     }
 
-    const ChatTurn = React.memo(function ChatTurn({ role, content, isStreaming, imageData, imageMimeType, showToolMessages, searchQuery, showRetry, onRetry, source }) {
+    const ChatTurn = React.memo(function ChatTurn({ role, content, isStreaming, imageData, imageMimeType, showToolMessages, searchQuery, showRetry, onRetry, source, provider }) {
       const [copied, setCopied] = useState(false);
       const isQa = source === 'qa';
-      const roleLabels = { user: isQa ? 'QA Tester' : 'You', assistant: 'Claude', system: 'System' };
+      // Per-message provider stamp (newer messages); fall back to 'Claude' for
+      // legacy messages that pre-date the per-provider stamping. Look up the
+      // provider definition so we can prefix with the icon (✦ Claude / ⚙ Codex).
+      const providerDef = provider ? PROVIDER_BY_KIND[provider] : null;
+      const assistantLabel = providerDef ? providerDef.label : 'Claude';
+      const roleLabels = { user: isQa ? 'QA Tester' : 'You', assistant: assistantLabel, system: 'System' };
       const turnClass = isStreaming ? 'chat-turn chat-turn-streaming' : 'chat-turn chat-turn-' + role;
       // Filter [Using tool: ...] annotations for assistant messages AND for QA-source
       // messages regardless of role (since QA reports are relayed as role=user).
@@ -1412,7 +1417,7 @@
         showRetry && onRetry && e('button', { className: 'retry-btn', onClick: onRetry }, '\u21BB Retry')
       );
     }, (prev, next) => {
-      return prev.content === next.content && prev.role === next.role && prev.isStreaming === next.isStreaming && prev.searchQuery === next.searchQuery && prev.showToolMessages === next.showToolMessages && prev.showRetry === next.showRetry && prev.imageData === next.imageData && prev.source === next.source;
+      return prev.content === next.content && prev.role === next.role && prev.isStreaming === next.isStreaming && prev.searchQuery === next.searchQuery && prev.showToolMessages === next.showToolMessages && prev.showRetry === next.showRetry && prev.imageData === next.imageData && prev.source === next.source && prev.provider === next.provider;
     });
 
     // Terminal Panel
@@ -1926,6 +1931,7 @@
                         imageData: m.imageData,
                         imageMimeType: m.imageMimeType,
                         source: m.source,
+                        provider: m.provider,
                         showToolMessages,
                         searchQuery: searchVisible ? searchQuery : '',
                         showRetry: realIdx === lastUserMsgIndex && m.role === 'user' && !isWorking,
@@ -1935,7 +1941,7 @@
                   );
                 })(),
                 thinking && e(ThinkingBlock, { key: 'thinking', content: thinking, isActive: agent.status === 'thinking' }),
-                liveOutput && e(ChatTurn, { key: 'live', role: 'assistant', content: liveOutput, isStreaming: isWorking, showToolMessages }),
+                liveOutput && e(ChatTurn, { key: 'live', role: 'assistant', content: liveOutput, isStreaming: isWorking, showToolMessages, provider: agent.provider }),
                 queued.map((q, i) => e('div', { key: 'q' + i, className: 'chat-turn chat-turn-queued' },
                   e('div', { className: 'chat-turn-role' }, 'Queued'),
                   e('div', { className: 'chat-turn-content' }, q)

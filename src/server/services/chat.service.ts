@@ -273,7 +273,10 @@ async function runChatTurn(agentId: string, content: string, source?: 'qa'): Pro
             : '[Stopped by user]';
         finalText = finalText + '\n\n' + marker;
       }
-      const assistantMsg = agentService.appendMessage(agentId, 'assistant', finalText);
+      // Stamp the provider that produced this turn so the chat UI can render
+      // the correct role label ('Claude' vs 'Codex') per-message — historic
+      // messages without this field display 'Claude' for backward compat.
+      const assistantMsg = agentService.appendMessage(agentId, 'assistant', finalText, undefined, undefined, undefined, provider);
       broadcast({ type: 'message', message: assistantMsg });
     }
     turnBuffers.delete(agentId);

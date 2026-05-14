@@ -67,7 +67,7 @@ async function notifyLifecycle(kind: 'onIdle' | 'onStop' | 'onRemoved', agentId:
 //   src/server/services/prompts/{qa,atlas}-system-prompt.ts
 // They subscribe to agent lifecycle via agentService.onAgentIdle / onAgentRemoved.
 
-function addMessage(agentId: string, role: ChatMessage['role'], content: string, imageData?: string, imageMimeType?: string, source?: 'qa'): ChatMessage {
+function addMessage(agentId: string, role: ChatMessage['role'], content: string, imageData?: string, imageMimeType?: string, source?: 'qa', provider?: AgentProvider): ChatMessage {
   const msg: ChatMessage = {
     id: generateId(),
     agentId,
@@ -78,6 +78,7 @@ function addMessage(agentId: string, role: ChatMessage['role'], content: string,
   if (imageData) msg.imageData = imageData;
   if (imageMimeType) msg.imageMimeType = imageMimeType;
   if (source) msg.source = source;
+  if (provider) msg.provider = provider;
   if (!messages.has(agentId)) {
     messages.set(agentId, []);
   }
@@ -219,8 +220,8 @@ export const agentService = {
   },
 
   /** Internal: append any-role message. Used by chat.service when broadcasting user turns. */
-  appendMessage(agentId: string, role: ChatMessage['role'], content: string, imageData?: string, imageMimeType?: string, source?: 'qa'): ChatMessage {
-    return addMessage(agentId, role, content, imageData, imageMimeType, source);
+  appendMessage(agentId: string, role: ChatMessage['role'], content: string, imageData?: string, imageMimeType?: string, source?: 'qa', provider?: AgentProvider): ChatMessage {
+    return addMessage(agentId, role, content, imageData, imageMimeType, source, provider);
   },
 
   /** Internal: set agent status + broadcast agent_updated. No-op if status unchanged. */
