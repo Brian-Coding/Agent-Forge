@@ -1,5 +1,5 @@
 import { existsSync } from 'fs';
-import { ArgvTooLongError, safeSpawn } from '../../utils';
+import { ArgvTooLongError, resolveCliBinary, safeSpawn } from '../../utils';
 import { persistenceService } from '../../services/persistence.service';
 import { summarizeToolInput, type AgentEvent } from '../events';
 import { drainStreamToString, parseNdjsonLines, flushNdjsonLeftover } from '../stream-utils';
@@ -41,8 +41,10 @@ export const claudeAdapter: AgentAdapter<undefined> = {
     let proc: ReturnType<typeof safeSpawn> | null = null;
     let killed = false;
 
+    // Resolve to absolute path so Bun.spawn doesn't have to probe PATHEXT
+    // from the agent's cwd (which fails on Windows for npm shim files).
     const args: string[] = [
-      'claude',
+      resolveCliBinary('claude'),
       '--print',
       '--output-format', 'stream-json',
       '--verbose',

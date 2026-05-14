@@ -2,7 +2,7 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import { unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { isAbsolute, relative, resolve } from 'node:path';
-import { ArgvTooLongError, safeSpawn } from '../../utils';
+import { ArgvTooLongError, resolveCliBinary, safeSpawn } from '../../utils';
 import { persistenceService } from '../../services/persistence.service';
 import { summarizeToolInput, type AgentEvent } from '../events';
 import { drainStreamToString, parseNdjsonLines, flushNdjsonLeftover } from '../stream-utils';
@@ -396,10 +396,13 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
       baseArgs.push('-c', `reasoning_effort="${effort}"`);
     }
 
+    // Resolve to absolute path so Bun.spawn doesn't have to probe PATHEXT
+    // from the agent's cwd (which fails on Windows for npm shim files).
+    const codexBin = resolveCliBinary('codex');
     const sessionId = ctx.getSessionId();
     const args: string[] = sessionId
-      ? ['codex', 'exec', 'resume', ...baseArgs, sessionId, '-']
-      : ['codex', 'exec', ...baseArgs, '-'];
+      ? [codexBin, 'exec', 'resume', ...baseArgs, sessionId, '-']
+      : [codexBin, 'exec', ...baseArgs, '-'];
 
     // The Codex CLI doesn't have an --append-system-prompt flag. We
     // prepend the agent-forge system prompt (guardrails + persona + notes

@@ -83,3 +83,65 @@ export async function killProcessTree(proc: Subprocess<any, any, any>): Promise<
     try { proc.kill(); } catch {}
   }
 }
+
+// --- CLI binary resolution -------------------------------------------------
+// Bun.spawn(['codex', ...]) on Windows fails with ENOENT when spawning from
+// cwds other than the one Bun was started in, because Bun's child-spawn path
+// doesn't probe PATHEXT the way the parent process does. We resolve the
+// absolute path to the shim file ourselves so spawning is path-explicit and
+// cwd-independent.
+//
+// Strategy:
+//   * Walk PATH directories
+//   * For each dir, look for `<name><ext>` across PATHEXT (or .cmd/.exe/.bat
+//     defaults on Windows; bare name on POSIX)
+//   * Return the first hit; fall back to the bare name on miss so callers
+//     still get a clean ENOENT instead of a runtime crash
+//   * Cache per-name forever — npm/bun bin paths don't move during a run
+
+import { existsSync as _existsSync } from 'fs';
+import { join as _pathJoin, sep as _pathSep } from 'path';
+
+const _binaryCache: Map<string, string> = (globalThis as any).__cliBinaryCache ??= new Map<string, string>();
+
+export function resolveCliBinary(name: string): string {
+  const cached = _binaryCache.get(name);
+  if (cached) return cached;
+
+  const isWin = process.platform === 'win32';
+
+  // Determine which extensions to probe. PATHEXT is uppercase on Windows
+  // (e.g. ".COM;.EXE;.BAT;.CMD"); also fold in .CMD/.BAT/.EXE in case PATHEXT
+  // is unusual. On POSIX we look for the bare name only.
+  const exts: string[] = isWin
+    ? Array.from(new Set(
+        ((process.env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD').split(';')
+          .filter(Boolean)
+          .map(e => e.toLowerCase()))
+          .concat(['.cmd', '.bat', '.exe'])
+      ))
+    : [''];
+
+  const pathRaw = process.env.PATH ?? process.env.Path ?? '';
+  const dirs = pathRaw.split(isWin ? ';' : ':').filter(Boolean);
+
+  for (const dir of dirs) {
+    for (const ext of exts) {
+      const candidate = _pathJoin(dir, name + ext);
+      try {
+        if (_existsSync(candidate)) {
+          _binaryCache.set(name, candidate);
+          return candidate;
+        }
+      } catch {
+        // permission or weird path — keep going
+      }
+    }
+  }
+
+  // Fallback: bare name. Bun.spawn will surface its own ENOENT with the
+  // original argv if this turns out not to be on PATH after all.
+  console.warn(`[resolveCliBinary] '${name}' not found on PATH; falling back to bare name`);
+  _binaryCache.set(name, name);
+  return name;
+}
