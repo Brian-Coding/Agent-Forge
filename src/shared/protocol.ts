@@ -42,14 +42,17 @@ export interface AgentInfo {
 
 /**
  * Server-side persistence shape for an agent: the wire AgentInfo plus the
- * fields that aren't surfaced to the UI (per-provider session pool, token
- * accounting, output buffer position, etc.). Stored in data.json.
+ * fields that aren't surfaced to the UI (current session, token accounting,
+ * etc.). Stored in data.json.
  *
- * sessionIds replaces the legacy single `sessionId: string | null` field;
- * `migrateAgentRecord` (below) hoists the old field on load.
+ * Session model: one current session per agent, owned by exactly one
+ * provider. When the user swaps provider, the next turn starts fresh
+ * (with prior UI chat history prepended into the prompt) and the new
+ * provider claims currentSessionId/currentSessionProvider as its own.
  */
 export interface PersistedAgentRecord extends AgentInfo {
-  sessionIds?: Partial<Record<AgentProvider, string>>;
+  currentSessionId?: string | null;
+  currentSessionProvider?: AgentProvider | null;
   contextTokens?: number;
   contextLimit?: number;
   totalInputTokens?: number;
@@ -59,29 +62,55 @@ export interface PersistedAgentRecord extends AgentInfo {
 }
 
 /**
- * One-time, idempotent normalization of a persisted agent record. Applied to
- * every agent on load. Two responsibilities:
- *   1) Hoist legacy top-level `sessionId: string | null` into `sessionIds.claude`
- *      (per-provider session pool — see plan §2.2 / §6.2).
- *   2) Default `provider` to 'claude' so the inline dropdown always has a value.
+ * One-time, idempotent normalization of a persisted agent record on load.
+ * Two historical layouts get migrated forward to the unified-session shape:
+ *
+ *   v1 (pre-rebuild):   { sessionId: 'abc' }
+ *     → { currentSessionId: 'abc', currentSessionProvider: 'claude' }
+ *
+ *   v2 (Phase 1 rebuild): { sessionIds: { claude: 'a', codex: 'b' } }
+ *     → { currentSessionId: 'a', currentSessionProvider: 'claude' }
+ *       (Codex session is dropped — we can't carry both forward; the lost
+ *        side starts fresh on next turn with full UI history prepended.)
+ *
+ *   v3 (current):       { currentSessionId, currentSessionProvider }
+ *     → unchanged
+ *
+ * Also defaults `provider` to 'claude' so the inline dropdown always has
+ * a valid value, and clears the agent of any unknown shapes.
  */
 export function migrateAgentRecord(raw: any): PersistedAgentRecord {
   if (!raw || typeof raw !== 'object') return raw;
   const record: any = { ...raw };
 
-  // 1) sessionId → sessionIds.claude
-  const legacy = record.sessionId;
+  // v1 → v3: legacy top-level `sessionId` string
+  if (typeof record.sessionId === 'string' && record.sessionId && !record.currentSessionId) {
+    record.currentSessionId = record.sessionId;
+    record.currentSessionProvider = 'claude';
+  }
   delete record.sessionId;
-  if (!record.sessionIds || typeof record.sessionIds !== 'object') {
-    record.sessionIds = {};
-  }
-  if (typeof legacy === 'string' && legacy && !record.sessionIds.claude) {
-    record.sessionIds.claude = legacy;
-  }
 
-  // 2) Default provider
+  // v2 → v3: per-provider sessionIds map (preserve claude side if present)
+  if (record.sessionIds && typeof record.sessionIds === 'object' && !record.currentSessionId) {
+    if (typeof record.sessionIds.claude === 'string' && record.sessionIds.claude) {
+      record.currentSessionId = record.sessionIds.claude;
+      record.currentSessionProvider = 'claude';
+    } else if (typeof record.sessionIds.codex === 'string' && record.sessionIds.codex) {
+      record.currentSessionId = record.sessionIds.codex;
+      record.currentSessionProvider = 'codex';
+    }
+  }
+  delete record.sessionIds;
+
+  // Default provider for the inline dropdown.
   if (record.provider !== 'claude' && record.provider !== 'codex') {
     record.provider = 'claude';
+  }
+
+  // Normalize empty session marker to null instead of undefined.
+  if (!record.currentSessionId) {
+    record.currentSessionId = null;
+    record.currentSessionProvider = null;
   }
 
   return record as PersistedAgentRecord;

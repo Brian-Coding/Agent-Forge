@@ -20,11 +20,14 @@ import { broadcast } from '../broadcast';
 interface ManagedAgent {
   info: AgentInfo;
   /**
-   * Per-provider session pool. Switching provider preserves both threads —
-   * `sessionIds.claude` keeps Claude's resume token, `sessionIds.codex` keeps
-   * Codex's. Only "Clear History" wipes both.
+   * One current session per agent, owned by exactly one provider. When the
+   * user swaps providers, the next turn detects the mismatch, starts fresh
+   * (no --resume), prepends the prior UI chat history into the prompt, and
+   * then claims currentSessionId/currentSessionProvider for the new provider.
+   * "Clear History" nulls both.
    */
-  sessionIds: Partial<Record<AgentProvider, string>>;
+  currentSessionId: string | null;
+  currentSessionProvider: AgentProvider | null;
   watcher: FSWatcher | null;
   lastFileChange: string[];
   pendingTimeouts: ReturnType<typeof setTimeout>[];
@@ -350,7 +353,8 @@ export const agentService = {
 
     agents.set(id, {
       info,
-      sessionIds: {},
+      currentSessionId: null,
+      currentSessionProvider: null,
       watcher: null,
       lastFileChange: [],
       pendingTimeouts: [],
@@ -436,24 +440,36 @@ export const agentService = {
     const agent = agents.get(agentId);
     if (!agent) return false;
     messages.set(agentId, []);
-    // Clear sessions for both providers — "Clear History" is the one path that
-    // fully resets the agent's memory across the per-provider pool.
-    agent.sessionIds = {};
+    // "Clear History" fully resets the agent's memory.
+    agent.currentSessionId = null;
+    agent.currentSessionProvider = null;
     await persistenceService.saveNow();
     return true;
   },
 
-  // --- Per-provider session pool (read by chat.service ctx.getSessionId / written via ctx.updateSessionId) ---
+  // --- Current session (read by chat.service to decide --resume vs fresh) ---
 
-  getProviderSessionId(agentId: string, provider: AgentProvider): string | null {
-    return agents.get(agentId)?.sessionIds[provider] ?? null;
+  /** Returns the active session id, or null if no session is established yet. */
+  getCurrentSessionId(agentId: string): string | null {
+    return agents.get(agentId)?.currentSessionId ?? null;
   },
 
-  setProviderSessionId(agentId: string, provider: AgentProvider, sessionId: string): void {
+  /** Which provider owns the current session — used to detect swap boundaries. */
+  getCurrentSessionProvider(agentId: string): AgentProvider | null {
+    return agents.get(agentId)?.currentSessionProvider ?? null;
+  },
+
+  /**
+   * Claim or update the current session for an agent. Always sets both
+   * fields together so they stay consistent. Used by the bridge after a
+   * turn establishes / updates its provider session id.
+   */
+  setCurrentSession(agentId: string, provider: AgentProvider, sessionId: string): void {
     const agent = agents.get(agentId);
     if (!agent) return;
-    if (agent.sessionIds[provider] === sessionId) return;
-    agent.sessionIds[provider] = sessionId;
+    if (agent.currentSessionId === sessionId && agent.currentSessionProvider === provider) return;
+    agent.currentSessionId = sessionId;
+    agent.currentSessionProvider = provider;
     persistenceService.save();
   },
 
@@ -638,14 +654,18 @@ export const agentService = {
   load(data: { agents: any[]; messages: ChatMessage[]; sharedContext: string }) {
     for (const agentData of data.agents) {
       // protocol.migrateAgentRecord (called by persistence.service.load) has
-      // already hoisted any legacy top-level `sessionId` string into
-      // `sessionIds.claude` and defaulted `provider` to 'claude'. Belt-and-
-      // braces here for any record that somehow bypassed the migration.
-      const sessionIds = agentData.sessionIds && typeof agentData.sessionIds === 'object'
-        ? { ...agentData.sessionIds }
-        : (typeof agentData.sessionId === 'string' && agentData.sessionId
-            ? { claude: agentData.sessionId }
-            : {});
+      // already collapsed legacy session shapes into currentSessionId +
+      // currentSessionProvider. Belt-and-braces handling here for any record
+      // that somehow bypassed migration.
+      const sessionProviderCandidate = agentData.currentSessionProvider;
+      const currentSessionId = typeof agentData.currentSessionId === 'string' && agentData.currentSessionId
+        ? agentData.currentSessionId
+        : null;
+      const currentSessionProvider: AgentProvider | null = currentSessionId &&
+        (sessionProviderCandidate === 'claude' || sessionProviderCandidate === 'codex')
+          ? sessionProviderCandidate
+          : (currentSessionId ? 'claude' : null);
+
       const managed: ManagedAgent = {
         info: {
           ...agentData,
@@ -655,7 +675,8 @@ export const agentService = {
           workspaceId: agentData.workspaceId || '',
           provider: (agentData.provider === 'claude' || agentData.provider === 'codex') ? agentData.provider : 'claude',
         },
-        sessionIds,
+        currentSessionId,
+        currentSessionProvider,
         watcher: null,
         lastFileChange: [],
         pendingTimeouts: [],
@@ -695,7 +716,8 @@ export const agentService = {
   buildPersistedAgents(): any[] {
     return Array.from(agents.values()).map(a => ({
       ...a.info,
-      sessionIds: a.sessionIds,
+      currentSessionId: a.currentSessionId,
+      currentSessionProvider: a.currentSessionProvider,
       contextTokens: a.contextTokens,
       contextLimit: a.contextLimit,
       totalInputTokens: a.totalInputTokens,

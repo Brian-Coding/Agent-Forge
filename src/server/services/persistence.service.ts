@@ -152,7 +152,7 @@ export const persistenceService = {
             return after;
           });
           if (migrated > 0) {
-            console.log(`[persistence] migrated ${migrated} agent record(s) to per-provider session pool`);
+            console.log(`[persistence] migrated ${migrated} agent record(s) to unified session model (currentSessionId + currentSessionProvider)`);
           }
         }
         return raw as PersistedData;

@@ -27,6 +27,68 @@ interface TurnBuffer {
 }
 const turnBuffers: Map<string, TurnBuffer> = (globalThis as any).__chatTurnBuffers ??= new Map();
 
+// --- Cross-provider history prepend ---------------------------------------
+// When the user swaps provider mid-conversation, the new provider has no
+// session yet, so we feed it the prior UI chat history as a delimited
+// context block. Sliding window + per-message + total caps keep the
+// injected block small enough not to dominate the model's context.
+//
+// This only runs on swap boundaries. Once the new provider's first turn
+// completes, ctx.updateSessionId claims the session for it, and subsequent
+// same-provider turns --resume the cached session for free.
+
+const HISTORY_RECENT_TURNS = 20;
+const HISTORY_USER_CAP = 1500;
+const HISTORY_ASSISTANT_CAP = 1500;
+const HISTORY_MAX_TOTAL = 12000;
+
+function prependPriorHistory(agentId: string, currentUserContent: string): string {
+  const all = agentService.getMessages(agentId);
+  // Exclude the user message we just appended (the prompt is already going
+  // in as the actual turn) plus any pure-system bookkeeping rows.
+  const turns = all
+    .filter(m => m.role === 'user' || m.role === 'assistant')
+    .slice(0, -1) // drop the just-appended user message
+    .slice(-HISTORY_RECENT_TURNS);
+
+  if (turns.length === 0) return currentUserContent;
+
+  const formatted = turns.map(m => {
+    const cap = m.role === 'user' ? HISTORY_USER_CAP : HISTORY_ASSISTANT_CAP;
+    const label = m.role === 'user'
+      ? 'User'
+      : `Assistant (${m.provider === 'codex' ? 'Codex' : 'Claude'})`;
+    const text = m.content.length > cap
+      ? m.content.substring(0, cap) + `... [truncated, ${m.content.length - cap} chars cut]`
+      : m.content;
+    return `[${label}]: ${text}`;
+  });
+
+  // Total-budget walk: drop oldest until under HISTORY_MAX_TOTAL.
+  let totalLen = formatted.reduce((s, t) => s + t.length + 2, 0);
+  let dropped = 0;
+  while (totalLen > HISTORY_MAX_TOTAL && formatted.length > 1) {
+    const out = formatted.shift()!;
+    totalLen -= out.length + 2;
+    dropped++;
+  }
+
+  const header = [
+    '=== Prior conversation (from earlier turns with this agent, possibly with a different LLM provider) ===',
+    'You are continuing a chat that may have included turns from a different model. Treat the messages below as established conversation context: the user said what is shown, and the assistant replies shown are what the user already saw. Don\'t re-introduce yourself or restart the conversation unless the user explicitly asks.',
+    dropped > 0 ? `(${dropped} earlier message${dropped === 1 ? '' : 's'} omitted to keep this block compact)` : null,
+  ].filter(Boolean).join('\n');
+
+  return [
+    header,
+    '',
+    formatted.join('\n\n'),
+    '',
+    '=== Current user message ===',
+    currentUserContent,
+  ].join('\n');
+}
+
 // --- Bridge: translate normalized AgentEvent → wire-protocol messages -------
 
 function handleEvent(agentId: string, event: AgentEvent): void {
@@ -205,7 +267,26 @@ async function runChatTurn(agentId: string, content: string, source?: 'qa'): Pro
     agentService.getSharedContext(),
   );
 
-  // 5) Build AgentRunContext — closures over agentId so emit callbacks route.
+  // 5) Decide --resume vs fresh start. We --resume only when the agent's
+  //    current session is owned by THIS provider; if the user just swapped
+  //    providers, we start fresh and prepend the prior UI chat history so
+  //    the new provider has cross-provider context. After this turn finishes,
+  //    setCurrentSession claims the session for the (now-current) provider.
+  const previousSessionProvider = agentService.getCurrentSessionProvider(agentId);
+  const previousSessionId = agentService.getCurrentSessionId(agentId);
+  const isProviderMatch = previousSessionProvider === provider && !!previousSessionId;
+  const sessionIdForAdapter = isProviderMatch ? previousSessionId : null;
+
+  // Build the prompt body. On a swap, prepend the prior conversation as
+  // delimited context so the new provider sees what the previous provider
+  // saw. We re-fetch messages here so it includes the user turn we just
+  // appended (which is correct — the model sees its own user prompt as
+  // "User: ..." within the history block, mirroring the live conversation).
+  const promptBody = isProviderMatch
+    ? content
+    : prependPriorHistory(agentId, content);
+
+  // 6) Build AgentRunContext — closures over agentId so emit callbacks route.
   const turn: TurnBuffer = { accumulatedText: '', lastResultEmitted: null };
   turnBuffers.set(agentId, turn);
 
@@ -218,10 +299,13 @@ async function runChatTurn(agentId: string, content: string, source?: 'qa'): Pro
     reasoningLevel: info.reasoningLevel,
 
     getSessionId(): string | null {
-      return agentService.getProviderSessionId(agentId, provider);
+      return sessionIdForAdapter;
     },
     updateSessionId(nextSessionId: string): void {
-      agentService.setProviderSessionId(agentId, provider, nextSessionId);
+      // Claim the new session for this turn's provider. If the user swaps
+      // providers again, this lookup will detect the mismatch on the next
+      // turn and start fresh.
+      agentService.setCurrentSession(agentId, provider, nextSessionId);
     },
     emitChatEvent(_event: unknown): void {
       // Raw provider events currently have no UI surface. Hook target for
@@ -243,9 +327,9 @@ async function runChatTurn(agentId: string, content: string, source?: 'qa'): Pro
     },
   };
 
-  // 6) Create handle, register, run.
+  // 7) Create handle, register, run.
   const state = adapter.createState(ctx);
-  const handle = adapter.createHandle(content, ctx, state);
+  const handle = adapter.createHandle(promptBody, ctx, state);
   currentHandles.set(agentId, handle);
 
   try {
