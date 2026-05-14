@@ -388,9 +388,14 @@
     .maximize-btn { font-size: 13px; }
 
     /* Cost dashboard (Feature 3) */
-    .cost-dashboard { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-secondary); }
+    .cost-dashboard { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); margin-right: 8px; }
     .cost-value { color: var(--text-primary); font-weight: 500; }
     .cost-sep { color: var(--text-muted); }
+    .cost-window-toggle { background: var(--bg-tertiary); color: var(--text-muted); border: 1px solid var(--border); border-radius: 4px; padding: 1px 6px; font-size: 10px; font-family: 'SF Mono', Monaco, Consolas, monospace; cursor: pointer; text-transform: lowercase; }
+    .cost-window-toggle:hover { color: var(--text-primary); border-color: var(--accent); }
+    .cost-provider { display: inline-flex; align-items: center; gap: 3px; padding: 0 2px; }
+    .cost-icon { color: var(--text-muted); font-size: 11px; }
+    .cost-total { color: var(--text-muted); }
 
     /* Broadcast toggle (Feature 10) */
     .broadcast-toggle { display: flex; align-items: center; gap: 6px; background: var(--bg-tertiary); border: 1px solid var(--border); color: var(--text-secondary); padding: 4px 10px; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 500; }
@@ -703,10 +708,10 @@
         label: 'Claude',
         icon: '✦',
         models: [
-          { id: 'claude-opus-4-7',           label: 'opus' },
+          { id: 'claude-opus-4-7',           label: 'opus 4.7' },
           { id: 'claude-opus-4-6',           label: 'opus 4.6' },
-          { id: 'claude-sonnet-4-6',         label: 'sonnet' },
-          { id: 'claude-haiku-4-5-20251001', label: 'haiku' },
+          { id: 'claude-sonnet-4-6',         label: 'sonnet 4.6' },
+          { id: 'claude-haiku-4-5-20251001', label: 'haiku 4.5' },
         ],
         defaultModel: 'claude-opus-4-7',
         reasoningLevels: null,
@@ -770,6 +775,10 @@
       const [workspaces, setWorkspaces] = useState([]);
       const [statusStartTimes, setStatusStartTimes] = useState({});
       const [tokenUsage, setTokenUsage] = useState({});
+      // Cross-provider cost / token rollups for the bottom-bar tracker. Server
+      // emits `usage_summary` on WS connect and after each turn finalizes.
+      const [usageSummary, setUsageSummary] = useState({ rolling: null, lifetime: null });
+      const [usageView, setUsageView] = useState('rolling'); // 'rolling' (30d) | 'lifetime'
       const [terminals, setTerminals] = useState([]);
       const [terminalOutput, setTerminalOutput] = useState({});
       const [errorToasts, setErrorToasts] = useState([]);
@@ -935,6 +944,9 @@
               // Token usage
               case 'token_usage':
                 setTokenUsage(prev => ({ ...prev, [msg.agentId]: { contextTokens: msg.contextTokens, contextLimit: msg.contextLimit, totalInputTokens: msg.totalInputTokens, totalOutputTokens: msg.totalOutputTokens, totalCostUsd: msg.totalCostUsd, numTurns: msg.numTurns } }));
+                break;
+              case 'usage_summary':
+                setUsageSummary({ rolling: msg.rolling, lifetime: msg.lifetime });
                 break;
               // Workspaces
               case 'workspaces_list':
@@ -3977,18 +3989,38 @@
             })()
           ),
 
-          // Bottom bar (workspace info, cost, broadcast toggle, grid controls)
+          // Bottom bar (workspace info, cost tracker, broadcast toggle, grid controls)
           e('div', { className: 'bottom-bar' },
             e('div', { className: 'bottom-bar-left' },
               activeWorkspace && e('span', { style: { fontWeight: 600, fontSize: 13, color: 'var(--text-primary)', marginRight: 8 } }, activeWorkspace.name),
-              // Feature 3: Cost dashboard
-              (costDashboard.totalCost > 0 || costDashboard.totalTurns > 0) && e('div', { className: 'cost-dashboard' },
-                e('span', { className: 'cost-value' }, '$' + costDashboard.totalCost.toFixed(2) + ' total'),
-                e('span', { className: 'cost-sep' }, '\u00B7'),
-                e('span', null, formatTokens(costDashboard.totalTokens) + ' tokens'),
-                e('span', { className: 'cost-sep' }, '\u00B7'),
-                e('span', null, costDashboard.totalTurns + ' turns')
-              ),
+              // Cross-provider cost tracker \u2014 server-computed rolling 30d + lifetime,
+              // per-provider breakdown (\u2726 Claude, \u2699 Codex). Toggle picks which window.
+              (() => {
+                const summary = usageView === 'lifetime' ? usageSummary.lifetime : usageSummary.rolling;
+                if (!summary) return null;
+                const t = summary.total;
+                const c = summary.claude;
+                const x = summary.codex;
+                if (t.turns === 0 && t.costUsd === 0) return null;
+                const fmtCost = (v) => v < 0.01 ? '<$0.01' : '$' + v.toFixed(2);
+                return e('div', { className: 'cost-dashboard' },
+                  e('button', {
+                    className: 'cost-window-toggle',
+                    onClick: () => setUsageView(prev => prev === 'rolling' ? 'lifetime' : 'rolling'),
+                    title: 'Toggle between rolling 30-day window and lifetime totals',
+                  }, usageView === 'lifetime' ? 'all time' : '30d'),
+                  c.turns > 0 && e('span', { className: 'cost-provider', title: c.turns + ' Claude turns \u00B7 ' + formatTokens(c.inputTokens + c.outputTokens) + ' tokens' },
+                    e('span', { className: 'cost-icon' }, '\u2726'),
+                    e('span', { className: 'cost-value' }, fmtCost(c.costUsd))
+                  ),
+                  x.turns > 0 && e('span', { className: 'cost-provider', title: x.turns + ' Codex turns \u00B7 ' + formatTokens(x.inputTokens + x.outputTokens) + ' tokens' },
+                    e('span', { className: 'cost-icon' }, '\u2699'),
+                    e('span', { className: 'cost-value' }, fmtCost(x.costUsd))
+                  ),
+                  e('span', { className: 'cost-sep' }, '\u00B7'),
+                  e('span', { className: 'cost-total', title: 'Combined total' }, fmtCost(t.costUsd) + ' \u00B7 ' + formatTokens(t.inputTokens + t.outputTokens) + ' tok \u00B7 ' + t.turns + ' turns')
+                );
+              })(),
               // Feature 10: Broadcast toggle
               e('button', {
                 className: 'broadcast-toggle' + (showBroadcast ? ' active' : ''),

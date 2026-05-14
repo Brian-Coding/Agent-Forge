@@ -11,6 +11,7 @@ import { terminalService } from './services/terminal.service';
 import { browserService } from './services/browser.service';
 import { qaService } from './services/qa.service';
 import { atlasService } from './services/atlas.service';
+import { usageService } from './services/usage.service';
 
 import { websocketHandlers } from './ws';
 
@@ -250,7 +251,8 @@ async function init() {
       data.agents.map(a => a.id),
       agentService.setAgentWorkspace,
     );
-    console.log(`Loaded ${data.agents.length} agents, ${data.messages.length} messages, ${noteService.getAll().length} notes, ${documentService.getAll().length} documents, ${workspaceService.getAll().length} workspaces from disk`);
+    usageService.load(data.usageEvents);
+    console.log(`Loaded ${data.agents.length} agents, ${data.messages.length} messages, ${noteService.getAll().length} notes, ${documentService.getAll().length} documents, ${workspaceService.getAll().length} workspaces, ${(data.usageEvents ?? []).length} usage entries from disk`);
   }
 
   // Wire up cross-service callbacks
@@ -265,6 +267,7 @@ async function init() {
     documents: documentService.getAll(),
     settings: settingsService.get(),
     workspaces: workspaceService.getAll(),
+    usageEvents: usageService.getEvents(),
   }));
 }
 

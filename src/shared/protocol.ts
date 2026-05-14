@@ -172,6 +172,38 @@ export interface TerminalSession {
   createdAt: number;
 }
 
+/**
+ * One usage entry per agent turn. Coalesces all `usage` events emitted by
+ * the adapter within a single turn into a single record so the log grows
+ * at most one row per turn (~150 bytes). Provider stamped so the cost
+ * tracker can break down Claude vs Codex spend.
+ */
+export interface UsageEvent {
+  timestamp: number;
+  agentId: string;
+  provider: AgentProvider;
+  inputTokens: number;
+  outputTokens: number;
+  costUsd: number;
+  turns: number;
+}
+
+/**
+ * Per-provider rollup. windowDays = 0 means "all time" (no time filter).
+ */
+export interface UsageBucket {
+  inputTokens: number;
+  outputTokens: number;
+  costUsd: number;
+  turns: number;
+}
+export interface UsageSummary {
+  windowDays: number;       // 0 for lifetime, >0 for rolling window
+  claude: UsageBucket;
+  codex: UsageBucket;
+  total: UsageBucket;
+}
+
 // Client -> Server messages
 export type ClientMessage =
   | { type: 'create_agent'; name: string; cwd: string; referencePaths?: string[]; systemPrompt?: string; workspaceId?: string }
@@ -249,8 +281,11 @@ export type ServerMessage =
   | { type: 'document_content_stream'; documentId: string; content: string }
   // Settings
   | { type: 'settings'; settings: AppSettings }
-  // Token usage
+  // Token usage (per-agent live state — drives the per-chat context bar)
   | { type: 'token_usage'; agentId: string; contextTokens: number; contextLimit: number; totalInputTokens: number; totalOutputTokens: number; totalCostUsd: number; numTurns: number }
+  // Cost / token rollups across all agents — drives the bottom-bar tracker.
+  // Server sends both a rolling-window (30d) and a lifetime (windowDays=0) summary.
+  | { type: 'usage_summary'; rolling: UsageSummary; lifetime: UsageSummary }
   // Workspaces
   | { type: 'workspaces_list'; workspaces: WorkspaceInfo[] }
   | { type: 'workspace_created'; workspace: WorkspaceInfo }
@@ -275,4 +310,11 @@ export interface PersistedData {
   documents: LiveDocument[];
   settings: AppSettings;
   workspaces: WorkspaceInfo[];
+  /**
+   * Append-only usage log: one entry per finalized agent turn, with the
+   * provider stamped so the bottom-bar cost tracker can break down spend
+   * by Claude vs Codex over rolling time windows. Optional/undefined for
+   * pre-rebuild data.json files; loaded as [] in that case.
+   */
+  usageEvents?: UsageEvent[];
 }

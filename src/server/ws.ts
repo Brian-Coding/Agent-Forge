@@ -13,6 +13,7 @@ import { terminalService } from './services/terminal.service';
 import { qaService } from './services/qa.service';
 import { atlasService } from './services/atlas.service';
 import { chatService } from './services/chat.service';
+import { usageService } from './services/usage.service';
 
 // WebSocket heartbeat — ping every 30s, close stale clients after 40s
 setInterval(() => {
@@ -387,6 +388,9 @@ export const websocketHandlers = {
     sendTo(ws, { type: 'settings', settings: settingsService.get() });
     sendTo(ws, { type: 'workspaces_list', workspaces: workspaceService.getAll() });
     sendTo(ws, { type: 'terminals_list', terminals: terminalService.getAll() });
+    // Cross-provider cost / token rollups — drives the bottom-bar tracker.
+    const { rolling, lifetime } = usageService.getSummariesForConnect();
+    sendTo(ws, { type: 'usage_summary', rolling, lifetime });
 
     // Send token usage for each agent
     for (const agent of agentService.getAgents()) {

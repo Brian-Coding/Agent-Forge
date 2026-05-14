@@ -7,6 +7,7 @@ import { agentService } from './agent.service';
 import { documentService } from './document.service';
 import { persistenceService } from './persistence.service';
 import { promptBuilderService } from './prompt-builder.service';
+import { usageService } from './usage.service';
 
 // --- HMR-safe state ---------------------------------------------------------
 
@@ -24,6 +25,11 @@ interface TurnBuffer {
   accumulatedText: string;
   lastResultEmitted: string | null;
   abortReason?: 'user' | 'timeout' | 'system';
+  // Per-turn usage accumulator. Each adapter `usage` event sums its deltas
+  // here; at turn-finalize the rolled-up totals get one entry in the usage
+  // log via usageService.record() — so the log grows at most one row per
+  // turn, not one row per internal API sub-call.
+  turnUsage: { inputTokens: number; outputTokens: number; costUsd: number; turns: number };
 }
 const turnBuffers: Map<string, TurnBuffer> = (globalThis as any).__chatTurnBuffers ??= new Map();
 
@@ -148,6 +154,14 @@ function handleEvent(agentId: string, event: AgentEvent): void {
         costUsdDelta: event.costUsdDelta,
         turnsDelta: event.turnsDelta,
       });
+      // Accumulate into the per-turn buffer for the usage-log record at finalize.
+      const turn = turnBuffers.get(agentId);
+      if (turn) {
+        if (typeof event.inputTokensDelta === 'number') turn.turnUsage.inputTokens += event.inputTokensDelta;
+        if (typeof event.outputTokensDelta === 'number') turn.turnUsage.outputTokens += event.outputTokensDelta;
+        if (typeof event.costUsdDelta === 'number') turn.turnUsage.costUsd += event.costUsdDelta;
+        if (typeof event.turnsDelta === 'number') turn.turnUsage.turns += event.turnsDelta;
+      }
       const snap = agentService.getTokenUsage(agentId);
       if (snap) {
         broadcast({
@@ -287,7 +301,11 @@ async function runChatTurn(agentId: string, content: string, source?: 'qa'): Pro
     : prependPriorHistory(agentId, content);
 
   // 6) Build AgentRunContext — closures over agentId so emit callbacks route.
-  const turn: TurnBuffer = { accumulatedText: '', lastResultEmitted: null };
+  const turn: TurnBuffer = {
+    accumulatedText: '',
+    lastResultEmitted: null,
+    turnUsage: { inputTokens: 0, outputTokens: 0, costUsd: 0, turns: 0 },
+  };
   turnBuffers.set(agentId, turn);
 
   const ctx: AgentRunContext = {
@@ -363,6 +381,14 @@ async function runChatTurn(agentId: string, content: string, source?: 'qa'): Pro
       const assistantMsg = agentService.appendMessage(agentId, 'assistant', finalText, undefined, undefined, undefined, provider);
       broadcast({ type: 'message', message: assistantMsg });
     }
+
+    // Persist the per-turn usage rollup. No-ops if every counter is zero
+    // (a turn that errored before any API call). Triggers a usage_summary
+    // broadcast so the bottom-bar tracker updates immediately.
+    if (turnState) {
+      usageService.record(agentId, provider, turnState.turnUsage);
+    }
+
     turnBuffers.delete(agentId);
 
     await documentService.releaseLocksForAgent(agentId);
