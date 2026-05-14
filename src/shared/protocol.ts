@@ -2,6 +2,12 @@
 
 export type AgentStatus = 'idle' | 'working' | 'thinking' | 'error' | 'stopped';
 
+/**
+ * Provider identifier. Mirrors `ChatAgentKind` in `src/server/agents/agent-kinds.ts`,
+ * duplicated here so the shared wire types don't need to import server-side code.
+ */
+export type AgentProvider = 'claude' | 'codex';
+
 export interface WorkspaceInfo {
   id: string;
   name: string;
@@ -28,6 +34,57 @@ export interface AgentInfo {
   createdAt: number;
   workspaceId: string;        // Workspace this agent belongs to
   hideFromGrid?: boolean;     // True for special-purpose agents (UI Atlas, QA Tester) that shouldn't take grid slots or appear in chip lists
+  // Provider / model selection (hot-swappable per agent, per the inline dropdowns under each chat input)
+  provider?: AgentProvider;   // Defaults to 'claude' when absent (backward compat with pre-rebuild data.json)
+  model?: string;             // Provider-scoped model id; null → adapter default
+  reasoningLevel?: string;    // Codex-only (low / medium / high / xhigh)
+}
+
+/**
+ * Server-side persistence shape for an agent: the wire AgentInfo plus the
+ * fields that aren't surfaced to the UI (per-provider session pool, token
+ * accounting, output buffer position, etc.). Stored in data.json.
+ *
+ * sessionIds replaces the legacy single `sessionId: string | null` field;
+ * `migrateAgentRecord` (below) hoists the old field on load.
+ */
+export interface PersistedAgentRecord extends AgentInfo {
+  sessionIds?: Partial<Record<AgentProvider, string>>;
+  contextTokens?: number;
+  contextLimit?: number;
+  totalInputTokens?: number;
+  totalOutputTokens?: number;
+  totalCostUsd?: number;
+  numTurns?: number;
+}
+
+/**
+ * One-time, idempotent normalization of a persisted agent record. Applied to
+ * every agent on load. Two responsibilities:
+ *   1) Hoist legacy top-level `sessionId: string | null` into `sessionIds.claude`
+ *      (per-provider session pool — see plan §2.2 / §6.2).
+ *   2) Default `provider` to 'claude' so the inline dropdown always has a value.
+ */
+export function migrateAgentRecord(raw: any): PersistedAgentRecord {
+  if (!raw || typeof raw !== 'object') return raw;
+  const record: any = { ...raw };
+
+  // 1) sessionId → sessionIds.claude
+  const legacy = record.sessionId;
+  delete record.sessionId;
+  if (!record.sessionIds || typeof record.sessionIds !== 'object') {
+    record.sessionIds = {};
+  }
+  if (typeof legacy === 'string' && legacy && !record.sessionIds.claude) {
+    record.sessionIds.claude = legacy;
+  }
+
+  // 2) Default provider
+  if (record.provider !== 'claude' && record.provider !== 'codex') {
+    record.provider = 'claude';
+  }
+
+  return record as PersistedAgentRecord;
 }
 
 export interface ChatMessage {

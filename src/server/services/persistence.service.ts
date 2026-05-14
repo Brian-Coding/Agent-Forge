@@ -1,4 +1,5 @@
 import type { PersistedData } from '../../shared/protocol';
+import { migrateAgentRecord } from '../../shared/protocol';
 import { treeKill } from '../utils';
 
 const DATA_FILE = './data.json';
@@ -139,7 +140,22 @@ export const persistenceService = {
     try {
       const file = Bun.file(DATA_FILE);
       if (await file.exists()) {
-        return await file.json();
+        const raw = await file.json();
+        // Migrate each agent record (legacy sessionId → sessionIds.claude, default provider).
+        // Idempotent on subsequent loads.
+        if (raw && Array.isArray(raw.agents)) {
+          let migrated = 0;
+          raw.agents = raw.agents.map((a: any) => {
+            const before = JSON.stringify(a);
+            const after = migrateAgentRecord(a);
+            if (JSON.stringify(after) !== before) migrated++;
+            return after;
+          });
+          if (migrated > 0) {
+            console.log(`[persistence] migrated ${migrated} agent record(s) to per-provider session pool`);
+          }
+        }
+        return raw as PersistedData;
       }
     } catch (e) {
       console.error('Failed to load persisted data:', e);

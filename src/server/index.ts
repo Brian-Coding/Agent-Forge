@@ -9,6 +9,8 @@ import { documentService } from './services/document.service';
 import { agentService, initAgentService } from './services/agent.service';
 import { terminalService } from './services/terminal.service';
 import { browserService } from './services/browser.service';
+import { qaService } from './services/qa.service';
+import { atlasService } from './services/atlas.service';
 
 import { websocketHandlers } from './ws';
 
@@ -350,7 +352,10 @@ if (server.port !== preferredPort) {
   console.warn(`NOTE: Preferred port ${preferredPort} was busy; bound to ${server.port} instead.`);
 }
 
-agentService.setGuiPort(server.port ?? 0);
+// Tell QA + Atlas services the bound port — they substitute {GUI_PORT} into their system prompts
+// at provision time so the spawned agents call back to the same Bun.serve we just bound.
+qaService.setGuiPort(server.port ?? 0);
+atlasService.setGuiPort(server.port ?? 0);
 console.log(`Server running at http://localhost:${server.port}`);
 
 // --- Graceful shutdown ---

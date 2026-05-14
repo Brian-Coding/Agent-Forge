@@ -7,6 +7,12 @@ import { documentService } from './services/document.service';
 import { settingsService } from './services/settings.service';
 import { workspaceService } from './services/workspace.service';
 import { terminalService } from './services/terminal.service';
+// Side-effect imports — qa.service and atlas.service register their agent
+// lifecycle listeners at module load. Importing them here guarantees the
+// listeners are wired before the first WS message arrives.
+import { qaService } from './services/qa.service';
+import { atlasService } from './services/atlas.service';
+import { chatService } from './services/chat.service';
 
 // WebSocket heartbeat — ping every 30s, close stale clients after 40s
 setInterval(() => {
@@ -60,14 +66,14 @@ async function handleMessage(ws: ServerWebSocket<unknown>, message: ClientMessag
     }
 
     case 'send_message': {
-      await agentService.sendMessage(message.agentId, message.content);
+      await chatService.sendMessage(message.agentId, message.content);
       break;
     }
 
     case 'send_qa_message': {
       try {
         console.log(`[qa] send_qa_message ws=${message.workspaceId} src=${message.sourceAgentId} content="${message.content.slice(0, 80)}..."`);
-        await agentService.sendQaMessage(message.workspaceId, message.sourceAgentId, message.content);
+        await qaService.sendQaMessage(message.workspaceId, message.sourceAgentId, message.content);
         console.log(`[qa] send_qa_message dispatched ok`);
       } catch (e: any) {
         console.error(`[qa] send_qa_message failed:`, e);
@@ -78,11 +84,8 @@ async function handleMessage(ws: ServerWebSocket<unknown>, message: ClientMessag
 
     case 'abort_qa_test': {
       try {
-        const wsInfo = workspaceService.get(message.workspaceId);
-        if (!wsInfo) throw new Error('Workspace not found');
-        if (!wsInfo.qaAgentId) throw new Error('No QA agent provisioned');
-        console.log(`[qa] abort_qa_test ws=${message.workspaceId} qa=${wsInfo.qaAgentId}`);
-        await agentService.stopAgent(wsInfo.qaAgentId);
+        console.log(`[qa] abort_qa_test ws=${message.workspaceId}`);
+        await qaService.abortQaTest(message.workspaceId);
       } catch (e: any) {
         console.error(`[qa] abort_qa_test failed:`, e);
         sendTo(ws, { type: 'error', message: e?.message || 'QA abort failed' });
@@ -93,7 +96,7 @@ async function handleMessage(ws: ServerWebSocket<unknown>, message: ClientMessag
     case 'provision_atlas_agent': {
       try {
         console.log(`[atlas] provision ws=${message.workspaceId} cwd=${message.projectCwd}`);
-        const created = await agentService.provisionAtlasAgent(message.workspaceId, message.projectCwd);
+        const created = await atlasService.provisionAtlasAgent(message.workspaceId, message.projectCwd);
         broadcast({ type: 'agent_created', agent: created });
         broadcast({ type: 'agents_list', agents: agentService.getAgents() });
         console.log(`[atlas] agent created id=${created.id}`);
@@ -107,7 +110,7 @@ async function handleMessage(ws: ServerWebSocket<unknown>, message: ClientMessag
     case 'rescan_atlas': {
       try {
         console.log(`[atlas] rescan ws=${message.workspaceId}`);
-        const created = await agentService.rescanAtlas(message.workspaceId);
+        const created = await atlasService.rescanAtlas(message.workspaceId);
         broadcast({ type: 'agent_created', agent: created });
         broadcast({ type: 'agents_list', agents: agentService.getAgents() });
         console.log(`[atlas] rescan agent created id=${created.id}`);
@@ -155,7 +158,7 @@ async function handleMessage(ws: ServerWebSocket<unknown>, message: ClientMessag
 
     case 'broadcast_message': {
       await Promise.all(message.agentIds.map(
-        (agentId: string) => agentService.sendMessage(agentId, message.content)
+        (agentId: string) => chatService.sendMessage(agentId, message.content)
       ));
       break;
     }
