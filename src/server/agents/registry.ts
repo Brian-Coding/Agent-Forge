@@ -1,15 +1,16 @@
 import { getAgentDefinition, type ChatAgentKind } from './agent-kinds';
 import { claudeAdapter } from './adapters/claude';
+import { codexAdapter } from './adapters/codex';
 import type { AgentAdapter } from './types';
 
 /**
- * Adapter registry. Adapters register themselves via `registerAdapter()`
- * from their own module (avoids circular imports between adapter files).
- *
- * Phase 2 registers Claude. Phase 3 registers Codex.
+ * Adapter registry. Both Claude and Codex are wired here. Add a new
+ * provider by implementing the AgentAdapter contract and adding it to
+ * the map below — no other code changes required.
  */
 const adapters: Partial<Record<ChatAgentKind, AgentAdapter<any>>> = {
   claude: claudeAdapter,
+  codex: codexAdapter,
 };
 
 export function registerAdapter(adapter: AgentAdapter<any>): void {

@@ -353,6 +353,13 @@
     .image-upload-btn { background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 4px 6px; font-size: 16px; }
     .image-upload-btn:hover { color: var(--text-primary); }
 
+    /* Inline provider + model dropdowns under each agent's chat input */
+    .agent-provider-row { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 11px; }
+    .agent-provider-select { background: var(--bg-tertiary); color: var(--text-secondary); border: 1px solid var(--border); border-radius: 4px; padding: 2px 6px; font-size: 11px; font-family: 'SF Mono', Monaco, Consolas, monospace; cursor: pointer; outline: none; }
+    .agent-provider-select:hover { color: var(--text-primary); border-color: var(--accent); }
+    .agent-provider-select:focus { border-color: var(--accent); }
+    .agent-provider-select-kind { font-weight: 500; color: var(--text-primary); }
+
     /* Copy message button (Feature 7) */
     .chat-turn { position: relative; }
     .copy-msg-btn { position: absolute; top: 6px; right: 6px; background: var(--bg-tertiary); border: 1px solid var(--border); color: var(--text-secondary); padding: 2px 8px; border-radius: 4px; cursor: pointer; font-size: 11px; opacity: 0; transition: opacity 0.15s; z-index: 1; }
@@ -686,6 +693,40 @@
     function expandSlashTemplate(template) {
       return (template || '').replace(/\{args\}/g, SLASH_DEFAULT_ARGS).trim();
     }
+
+    // Provider + model definitions for the inline dropdowns under each agent's
+    // chat input. Mirrors the server-side AGENT_DEFINITIONS in
+    // src/server/agents/agent-kinds.ts — keep them in sync when adding models.
+    const AGENT_PROVIDERS = [
+      {
+        kind: 'claude',
+        label: 'Claude',
+        icon: '✦',
+        models: [
+          { id: 'claude-opus-4-7',           label: 'opus' },
+          { id: 'claude-opus-4-6',           label: 'opus 4.6' },
+          { id: 'claude-sonnet-4-6',         label: 'sonnet' },
+          { id: 'claude-haiku-4-5-20251001', label: 'haiku' },
+        ],
+        defaultModel: 'claude-opus-4-7',
+        reasoningLevels: null,
+      },
+      {
+        kind: 'codex',
+        label: 'Codex',
+        icon: '⚙',
+        models: [
+          { id: 'gpt-5.5',           label: 'gpt-5.5' },
+          { id: 'gpt-5.4',           label: 'gpt-5.4' },
+          { id: 'gpt-5.2-codex',     label: 'gpt-5.2 codex' },
+          { id: 'gpt-5.1-codex-max', label: 'gpt-5.1 codex max' },
+        ],
+        defaultModel: 'gpt-5.5',
+        reasoningLevels: ['low', 'medium', 'high', 'xhigh'],
+        defaultReasoningLevel: 'medium',
+      },
+    ];
+    const PROVIDER_BY_KIND = Object.fromEntries(AGENT_PROVIDERS.map(p => [p.kind, p]));
 
     // ======================== HOOKS ========================
 
@@ -1375,7 +1416,7 @@
     });
 
     // Terminal Panel
-    function TerminalPanel({ agent, messages, liveOutput, queuedMessages, fileChanges, thinkingOutput, statusStartTime, tokenUsage, terminals, terminalOutput, workspace, qaAgent, qaMessages, qaTokenUsage, qaHasUnread, qaLiveShots, onQaSend, onQaAbort, onClearQaUnread, onSendMessage, onSendImage, onSendImages, onStop, onClearHistory, onClearFileChanges, onMinimize, onMaximize, isMaximized, onFocus, isFocused, onCreateTerminal, onKillTerminal, isLocked, onToggleLock, isDragging, isDragOver, onDragStart, onDragEnd, onDragOver, onDragLeave, onDrop }) {
+    function TerminalPanel({ agent, messages, liveOutput, queuedMessages, fileChanges, thinkingOutput, statusStartTime, tokenUsage, terminals, terminalOutput, workspace, qaAgent, qaMessages, qaTokenUsage, qaHasUnread, qaLiveShots, onQaSend, onQaAbort, onClearQaUnread, onSendMessage, onSendImage, onSendImages, onStop, onClearHistory, onClearFileChanges, onMinimize, onMaximize, isMaximized, onFocus, isFocused, onCreateTerminal, onKillTerminal, onUpdateAgent, isLocked, onToggleLock, isDragging, isDragOver, onDragStart, onDragEnd, onDragOver, onDragLeave, onDrop }) {
       const [input, setInput] = useState('');
       const [inputHistory, setInputHistory] = useState([]);
       const [historyIdx, setHistoryIdx] = useState(-1);
@@ -1971,7 +2012,51 @@
                 e('span', { className: 'slash-autocomplete-desc' }, cmd.description || cmd.name)
               ))
             )
-          )
+          ),
+          // Inline provider + model + reasoning dropdowns. Hot-swap mid-chat;
+          // each provider keeps its own sessionId so swapping preserves both threads.
+          (() => {
+            const currentProvider = PROVIDER_BY_KIND[agent.provider] || PROVIDER_BY_KIND.claude;
+            const currentModel = currentProvider.models.find(m => m.id === agent.model) || currentProvider.models[0];
+            const currentReasoning = agent.reasoningLevel || currentProvider.defaultReasoningLevel || '';
+            return e('div', { className: 'agent-provider-row' },
+              e('select', {
+                className: 'agent-provider-select agent-provider-select-kind',
+                value: currentProvider.kind,
+                onChange: (ev) => {
+                  const nextKind = ev.target.value;
+                  const nextDef = PROVIDER_BY_KIND[nextKind];
+                  if (!nextDef || !onUpdateAgent) return;
+                  // Reset model to the provider's default on swap so we don't
+                  // ship a Claude model id to Codex (or vice versa).
+                  const updates = { provider: nextKind, model: nextDef.defaultModel };
+                  if (nextDef.reasoningLevels && !agent.reasoningLevel) {
+                    updates.reasoningLevel = nextDef.defaultReasoningLevel;
+                  }
+                  onUpdateAgent(agent.id, updates);
+                },
+                title: 'Provider — swap any time; each provider keeps its own session',
+              },
+                AGENT_PROVIDERS.map(p => e('option', { key: p.kind, value: p.kind }, p.icon + ' ' + p.label))
+              ),
+              e('select', {
+                className: 'agent-provider-select agent-provider-select-model',
+                value: currentModel ? currentModel.id : '',
+                onChange: (ev) => { if (onUpdateAgent) onUpdateAgent(agent.id, { model: ev.target.value }); },
+                title: 'Model',
+              },
+                currentProvider.models.map(m => e('option', { key: m.id, value: m.id }, m.label))
+              ),
+              currentProvider.reasoningLevels && e('select', {
+                className: 'agent-provider-select agent-provider-select-reasoning',
+                value: currentReasoning,
+                onChange: (ev) => { if (onUpdateAgent) onUpdateAgent(agent.id, { reasoningLevel: ev.target.value }); },
+                title: 'Reasoning effort',
+              },
+                currentProvider.reasoningLevels.map(r => e('option', { key: r, value: r }, r))
+              )
+            );
+          })()
         )
           ),
           // Resizer (only meaningful when split — CSS hides it when stacked)
@@ -3818,6 +3903,7 @@
                   isFocused: focusedAgentId === maximizedAgent,
                   onCreateTerminal: ws.createTerminal,
                   onKillTerminal: ws.killTerminal,
+                  onUpdateAgent: ws.updateAgent,
                 });
               }
               // Keep empty-string placeholders (intentional empty slots); only filter out minimized agents
@@ -3870,6 +3956,7 @@
                   isFocused: focusedAgentId === agentId,
                   onCreateTerminal: ws.createTerminal,
                   onKillTerminal: ws.killTerminal,
+                  onUpdateAgent: ws.updateAgent,
                   isLocked,
                   onToggleLock: toggleLock,
                   isDragging: draggedAgent === agentId,

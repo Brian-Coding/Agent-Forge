@@ -145,7 +145,7 @@ export interface TerminalSession {
 // Client -> Server messages
 export type ClientMessage =
   | { type: 'create_agent'; name: string; cwd: string; referencePaths?: string[]; systemPrompt?: string; workspaceId?: string }
-  | { type: 'update_agent'; id: string; name?: string; cwd?: string; referencePaths?: string[]; systemPrompt?: string }
+  | { type: 'update_agent'; id: string; name?: string; cwd?: string; referencePaths?: string[]; systemPrompt?: string; provider?: AgentProvider; model?: string; reasoningLevel?: string }
   | { type: 'send_message'; agentId: string; content: string }
   | { type: 'kill_agent'; agentId: string }
   | { type: 'stop_agent'; agentId: string }
