@@ -388,9 +388,8 @@ export const websocketHandlers = {
     sendTo(ws, { type: 'settings', settings: settingsService.get() });
     sendTo(ws, { type: 'workspaces_list', workspaces: workspaceService.getAll() });
     sendTo(ws, { type: 'terminals_list', terminals: terminalService.getAll() });
-    // Cross-provider cost / token rollups — drives the bottom-bar tracker.
-    const { rolling, lifetime } = usageService.getSummariesForConnect();
-    sendTo(ws, { type: 'usage_summary', rolling, lifetime });
+    // Cross-provider token report — drives the Tokens sidebar tab.
+    sendTo(ws, { type: 'usage_report', report: usageService.getReportForConnect() });
 
     // Send token usage for each agent
     for (const agent of agentService.getAgents()) {

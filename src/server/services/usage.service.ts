@@ -1,62 +1,131 @@
-import type { AgentProvider, UsageBucket, UsageEvent, UsageSummary } from '../../shared/protocol';
+import type {
+  AgentProvider,
+  ProviderTokenBucket,
+  UsageEvent,
+  UsageReport,
+  WindowTokenSummary,
+} from '../../shared/protocol';
 import { broadcast } from '../broadcast';
+import { agentService } from './agent.service';
 import { persistenceService } from './persistence.service';
 
-// HMR-safe state. The log is append-only; the array can grow to thousands of
-// rows over time but each row is small (~150 bytes), so ~1MB / ~10K turns.
+// HMR-safe append-only log. One row per finalized turn (~150 bytes); for a heavy
+// user that's still under ~10MB after years of use, comfortably small for data.json.
 const events: UsageEvent[] = (globalThis as any).__usageEvents ??= [];
 
-const ROLLING_WINDOW_DAYS = 30;
+// ---------------------------------------------------------------------------
+// Bucket / summary helpers
+// ---------------------------------------------------------------------------
 
-function emptyBucket(): UsageBucket {
-  return { inputTokens: 0, outputTokens: 0, costUsd: 0, turns: 0 };
+function emptyBucket(): ProviderTokenBucket {
+  return { inputTokens: 0, outputTokens: 0, turns: 0 };
 }
 
-function addInto(bucket: UsageBucket, ev: UsageEvent): void {
+function emptyWindow(): WindowTokenSummary {
+  return { claude: emptyBucket(), codex: emptyBucket(), total: emptyBucket() };
+}
+
+function addInto(bucket: ProviderTokenBucket, ev: UsageEvent): void {
   bucket.inputTokens += ev.inputTokens;
   bucket.outputTokens += ev.outputTokens;
-  bucket.costUsd += ev.costUsd;
   bucket.turns += ev.turns;
 }
 
-function emptySummary(windowDays: number): UsageSummary {
-  return {
-    windowDays,
-    claude: emptyBucket(),
-    codex: emptyBucket(),
-    total: emptyBucket(),
-  };
+function addEventToWindow(window: WindowTokenSummary, ev: UsageEvent): void {
+  if (ev.provider === 'claude') addInto(window.claude, ev);
+  else if (ev.provider === 'codex') addInto(window.codex, ev);
+  addInto(window.total, ev);
 }
 
-/**
- * Compute a rollup over the entire log (windowDays = 0) or just the entries
- * within the given trailing window (e.g. last 30 days). The window is
- * exclusive-of-future, inclusive-of-now: an event with `timestamp` equal to
- * "now minus windowDays" is included.
- */
-function computeSummary(windowDays: number = 0): UsageSummary {
-  const summary = emptySummary(windowDays);
-  const cutoff = windowDays > 0 ? Date.now() - windowDays * 24 * 60 * 60 * 1000 : -Infinity;
+// ---------------------------------------------------------------------------
+// Calendar boundaries (server-local time — server runs on the user's machine
+// so this matches the user's clock)
+// ---------------------------------------------------------------------------
+
+function startOfTodayMs(): number {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+/** Most recent Monday 00:00 local. Monday-as-week-start is what most calendars use in the UK/EU; if the user is US/Sunday-start we can revisit. */
+function startOfWeekMs(): number {
+  const d = new Date();
+  const day = d.getDay(); // 0 = Sun, 1 = Mon, ..., 6 = Sat
+  // Days back to Monday: if today=Mon (1), back 0. if today=Sun (0), back 6. Otherwise day-1.
+  const back = day === 0 ? 6 : day - 1;
+  d.setDate(d.getDate() - back);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+function startOfMonthMs(): number {
+  const d = new Date();
+  d.setDate(1);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+// ---------------------------------------------------------------------------
+// Report compute
+// ---------------------------------------------------------------------------
+
+function computeReport(): UsageReport {
+  const today = emptyWindow();
+  const week = emptyWindow();
+  const month = emptyWindow();
+  const allTime = emptyWindow();
+
+  const todayBoundary = startOfTodayMs();
+  const weekBoundary = startOfWeekMs();
+  const monthBoundary = startOfMonthMs();
+
+  // Per-agent tally, keyed by agentId. Accumulated in one pass.
+  const perAgentMap = new Map<string, {
+    claude: ProviderTokenBucket;
+    codex: ProviderTokenBucket;
+    lastTimestamp: number;
+  }>();
+
   for (const ev of events) {
-    if (ev.timestamp < cutoff) continue;
-    if (ev.provider === 'claude') addInto(summary.claude, ev);
-    else if (ev.provider === 'codex') addInto(summary.codex, ev);
-    addInto(summary.total, ev);
+    // Per-window accumulation
+    addEventToWindow(allTime, ev);
+    if (ev.timestamp >= monthBoundary) addEventToWindow(month, ev);
+    if (ev.timestamp >= weekBoundary) addEventToWindow(week, ev);
+    if (ev.timestamp >= todayBoundary) addEventToWindow(today, ev);
+
+    // Per-agent accumulation
+    let bucket = perAgentMap.get(ev.agentId);
+    if (!bucket) {
+      bucket = { claude: emptyBucket(), codex: emptyBucket(), lastTimestamp: 0 };
+      perAgentMap.set(ev.agentId, bucket);
+    }
+    if (ev.provider === 'claude') addInto(bucket.claude, ev);
+    else if (ev.provider === 'codex') addInto(bucket.codex, ev);
+    if (ev.timestamp > bucket.lastTimestamp) bucket.lastTimestamp = ev.timestamp;
   }
-  return summary;
+
+  const perAgent = Array.from(perAgentMap.entries())
+    .map(([agentId, b]) => ({
+      agentId,
+      agentName: agentService.getAgentName(agentId),
+      claude: b.claude,
+      codex: b.codex,
+      lastTimestamp: b.lastTimestamp,
+    }))
+    // Most-recently-used agents first
+    .sort((a, b) => b.lastTimestamp - a.lastTimestamp);
+
+  return { today, week, month, allTime, perAgent };
 }
 
-/**
- * Send the latest rolling + lifetime summaries to all connected clients.
- * Called after each turn-finalize and on initial WS connect.
- */
-function broadcastSummary(): void {
-  broadcast({
-    type: 'usage_summary',
-    rolling: computeSummary(ROLLING_WINDOW_DAYS),
-    lifetime: computeSummary(0),
-  });
+function broadcastReport(): void {
+  broadcast({ type: 'usage_report', report: computeReport() });
 }
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
 
 export const usageService = {
   /** Restore the log from persistence on startup. Idempotent + safe to call before any other init. */
@@ -64,8 +133,6 @@ export const usageService = {
     events.length = 0;
     if (Array.isArray(persisted)) {
       for (const ev of persisted) {
-        // Defensive: only accept entries we recognize. Forward-compat ignores
-        // unknown providers / missing fields without throwing on load.
         if (
           ev && typeof ev === 'object'
           && typeof ev.timestamp === 'number'
@@ -78,6 +145,10 @@ export const usageService = {
             provider: ev.provider,
             inputTokens: typeof ev.inputTokens === 'number' ? ev.inputTokens : 0,
             outputTokens: typeof ev.outputTokens === 'number' ? ev.outputTokens : 0,
+            // costUsd remains persisted (some Anthropic data) but is no longer
+            // surfaced to the UI. Keeping it preserves a future option to
+            // expose authoritative Claude-side cost again if pricing access
+            // ever stabilizes upstream.
             costUsd: typeof ev.costUsd === 'number' ? ev.costUsd : 0,
             turns: typeof ev.turns === 'number' ? ev.turns : 0,
           });
@@ -87,9 +158,8 @@ export const usageService = {
   },
 
   /**
-   * Append a turn's coalesced usage to the log. No-op if every field is zero
-   * (a turn that ran but produced no measurable usage — empty turn, error,
-   * stopped before any API call). Triggers a save + broadcast.
+   * Append a turn's coalesced usage to the log. No-op when all counters are
+   * zero. Triggers a save + broadcast of the recomputed report.
    */
   record(agentId: string, provider: AgentProvider, deltas: {
     inputTokens?: number;
@@ -112,7 +182,7 @@ export const usageService = {
       turns,
     });
     persistenceService.save();
-    broadcastSummary();
+    broadcastReport();
   },
 
   /** Snapshot the current log for persistence. */
@@ -120,11 +190,8 @@ export const usageService = {
     return events;
   },
 
-  /** Build the rolling + lifetime summaries — used by ws.ts on WS connect. */
-  getSummariesForConnect(): { rolling: UsageSummary; lifetime: UsageSummary } {
-    return {
-      rolling: computeSummary(ROLLING_WINDOW_DAYS),
-      lifetime: computeSummary(0),
-    };
+  /** Build the full report — used by ws.ts on each WS connect. */
+  getReportForConnect(): UsageReport {
+    return computeReport();
   },
 };

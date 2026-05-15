@@ -242,6 +242,27 @@
     .slash-autocomplete-slug { font-family: var(--font-mono, ui-monospace, monospace); font-size: 11px; color: var(--accent); font-weight: 600; min-width: 80px; flex-shrink: 0; }
     .slash-autocomplete-desc { font-size: 11px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
 
+    /* Tokens panel — sidebar tab with per-window per-provider rollups */
+    .tokens-panel { flex: 1; display: flex; flex-direction: column; overflow-y: auto; padding: 8px; gap: 4px; }
+    .tokens-header { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); padding: 4px 4px 8px; }
+    .tokens-window-row { padding: 8px 10px; border-radius: 6px; background: var(--bg-primary); border: 1px solid var(--border); margin-bottom: 4px; }
+    .tokens-window-label { font-size: 11px; font-weight: 600; color: var(--text-secondary); margin-bottom: 4px; }
+    .tokens-window-providers { display: flex; flex-direction: column; gap: 2px; }
+    .tokens-provider-line { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-primary); font-family: 'SF Mono', Monaco, Consolas, monospace; }
+    .tokens-provider-line.inactive { color: var(--text-muted); }
+    .tokens-provider-line.tokens-total { border-top: 1px dashed var(--border); padding-top: 3px; margin-top: 2px; color: var(--text-secondary); }
+    .tokens-provider-icon { width: 14px; text-align: center; color: var(--text-muted); font-size: 11px; }
+    .tokens-provider-name { width: 50px; font-size: 11px; color: var(--text-muted); }
+    .tokens-provider-value { flex: 1; }
+    .tokens-provider-turns { font-size: 10px; color: var(--text-muted); }
+    .tokens-per-agent { margin-top: 8px; border-top: 1px solid var(--border); padding-top: 8px; }
+    .tokens-per-agent-header { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); padding: 0 4px 6px; }
+    .tokens-per-agent-row { padding: 5px 8px; border-radius: 4px; }
+    .tokens-per-agent-row:hover { background: var(--bg-primary); }
+    .tokens-per-agent-name { font-size: 12px; color: var(--text-primary); margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .tokens-per-agent-tokens { font-size: 11px; color: var(--text-secondary); font-family: 'SF Mono', Monaco, Consolas, monospace; display: flex; align-items: center; gap: 4px; }
+    .tokens-per-agent-last { margin-left: auto; color: var(--text-muted); font-size: 10px; }
+
     /* Notes panel */
     .notes-panel { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
     .notes-list { flex: 1; overflow-y: auto; padding: 4px 8px; }
@@ -388,14 +409,7 @@
     .maximize-btn { font-size: 13px; }
 
     /* Cost dashboard (Feature 3) */
-    .cost-dashboard { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); margin-right: 8px; }
-    .cost-value { color: var(--text-primary); font-weight: 500; }
-    .cost-sep { color: var(--text-muted); }
-    .cost-window-toggle { background: var(--bg-tertiary); color: var(--text-muted); border: 1px solid var(--border); border-radius: 4px; padding: 1px 6px; font-size: 10px; font-family: 'SF Mono', Monaco, Consolas, monospace; cursor: pointer; text-transform: lowercase; }
-    .cost-window-toggle:hover { color: var(--text-primary); border-color: var(--accent); }
-    .cost-provider { display: inline-flex; align-items: center; gap: 3px; padding: 0 2px; }
-    .cost-icon { color: var(--text-muted); font-size: 11px; }
-    .cost-total { color: var(--text-muted); }
+    /* cost-dashboard styles removed — token data moved to the Tokens sidebar tab */
 
     /* Broadcast toggle (Feature 10) */
     .broadcast-toggle { display: flex; align-items: center; gap: 6px; background: var(--bg-tertiary); border: 1px solid var(--border); color: var(--text-secondary); padding: 4px 10px; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 500; }
@@ -775,11 +789,10 @@
       const [workspaces, setWorkspaces] = useState([]);
       const [statusStartTimes, setStatusStartTimes] = useState({});
       const [tokenUsage, setTokenUsage] = useState({});
-      // Cross-provider cost / token rollups for the bottom-bar tracker. Server
-      // emits `usage_summary` on WS connect and after each turn finalizes.
-      // Owned by the hook because it's set from inbound WS messages; the
-      // toggle-state (rolling vs lifetime view) lives in App (UI-only).
-      const [usageSummary, setUsageSummary] = useState({ rolling: null, lifetime: null });
+      // Full cross-provider token report for the Tokens sidebar tab.
+      // Server emits `usage_report` on WS connect and after each turn finalizes.
+      // null until the first report lands (the connect handshake fires it).
+      const [usageReport, setUsageReport] = useState(null);
       const [terminals, setTerminals] = useState([]);
       const [terminalOutput, setTerminalOutput] = useState({});
       const [errorToasts, setErrorToasts] = useState([]);
@@ -946,8 +959,8 @@
               case 'token_usage':
                 setTokenUsage(prev => ({ ...prev, [msg.agentId]: { contextTokens: msg.contextTokens, contextLimit: msg.contextLimit, totalInputTokens: msg.totalInputTokens, totalOutputTokens: msg.totalOutputTokens, totalCostUsd: msg.totalCostUsd, numTurns: msg.numTurns } }));
                 break;
-              case 'usage_summary':
-                setUsageSummary({ rolling: msg.rolling, lifetime: msg.lifetime });
+              case 'usage_report':
+                setUsageReport(msg.report);
                 break;
               // Workspaces
               case 'workspaces_list':
@@ -1021,7 +1034,7 @@
       }, [drainQueue, sendRaw]);
 
       return {
-        connected, agents, messages, liveOutput, queued, sharedContext, fileChanges, thinkingOutput, notes, documents, settings, workspaces, statusStartTimes, tokenUsage, usageSummary, terminals, terminalOutput, errorToasts, qaUnread, qaLiveShots,
+        connected, agents, messages, liveOutput, queued, sharedContext, fileChanges, thinkingOutput, notes, documents, settings, workspaces, statusStartTimes, tokenUsage, usageReport, terminals, terminalOutput, errorToasts, qaUnread, qaLiveShots,
         createAgent: (name, cwd, referencePaths, systemPrompt, workspaceId) => {
           sendRaw({ type: 'create_agent', name, cwd, referencePaths, systemPrompt, workspaceId });
         },
@@ -3426,6 +3439,92 @@
       );
     }
 
+    // Token usage panel — sidebar tab showing cross-provider, time-windowed
+    // token spend. Server (usage.service) computes the report from the
+    // append-only usageEvents log; client just renders. Tokens-only by
+    // design (cost numbers are unreliable since only Claude reports them).
+    function TokensPanel({ report }) {
+      if (!report) {
+        return e('div', { className: 'panel-empty', style: { padding: 16, color: 'var(--text-muted)', fontSize: 12 } },
+          'No usage data yet. Send a turn and this panel will populate.'
+        );
+      }
+
+      const fmt = (n) => formatTokens(n || 0);
+      const fmtInOut = (b) => fmt(b.inputTokens) + ' in · ' + fmt(b.outputTokens) + ' out';
+      const fmtRel = (ts) => {
+        if (!ts) return 'never';
+        const ms = Date.now() - ts;
+        const m = Math.round(ms / 60000);
+        if (m < 1) return 'just now';
+        if (m < 60) return m + 'm ago';
+        const h = Math.round(m / 60);
+        if (h < 24) return h + 'h ago';
+        const d = Math.round(h / 24);
+        return d + 'd ago';
+      };
+
+      const windowRow = (label, w) => {
+        const claudeActive = w.claude.turns > 0;
+        const codexActive = w.codex.turns > 0;
+        return e('div', { className: 'tokens-window-row', key: label },
+          e('div', { className: 'tokens-window-label' }, label),
+          e('div', { className: 'tokens-window-providers' },
+            e('div', { className: 'tokens-provider-line' + (claudeActive ? '' : ' inactive') },
+              e('span', { className: 'tokens-provider-icon' }, '✦'),
+              e('span', { className: 'tokens-provider-name' }, 'Claude'),
+              e('span', { className: 'tokens-provider-value' }, claudeActive ? fmtInOut(w.claude) : '—'),
+              claudeActive && e('span', { className: 'tokens-provider-turns' }, w.claude.turns + ' turns')
+            ),
+            e('div', { className: 'tokens-provider-line' + (codexActive ? '' : ' inactive') },
+              e('span', { className: 'tokens-provider-icon' }, '⚙'),
+              e('span', { className: 'tokens-provider-name' }, 'Codex'),
+              e('span', { className: 'tokens-provider-value' }, codexActive ? fmtInOut(w.codex) : '—'),
+              codexActive && e('span', { className: 'tokens-provider-turns' }, w.codex.turns + ' turns')
+            ),
+            e('div', { className: 'tokens-provider-line tokens-total' },
+              e('span', { className: 'tokens-provider-icon' }, '∑'),
+              e('span', { className: 'tokens-provider-name' }, 'Total'),
+              e('span', { className: 'tokens-provider-value' }, fmtInOut(w.total)),
+              w.total.turns > 0 && e('span', { className: 'tokens-provider-turns' }, w.total.turns + ' turns')
+            )
+          )
+        );
+      };
+
+      return e('div', { className: 'tokens-panel' },
+        e('div', { className: 'tokens-header' }, 'Token usage'),
+        windowRow('Today',    report.today),
+        windowRow('This week', report.week),
+        windowRow('This month', report.month),
+        windowRow('All time',   report.allTime),
+
+        report.perAgent.length > 0 && e('div', { className: 'tokens-per-agent' },
+          e('div', { className: 'tokens-per-agent-header' }, 'Per agent (' + report.perAgent.length + ')'),
+          report.perAgent.map(a => {
+            const cTok = a.claude.inputTokens + a.claude.outputTokens;
+            const xTok = a.codex.inputTokens + a.codex.outputTokens;
+            return e('div', { className: 'tokens-per-agent-row', key: a.agentId },
+              e('div', { className: 'tokens-per-agent-name' }, a.agentName || a.agentId),
+              e('div', { className: 'tokens-per-agent-tokens' },
+                cTok > 0 && e('span', { title: a.claude.turns + ' Claude turns · ' + fmtInOut(a.claude) },
+                  e('span', { className: 'tokens-provider-icon' }, '✦'),
+                  ' ',
+                  fmt(cTok)
+                ),
+                xTok > 0 && e('span', { title: a.codex.turns + ' Codex turns · ' + fmtInOut(a.codex), style: { marginLeft: 8 } },
+                  e('span', { className: 'tokens-provider-icon' }, '⚙'),
+                  ' ',
+                  fmt(xTok)
+                ),
+                e('span', { className: 'tokens-per-agent-last' }, fmtRel(a.lastTimestamp))
+              )
+            );
+          })
+        )
+      );
+    }
+
     // ======================== MAIN APP ========================
 
     // Token formatting helper
@@ -3437,10 +3536,7 @@
 
     function App() {
       const ws = useWebSocket();
-      const { connected, agents, messages, liveOutput, queued, sharedContext, fileChanges, thinkingOutput, notes, documents, settings, workspaces, statusStartTimes, tokenUsage, usageSummary, terminals, terminalOutput, errorToasts } = ws;
-      // Bottom-bar view toggle: rolling 30-day window vs lifetime totals.
-      // Pure UI state — server doesn't care which one we're showing.
-      const [usageView, setUsageView] = useState('rolling');
+      const { connected, agents, messages, liveOutput, queued, sharedContext, fileChanges, thinkingOutput, notes, documents, settings, workspaces, statusStartTimes, tokenUsage, usageReport, terminals, terminalOutput, errorToasts } = ws;
       const [showModal, setShowModal] = useState(false);
       const [showSharedContext, setShowSharedContext] = useState(false);
       const [showBroadcast, setShowBroadcast] = useState(false);
@@ -3711,18 +3807,6 @@
         : { gridTemplateColumns: 'repeat(' + columns + ', 1fr)', gridTemplateRows: 'repeat(' + rows + ', 1fr)' };
 
       // Feature 3: Cost dashboard — aggregate all token usage
-      const costDashboard = useMemo(() => {
-        let totalCost = 0, totalTokens = 0, totalTurns = 0;
-        for (const usage of Object.values(tokenUsage)) {
-          if (usage) {
-            totalCost += usage.totalCostUsd || 0;
-            totalTokens += (usage.totalInputTokens || 0) + (usage.totalOutputTokens || 0);
-            totalTurns += usage.numTurns || 0;
-          }
-        }
-        return { totalCost, totalTokens, totalTurns };
-      }, [tokenUsage]);
-
       const handleBroadcast = () => {
         const targets = Array.from(broadcastTargets);
         if (broadcastInput.trim() && targets.length > 0) {
@@ -3752,6 +3836,7 @@
         { id: 'plans', icon: ICONS.plans, label: 'Plans' },
         { id: 'commands', icon: ICONS.commands, label: 'Slash Commands' },
         { id: 'emulators', icon: ICONS.emulators, label: 'Emulators' },
+        { id: 'tokens', icon: null, emoji: '🪙', label: 'Token Usage' },
       ];
 
       return e('div', { className: 'app' },
@@ -3832,6 +3917,7 @@
           }),
           sidebarTab === 'commands' && e(CommandsPanel, { commands: SLASH_COMMANDS }),
           sidebarTab === 'emulators' && e(EmulatorsPanel, { settings, onUpdateSettings: ws.updateSettings }),
+          sidebarTab === 'tokens' && e(TokensPanel, { report: usageReport }),
           // Active ports always pinned to bottom of sidebar
           e(SidebarPorts),
         ),
@@ -3993,38 +4079,11 @@
             })()
           ),
 
-          // Bottom bar (workspace info, cost tracker, broadcast toggle, grid controls)
+          // Bottom bar (workspace info, broadcast toggle, grid controls).
+          // Token usage now lives in the dedicated Tokens sidebar tab.
           e('div', { className: 'bottom-bar' },
             e('div', { className: 'bottom-bar-left' },
               activeWorkspace && e('span', { style: { fontWeight: 600, fontSize: 13, color: 'var(--text-primary)', marginRight: 8 } }, activeWorkspace.name),
-              // Cross-provider cost tracker \u2014 server-computed rolling 30d + lifetime,
-              // per-provider breakdown (\u2726 Claude, \u2699 Codex). Toggle picks which window.
-              (() => {
-                const summary = usageView === 'lifetime' ? usageSummary.lifetime : usageSummary.rolling;
-                if (!summary) return null;
-                const t = summary.total;
-                const c = summary.claude;
-                const x = summary.codex;
-                if (t.turns === 0 && t.costUsd === 0) return null;
-                const fmtCost = (v) => v < 0.01 ? '<$0.01' : '$' + v.toFixed(2);
-                return e('div', { className: 'cost-dashboard' },
-                  e('button', {
-                    className: 'cost-window-toggle',
-                    onClick: () => setUsageView(prev => prev === 'rolling' ? 'lifetime' : 'rolling'),
-                    title: 'Toggle between rolling 30-day window and lifetime totals',
-                  }, usageView === 'lifetime' ? 'all time' : '30d'),
-                  c.turns > 0 && e('span', { className: 'cost-provider', title: c.turns + ' Claude turns \u00B7 ' + formatTokens(c.inputTokens + c.outputTokens) + ' tokens' },
-                    e('span', { className: 'cost-icon' }, '\u2726'),
-                    e('span', { className: 'cost-value' }, fmtCost(c.costUsd))
-                  ),
-                  x.turns > 0 && e('span', { className: 'cost-provider', title: x.turns + ' Codex turns \u00B7 ' + formatTokens(x.inputTokens + x.outputTokens) + ' tokens' },
-                    e('span', { className: 'cost-icon' }, '\u2699'),
-                    e('span', { className: 'cost-value' }, fmtCost(x.costUsd))
-                  ),
-                  e('span', { className: 'cost-sep' }, '\u00B7'),
-                  e('span', { className: 'cost-total', title: 'Combined total' }, fmtCost(t.costUsd) + ' \u00B7 ' + formatTokens(t.inputTokens + t.outputTokens) + ' tok \u00B7 ' + t.turns + ' turns')
-                );
-              })(),
               // Feature 10: Broadcast toggle
               e('button', {
                 className: 'broadcast-toggle' + (showBroadcast ? ' active' : ''),

@@ -189,19 +189,41 @@ export interface UsageEvent {
 }
 
 /**
- * Per-provider rollup. windowDays = 0 means "all time" (no time filter).
+ * Tokens-only rollup for one provider (or the combined total). Cost values
+ * are still captured in `UsageEvent.costUsd` for posterity but are not
+ * surfaced in the UI: the only provider that emits authoritative cost
+ * (Claude's `total_cost_usd` in its result event) makes side-by-side
+ * comparison misleading once Codex's $0 lands next to it.
  */
-export interface UsageBucket {
+export interface ProviderTokenBucket {
   inputTokens: number;
   outputTokens: number;
-  costUsd: number;
   turns: number;
 }
-export interface UsageSummary {
-  windowDays: number;       // 0 for lifetime, >0 for rolling window
-  claude: UsageBucket;
-  codex: UsageBucket;
-  total: UsageBucket;
+
+export interface WindowTokenSummary {
+  claude: ProviderTokenBucket;
+  codex: ProviderTokenBucket;
+  total: ProviderTokenBucket;
+}
+
+/**
+ * Full usage report rendered by the Tokens sidebar tab. Windows are
+ * calendar-aligned to the server's local time (which is the user's local
+ * time, since the server runs on the user's machine).
+ */
+export interface UsageReport {
+  today: WindowTokenSummary;     // Since 00:00 local today
+  week: WindowTokenSummary;      // Since most recent Mon 00:00 local
+  month: WindowTokenSummary;     // Since 1st of this calendar month, 00:00 local
+  allTime: WindowTokenSummary;   // Everything in the log
+  perAgent: Array<{
+    agentId: string;
+    agentName: string;
+    claude: ProviderTokenBucket;
+    codex: ProviderTokenBucket;
+    lastTimestamp: number;
+  }>;
 }
 
 // Client -> Server messages
@@ -283,9 +305,8 @@ export type ServerMessage =
   | { type: 'settings'; settings: AppSettings }
   // Token usage (per-agent live state — drives the per-chat context bar)
   | { type: 'token_usage'; agentId: string; contextTokens: number; contextLimit: number; totalInputTokens: number; totalOutputTokens: number; totalCostUsd: number; numTurns: number }
-  // Cost / token rollups across all agents — drives the bottom-bar tracker.
-  // Server sends both a rolling-window (30d) and a lifetime (windowDays=0) summary.
-  | { type: 'usage_summary'; rolling: UsageSummary; lifetime: UsageSummary }
+  // Full token report (windows + per-agent) — drives the Tokens sidebar tab.
+  | { type: 'usage_report'; report: UsageReport }
   // Workspaces
   | { type: 'workspaces_list'; workspaces: WorkspaceInfo[] }
   | { type: 'workspace_created'; workspace: WorkspaceInfo }
