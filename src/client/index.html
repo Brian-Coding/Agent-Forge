@@ -777,8 +777,9 @@
       const [tokenUsage, setTokenUsage] = useState({});
       // Cross-provider cost / token rollups for the bottom-bar tracker. Server
       // emits `usage_summary` on WS connect and after each turn finalizes.
+      // Owned by the hook because it's set from inbound WS messages; the
+      // toggle-state (rolling vs lifetime view) lives in App (UI-only).
       const [usageSummary, setUsageSummary] = useState({ rolling: null, lifetime: null });
-      const [usageView, setUsageView] = useState('rolling'); // 'rolling' (30d) | 'lifetime'
       const [terminals, setTerminals] = useState([]);
       const [terminalOutput, setTerminalOutput] = useState({});
       const [errorToasts, setErrorToasts] = useState([]);
@@ -1020,7 +1021,7 @@
       }, [drainQueue, sendRaw]);
 
       return {
-        connected, agents, messages, liveOutput, queued, sharedContext, fileChanges, thinkingOutput, notes, documents, settings, workspaces, statusStartTimes, tokenUsage, terminals, terminalOutput, errorToasts, qaUnread, qaLiveShots,
+        connected, agents, messages, liveOutput, queued, sharedContext, fileChanges, thinkingOutput, notes, documents, settings, workspaces, statusStartTimes, tokenUsage, usageSummary, terminals, terminalOutput, errorToasts, qaUnread, qaLiveShots,
         createAgent: (name, cwd, referencePaths, systemPrompt, workspaceId) => {
           sendRaw({ type: 'create_agent', name, cwd, referencePaths, systemPrompt, workspaceId });
         },
@@ -3436,7 +3437,10 @@
 
     function App() {
       const ws = useWebSocket();
-      const { connected, agents, messages, liveOutput, queued, sharedContext, fileChanges, thinkingOutput, notes, documents, settings, workspaces, statusStartTimes, tokenUsage, terminals, terminalOutput, errorToasts } = ws;
+      const { connected, agents, messages, liveOutput, queued, sharedContext, fileChanges, thinkingOutput, notes, documents, settings, workspaces, statusStartTimes, tokenUsage, usageSummary, terminals, terminalOutput, errorToasts } = ws;
+      // Bottom-bar view toggle: rolling 30-day window vs lifetime totals.
+      // Pure UI state — server doesn't care which one we're showing.
+      const [usageView, setUsageView] = useState('rolling');
       const [showModal, setShowModal] = useState(false);
       const [showSharedContext, setShowSharedContext] = useState(false);
       const [showBroadcast, setShowBroadcast] = useState(false);
