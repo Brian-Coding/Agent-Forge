@@ -45,32 +45,53 @@ process.on('uncaughtException', (err, origin) => {
 
 const LOCK_FILE = './agent-forge.lock';
 
-async function isPidInOurAncestorChain(targetPid: number): Promise<boolean> {
+/**
+ * One tasklist call returning a Map<pid, processName>. Replaces the per-PID
+ * PowerShell `Get-Process` lookups that used to fire 1-30+ times during
+ * startup — each PowerShell cold-start was ~1-2s and they sometimes hung as
+ * zombies, producing the visible PowerShell pile that pegged CPU.
+ *
+ * tasklist is a native Win32 binary (~10ms cold start) and emits CSV.
+ */
+async function getProcessNameMap(): Promise<Map<number, string>> {
+  const map = new Map<number, string>();
+  if (process.platform !== 'win32') return map;
+  try {
+    const proc = Bun.spawn(['tasklist', '/FO', 'CSV', '/NH'], { stdout: 'pipe', stderr: 'pipe' });
+    await proc.exited;
+    const out = await new Response(proc.stdout).text();
+    for (const line of out.split('\n')) {
+      const m = line.match(/^"([^"]+)","(\d+)"/);
+      if (!m) continue;
+      const name = m[1]!.replace(/\.exe$/i, '').toLowerCase();
+      const pid = parseInt(m[2]!, 10);
+      if (!isNaN(pid)) map.set(pid, name);
+    }
+  } catch {}
+  return map;
+}
+
+/**
+ * Are we standing inside a process chain that already includes the given
+ * PID? Used so a `bun run dev` started by an agent INSIDE agent-forge can't
+ * accidentally terminate the parent server when its lock-acquire sees the
+ * parent's PID.
+ *
+ * Old version walked the ancestor chain via repeated `Get-CimInstance
+ * Win32_Process` PowerShell calls — up to 32 spawns per check, each one
+ * a slow WMI query that visibly hammered WMI Provider Host. New version
+ * uses Bun's `process.ppid` for the immediate parent (the only case that
+ * actually matters in practice — Claude / Codex inside the running server
+ * spawning their own bun) and no shell-outs at all.
+ *
+ * If you somehow need to detect a deeper ancestor (grandparent or beyond),
+ * note that only the immediate parent is checked; deeper ancestors are
+ * not verified. This trade-off avoids the WMI process flood.
+ */
+function isPidImmediateAncestor(targetPid: number): boolean {
   if (process.platform !== 'win32') return false;
   if (targetPid === process.pid) return true;
-  let current = process.pid;
-  const visited = new Set<number>();
-  for (let i = 0; i < 32; i++) {
-    if (visited.has(current)) return false;
-    visited.add(current);
-    try {
-      const proc = Bun.spawn(
-        [
-          'powershell', '-NoProfile', '-Command',
-          `(Get-CimInstance Win32_Process -Filter "ProcessId=${current}").ParentProcessId`,
-        ],
-        { stdout: 'pipe', stderr: 'pipe' },
-      );
-      await proc.exited;
-      const out = (await new Response(proc.stdout).text()).trim();
-      const parentPid = parseInt(out, 10);
-      if (!Number.isFinite(parentPid) || parentPid <= 0) return false;
-      if (parentPid === targetPid) return true;
-      current = parentPid;
-    } catch {
-      return false;
-    }
-  }
+  if (typeof process.ppid === 'number' && targetPid === process.ppid) return true;
   return false;
 }
 
@@ -90,22 +111,14 @@ async function acquireProcessLock(): Promise<void> {
   }
 
   if (priorPid !== null && process.platform === 'win32') {
-    let isAliveBun = false;
-    try {
-      const proc = Bun.spawn(
-        [
-          'powershell', '-NoProfile', '-Command',
-          `(Get-Process -Id ${priorPid} -ErrorAction SilentlyContinue).ProcessName`,
-        ],
-        { stdout: 'pipe', stderr: 'pipe' },
-      );
-      await proc.exited;
-      const name = (await new Response(proc.stdout).text()).trim().toLowerCase();
-      if (name === 'bun') isAliveBun = true;
-    } catch {}
+    // Single tasklist call covers both the "is it alive?" and "is it bun?"
+    // questions in one ~10ms shell-out instead of a 1-2s PowerShell spawn.
+    const nameMap = await getProcessNameMap();
+    const priorName = nameMap.get(priorPid);
+    const isAliveBun = priorName === 'bun';
 
     if (isAliveBun) {
-      if (await isPidInOurAncestorChain(priorPid)) {
+      if (isPidImmediateAncestor(priorPid)) {
         console.error(
           `\nRefusing to start: agent-forge.lock is owned by our ancestor process (PID ${priorPid}).\n` +
           `This usually means an agent (Claude/Codex) inside a running agent-forge tried to spawn its own \`bun run dev\`.\n` +
@@ -122,6 +135,8 @@ async function acquireProcessLock(): Promise<void> {
       } catch (e) {
         console.warn(`Failed to kill prior bun.exe ${priorPid}:`, e);
       }
+    } else if (priorName) {
+      console.log(`Stale agent-forge.lock (PID ${priorPid} now running as '${priorName}', not bun); overwriting.`);
     } else {
       console.log(`Stale agent-forge.lock (PID ${priorPid} no longer running); overwriting.`);
     }
@@ -161,13 +176,23 @@ async function killOrphanBunOnPortRange(preferredPort: number): Promise<void> {
   const rangeStart = preferredPort;
   const rangeEnd = preferredPort + 7;
 
+  // Two shell-outs total: netstat (port→pid map) + tasklist (pid→name map).
+  // Old version did netstat + N PowerShells (one per candidate PID) which
+  // could each take 1-2s to cold-start and sometimes zombie'd, contributing
+  // to the visible PowerShell pile.
   let netstatOut = '';
+  let nameMap = new Map<number, string>();
   try {
-    const proc = Bun.spawn(['netstat', '-ano'], { stdout: 'pipe', stderr: 'pipe' });
-    await proc.exited;
-    netstatOut = await new Response(proc.stdout).text();
+    [netstatOut, nameMap] = await Promise.all([
+      (async () => {
+        const proc = Bun.spawn(['netstat', '-ano'], { stdout: 'pipe', stderr: 'pipe' });
+        await proc.exited;
+        return new Response(proc.stdout).text();
+      })(),
+      getProcessNameMap(),
+    ]);
   } catch (e) {
-    console.warn('Orphan-port scan: netstat failed, skipping cleanup:', e);
+    console.warn('Orphan-port scan: process inspection failed, skipping cleanup:', e);
     return;
   }
 
@@ -186,31 +211,17 @@ async function killOrphanBunOnPortRange(preferredPort: number): Promise<void> {
 
   if (orphanPids.size === 0) return;
 
-  // Confirm each candidate PID is actually a bun.exe before killing — other
-  // processes (Node dev servers, Vite, a browser using QUIC) can hold these
-  // ports and we must leave them alone.
-  const bunPids: number[] = [];
-  for (const pid of orphanPids) {
-    try {
-      const proc = Bun.spawn(
-        [
-          'powershell', '-NoProfile', '-Command',
-          `(Get-Process -Id ${pid} -ErrorAction SilentlyContinue).ProcessName`,
-        ],
-        { stdout: 'pipe', stderr: 'pipe' },
-      );
-      await proc.exited;
-      const name = (await new Response(proc.stdout).text()).trim().toLowerCase();
-      if (name === 'bun') bunPids.push(pid);
-      else if (name) console.log(`Orphan-port scan: PID ${pid} is ${name}, leaving alone.`);
-    } catch {}
-  }
-
-  // Filter out ancestors — same protection as the lock.
+  // Filter to actual bun.exe processes (don't kill the user's Vite, Chrome QUIC, etc.)
+  // and skip immediate ancestors (the parent that spawned us).
   const safeToKill: number[] = [];
-  for (const pid of bunPids) {
-    if (await isPidInOurAncestorChain(pid)) {
-      console.log(`Orphan-port scan: PID ${pid} is our ancestor — skipping.`);
+  for (const pid of orphanPids) {
+    const name = nameMap.get(pid);
+    if (name !== 'bun') {
+      if (name) console.log(`Orphan-port scan: PID ${pid} is ${name}, leaving alone.`);
+      continue;
+    }
+    if (isPidImmediateAncestor(pid)) {
+      console.log(`Orphan-port scan: PID ${pid} is our parent — skipping.`);
       continue;
     }
     safeToKill.push(pid);

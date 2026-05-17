@@ -125,7 +125,35 @@ function startFileWatcher(agentId: string) {
 
     agent.watcher = watch(agent.info.cwd, { recursive: true }, (eventType, filename) => {
       if (!filename) return;
-      if (filename.includes('node_modules') || filename.includes('.git/') || filename.startsWith('.')) return;
+      // Skip noisy/internal paths:
+      //   - node_modules:        huge tree, never user-meaningful changes
+      //   - .git/:               git internals; HEAD reads are direct now
+      //   - dotfiles:            OneDrive metadata, IDE state, swap files
+      //   - data.json / pids.json / agent-forge.lock:
+      //       server-internal files we write on every state mutation. Without
+      //       filtering, each save echoes back as a "file changed" event,
+      //       which on a OneDrive-synced cwd triggers Defender to rescan
+      //       the file, then OneDrive to re-upload, producing a feedback
+      //       loop with sustained 30-70% CPU even at chat-idle.
+      //   - dist / build / .next / .turbo / .cache / out:
+      //       common build output directories, similarly high-churn.
+      if (
+        filename.includes('node_modules')
+        || filename.includes('.git/')
+        || filename.includes('.git\\')
+        || filename.startsWith('.')
+        || filename === 'data.json'
+        || filename === 'pids.json'
+        || filename === 'agent-forge.lock'
+        || filename === 'data.json.tmp'
+        || filename === 'pids.json.tmp'
+        || filename.startsWith('dist/') || filename.startsWith('dist\\')
+        || filename.startsWith('build/') || filename.startsWith('build\\')
+        || filename.startsWith('out/') || filename.startsWith('out\\')
+        || filename.startsWith('.next/') || filename.startsWith('.next\\')
+        || filename.startsWith('.turbo/') || filename.startsWith('.turbo\\')
+        || filename.startsWith('.cache/') || filename.startsWith('.cache\\')
+      ) return;
 
       changedFiles.add(filename);
       if (debounceTimer) clearTimeout(debounceTimer);
