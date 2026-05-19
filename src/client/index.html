@@ -88,7 +88,7 @@
     .terminal-grid { flex: 1; display: grid; gap: 1px; background: var(--border); overflow: hidden; }
 
     /* Terminal panel */
-    .terminal-panel { background: var(--bg-primary); display: flex; flex-direction: column; overflow: hidden; }
+    .terminal-panel { background: var(--bg-primary); display: flex; flex-direction: column; overflow: hidden; min-width: 0; min-height: 0; }
     .panel-header { height: 36px; padding: 0 8px 0 12px; background: var(--bg-secondary); border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
     .panel-title { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 500; min-width: 0; }
     .panel-title-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -116,6 +116,8 @@
     .chat-turn-user .chat-turn-role { color: var(--accent); }
     .chat-turn-assistant { background: var(--bg-primary); }
     .chat-turn-assistant .chat-turn-role { color: var(--success); }
+    .chat-turn-assistant:not(.chat-turn-streaming) { background: rgba(13, 17, 23, 0.72); }
+    .chat-turn-assistant:not(.chat-turn-streaming) .chat-turn-content { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 13px; line-height: 1.55; }
     .chat-turn-assistant .chat-turn-content { white-space: normal; }
     .chat-turn-system { background: var(--bg-tertiary); }
     .chat-turn-system .chat-turn-role { color: var(--warning); }
@@ -132,6 +134,8 @@
     .thinking-header.collapsed svg { transform: rotate(-90deg); }
     .thinking-content { color: var(--text-secondary); font-style: italic; font-size: 12px; line-height: 1.5; white-space: pre-wrap; word-wrap: break-word; margin-top: 6px; max-height: 300px; overflow-y: auto; }
     .thinking-content.hidden { display: none; }
+    .agent-activity-pill { display: inline-flex; align-items: center; gap: 6px; margin: 6px 14px; padding: 4px 8px; border: 1px solid rgba(47, 129, 247, 0.25); border-radius: 999px; color: var(--text-secondary); background: rgba(47, 129, 247, 0.08); font-size: 11px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; align-self: flex-start; }
+    .agent-activity-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); animation: pulse 1.2s infinite; }
 
     /* Markdown in assistant messages */
     .chat-turn-assistant .chat-turn-content p { margin: 0 0 8px 0; }
@@ -783,6 +787,7 @@
       const [sharedContext, setSharedContext] = useState('');
       const [fileChanges, setFileChanges] = useState({});
       const [thinkingOutput, setThinkingOutput] = useState({});
+      const [agentActivity, setAgentActivity] = useState({});
       const [notes, setNotes] = useState([]);
       const [documents, setDocuments] = useState([]);
       const [settings, setSettings] = useState({});
@@ -853,6 +858,12 @@
                   const old = prev.find(a => a.id === msg.agent.id);
                   if (old && old.status !== msg.agent.status) {
                     setStatusStartTimes(st => ({ ...st, [msg.agent.id]: Date.now() }));
+                    const wasRunning = old.status === 'working' || old.status === 'thinking';
+                    const isNowRunning = msg.agent.status === 'working' || msg.agent.status === 'thinking';
+                    if (!wasRunning && isNowRunning) {
+                      setThinkingOutput(prev2 => { const n = {...prev2}; delete n[msg.agent.id]; return n; });
+                      setAgentActivity(prev2 => { const n = {...prev2}; delete n[msg.agent.id]; return n; });
+                    }
                     // Toast when an Atlas agent finishes a scan (working/thinking → idle).
                     if ((old.status === 'working' || old.status === 'thinking') && msg.agent.status === 'idle' && msg.agent.name === 'UI Atlas Agent') {
                       const toastId = 'atlas-done-' + Date.now();
@@ -867,7 +878,7 @@
                 });
                 if (msg.agent.status === 'idle') {
                   drainQueue(msg.agent.id);
-                  setThinkingOutput(prev => { const n = {...prev}; delete n[msg.agent.id]; return n; });
+                  setAgentActivity(prev => { const n = {...prev}; delete n[msg.agent.id]; return n; });
                 }
                 break;
               case 'agent_removed':
@@ -875,6 +886,7 @@
                 setMessages(prev => { const n = {...prev}; delete n[msg.agentId]; return n; });
                 setLiveOutput(prev => { const n = {...prev}; delete n[msg.agentId]; return n; });
                 setThinkingOutput(prev => { const n = {...prev}; delete n[msg.agentId]; return n; });
+                setAgentActivity(prev => { const n = {...prev}; delete n[msg.agentId]; return n; });
                 break;
               case 'message':
                 setMessages(prev => ({
@@ -892,6 +904,7 @@
                 setMessages(prev => ({ ...prev, [msg.agentId]: [] }));
                 setLiveOutput(prev => ({ ...prev, [msg.agentId]: '' }));
                 setThinkingOutput(prev => { const n = {...prev}; delete n[msg.agentId]; return n; });
+                setAgentActivity(prev => { const n = {...prev}; delete n[msg.agentId]; return n; });
                 break;
               case 'output': {
                 const MAX_LIVE_OUTPUT = 512000; // 500KB cap
@@ -904,6 +917,9 @@
                 });
                 break;
               }
+              case 'agent_activity':
+                setAgentActivity(prev => ({ ...prev, [msg.agentId]: { label: msg.label, timestamp: msg.timestamp } }));
+                break;
               case 'thinking_output':
                 setThinkingOutput(prev => ({
                   ...prev,
@@ -1034,7 +1050,7 @@
       }, [drainQueue, sendRaw]);
 
       return {
-        connected, agents, messages, liveOutput, queued, sharedContext, fileChanges, thinkingOutput, notes, documents, settings, workspaces, statusStartTimes, tokenUsage, usageReport, terminals, terminalOutput, errorToasts, qaUnread, qaLiveShots,
+        connected, agents, messages, liveOutput, queued, sharedContext, fileChanges, thinkingOutput, agentActivity, notes, documents, settings, workspaces, statusStartTimes, tokenUsage, usageReport, terminals, terminalOutput, errorToasts, qaUnread, qaLiveShots,
         createAgent: (name, cwd, referencePaths, systemPrompt, workspaceId) => {
           sendRaw({ type: 'create_agent', name, cwd, referencePaths, systemPrompt, workspaceId });
         },
@@ -1447,7 +1463,7 @@
     });
 
     // Terminal Panel
-    function TerminalPanel({ agent, messages, liveOutput, queuedMessages, fileChanges, thinkingOutput, statusStartTime, tokenUsage, terminals, terminalOutput, workspace, qaAgent, qaMessages, qaTokenUsage, qaHasUnread, qaLiveShots, onQaSend, onQaAbort, onClearQaUnread, onSendMessage, onSendImage, onSendImages, onStop, onClearHistory, onClearFileChanges, onMinimize, onMaximize, isMaximized, onFocus, isFocused, onCreateTerminal, onKillTerminal, onUpdateAgent, isLocked, onToggleLock, isDragging, isDragOver, onDragStart, onDragEnd, onDragOver, onDragLeave, onDrop }) {
+    function TerminalPanel({ agent, messages, liveOutput, queuedMessages, fileChanges, thinkingOutput, agentActivity, statusStartTime, tokenUsage, terminals, terminalOutput, workspace, qaAgent, qaMessages, qaTokenUsage, qaHasUnread, qaLiveShots, onQaSend, onQaAbort, onClearQaUnread, onSendMessage, onSendImage, onSendImages, onStop, onClearHistory, onClearFileChanges, onMinimize, onMaximize, isMaximized, onFocus, isFocused, onCreateTerminal, onKillTerminal, onUpdateAgent, isLocked, onToggleLock, isDragging, isDragOver, onDragStart, onDragEnd, onDragOver, onDragLeave, onDrop }) {
       const [input, setInput] = useState('');
       const [inputHistory, setInputHistory] = useState([]);
       const [historyIdx, setHistoryIdx] = useState(-1);
@@ -1627,7 +1643,7 @@
           if (ticking) return;
           ticking = true;
           requestAnimationFrame(() => {
-            const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 50;
+            const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 96;
             setAutoScrollEnabled(atBottom);
             ticking = false;
           });
@@ -1639,9 +1655,11 @@
       // Auto-scroll when new content arrives (only if enabled)
       useEffect(() => {
         if (autoScrollEnabled && contentRef.current) {
-          contentRef.current.scrollTop = contentRef.current.scrollHeight;
+          requestAnimationFrame(() => {
+            if (contentRef.current) contentRef.current.scrollTop = contentRef.current.scrollHeight;
+          });
         }
-      }, [messages, liveOutput, queuedMessages, thinkingOutput, autoScrollEnabled]);
+      }, [messages, liveOutput, queuedMessages, thinkingOutput, agentActivity, autoScrollEnabled]);
 
       // Notification when agent finishes
       useEffect(() => {
@@ -1820,6 +1838,7 @@
       const queued = queuedMessages || [];
       const files = fileChanges || [];
       const thinking = thinkingOutput || '';
+      const activity = isWorking ? agentActivity : null;
 
       // Status text for header (Feature 5)
       const statusTextMap = { idle: 'Idle', working: 'Working...', thinking: 'Thinking...', error: 'Error', stopped: 'Stopped' };
@@ -1875,7 +1894,7 @@
                   : (qaPanelOpen ? 'Close QA testing panel' : 'Open QA testing panel for this agent'),
             }, '\uD83E\uDDEA'),
             e('button', { className: 'panel-btn', onClick: () => { setSearchVisible(prev => !prev); setTimeout(() => searchInputRef.current?.focus(), 50); }, title: 'Search (Ctrl+F)' }, '\uD83D\uDD0D'),
-            isWorking && e('button', { className: 'panel-btn panel-btn-stop', onClick: () => onStop(agent.id), title: 'Stop (Esc)' }, 'Stop'),
+            isWorking && e('button', { className: 'panel-btn panel-btn-stop', onClick: () => onStop(agent.id), title: 'Stop current turn (Esc)' }, 'Stop turn'),
             !isMaximized && onMinimize && e('button', { className: 'panel-btn panel-minimize-btn', onClick: () => onMinimize(agent.id), title: 'Minimize' }, '_'),
             e('button', { className: 'panel-btn', onClick: () => onClearHistory(agent.id), title: 'Clear chat' }, 'Clear'),
           )
@@ -1967,6 +1986,10 @@
                   );
                 })(),
                 thinking && e(ThinkingBlock, { key: 'thinking', content: thinking, isActive: agent.status === 'thinking' }),
+                activity && e('div', { className: 'agent-activity-pill' },
+                  e('span', { className: 'agent-activity-dot' }),
+                  activity.label || 'Working...'
+                ),
                 liveOutput && e(ChatTurn, { key: 'live', role: 'assistant', content: liveOutput, isStreaming: isWorking, showToolMessages, provider: agent.provider }),
                 queued.map((q, i) => e('div', { key: 'q' + i, className: 'chat-turn chat-turn-queued' },
                   e('div', { className: 'chat-turn-role' }, 'Queued'),
@@ -1978,7 +2001,7 @@
           !autoScrollEnabled && e('button', {
             className: 'auto-scroll-btn',
             onClick: () => { setAutoScrollEnabled(true); if (contentRef.current) contentRef.current.scrollTop = contentRef.current.scrollHeight; }
-          }, '\u2193 Auto-scroll')
+          }, '\u2193 Jump to latest')
         ),
         // Terminal output section
         (() => {
@@ -1994,7 +2017,7 @@
                 e('div', { style: { display: 'flex', alignItems: 'center', gap: 6, padding: '2px 8px', background: 'var(--bg-secondary)', fontSize: 11 } },
                   e('span', { className: 'status-dot status-' + (t.status === 'running' ? 'working' : 'stopped'), style: { width: 6, height: 6 } }),
                   e('span', { style: { flex: 1, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, t.command),
-                  t.status === 'running' && onKillTerminal && e('button', { className: 'panel-btn panel-btn-stop', style: { fontSize: 10, padding: '1px 4px' }, onClick: () => onKillTerminal(t.id) }, 'Stop')
+                  t.status === 'running' && onKillTerminal && e('button', { className: 'panel-btn panel-btn-stop', style: { fontSize: 10, padding: '1px 4px' }, onClick: () => onKillTerminal(t.id), title: 'Force kill terminal process' }, 'Kill')
                 ),
                 e('pre', { style: { padding: '4px 8px', fontSize: 11, fontFamily: "'SF Mono', Monaco, Consolas, monospace", color: 'var(--text-secondary)', background: 'var(--bg-primary)', maxHeight: 120, overflowY: 'auto', whiteSpace: 'pre-wrap', wordWrap: 'break-word', margin: 0 } },
                   (terminalOutput || {})[t.id] || '(no output yet)'
@@ -2531,8 +2554,8 @@
                           e('button', {
                             className: 'workspace-atlas-stop',
                             onClick: (ev) => { ev.stopPropagation(); if (confirm('Abort the in-flight Atlas scan? Partial output will remain.')) onStopAtlas(atlasAgent.id); },
-                            title: 'Abort the in-flight Atlas scan',
-                          }, '⏹')
+                            title: 'Stop current Atlas scan',
+                          }, 'Stop scan')
                         )
                       );
                     }
@@ -2621,7 +2644,7 @@
           e('button', { className: 'btn btn-primary', style: { width: '100%' }, onClick: () => setShowNewModal(true) }, '+ New Workspace')
         ),
         e('div', { className: 'shortcuts-hint' },
-          e('span', null, e(React.Fragment, null, e('kbd', null, 'Ctrl+N'), ' new agent ', e('kbd', null, 'Esc'), ' stop ', e('kbd', null, 'Ctrl+B'), ' broadcast'))
+          e('span', null, e(React.Fragment, null, e('kbd', null, 'Ctrl+N'), ' new agent ', e('kbd', null, 'Esc'), ' stop turn ', e('kbd', null, 'Ctrl+B'), ' broadcast'))
         ),
         showNewModal && e(NewWorkspaceModal, { isOpen: true, onClose: () => setShowNewModal(false), onCreate: onCreateWorkspace })
       );
@@ -3536,7 +3559,7 @@
 
     function App() {
       const ws = useWebSocket();
-      const { connected, agents, messages, liveOutput, queued, sharedContext, fileChanges, thinkingOutput, notes, documents, settings, workspaces, statusStartTimes, tokenUsage, usageReport, terminals, terminalOutput, errorToasts } = ws;
+      const { connected, agents, messages, liveOutput, queued, sharedContext, fileChanges, thinkingOutput, agentActivity, notes, documents, settings, workspaces, statusStartTimes, tokenUsage, usageReport, terminals, terminalOutput, errorToasts } = ws;
       const [showModal, setShowModal] = useState(false);
       const [showSharedContext, setShowSharedContext] = useState(false);
       const [showBroadcast, setShowBroadcast] = useState(false);
@@ -3564,11 +3587,43 @@
       const activeWorkspace = workspaces.find(w => w.id === settings.activeWorkspaceId) || workspaces[0];
       const columns = activeWorkspace ? activeWorkspace.gridColumns : 2;
       const rows = activeWorkspace ? activeWorkspace.gridRows : 2;
-      // Preserve empty-string placeholders (intentionally empty slots) while filtering out stale agent IDs
-      const selectedAgents = activeWorkspace ? activeWorkspace.selectedAgentIds.filter(id => id === '' || agents.some(a => a.id === id)) : [];
+      const totalPanels = columns * rows;
 
       // Agents for the active workspace
       const workspaceAgents = activeWorkspace ? agents.filter(a => a.workspaceId === activeWorkspace.id && !a.hideFromGrid) : [];
+      const workspaceAgentIds = workspaceAgents.map(a => a.id);
+      const workspaceAgentIdSet = new Set(workspaceAgentIds);
+
+      const sameSlots = (a, b) => a.length === b.length && a.every((id, i) => id === b[i]);
+      const normalizeGridSlots = (rawIds, excludedIds = minimizedAgents) => {
+        const slots = Array.from({ length: totalPanels }, () => '');
+        const lockedIds = activeWorkspace ? activeWorkspace.lockedAgentIds || [] : [];
+        const seen = new Set();
+
+        (rawIds || []).forEach((id, idx) => {
+          if (!id || idx >= totalPanels || !lockedIds.includes(id) || !workspaceAgentIdSet.has(id) || excludedIds.has(id) || seen.has(id)) return;
+          slots[idx] = id;
+          seen.add(id);
+        });
+
+        const candidates = [];
+        for (const id of rawIds || []) {
+          if (!id || lockedIds.includes(id) || !workspaceAgentIdSet.has(id) || excludedIds.has(id) || seen.has(id)) continue;
+          candidates.push(id);
+          seen.add(id);
+        }
+        for (const id of workspaceAgentIds) {
+          if (excludedIds.has(id) || seen.has(id)) continue;
+          candidates.push(id);
+          seen.add(id);
+        }
+
+        let nextCandidate = 0;
+        for (let i = 0; i < slots.length && nextCandidate < candidates.length; i++) {
+          if (!slots[i]) slots[i] = candidates[nextCandidate++];
+        }
+        return slots;
+      };
 
       // Sync sidebar width from server settings on first load
       const sidebarWidthSynced = useRef(false);
@@ -3677,64 +3732,37 @@
         return () => window.removeEventListener('keydown', handler);
       }, [agents, ws, focusedAgentId, maximizedAgent]);
 
-      const totalPanels = columns * rows;
-
-      // Fix 1: Compact/pad selectedAgentIds when grid resizes
+      // Keep workspace slots canonical: exactly one agent per visible slot,
+      // no duplicates, no minimized/stale IDs, and no overflow beyond grid capacity.
+      const displayAgents = activeWorkspace ? normalizeGridSlots(activeWorkspace.selectedAgentIds || []) : [];
       useEffect(() => {
         if (!activeWorkspace) return;
-        const current = activeWorkspace.selectedAgentIds;
-        if (current.length === totalPanels) return; // already correct size
-
-        if (totalPanels < current.length) {
-          // Grid shrank — compact: keep locked agents in-place, fill unlocked left-to-right, drop overflow
-          const lockedIds = activeWorkspace.lockedAgentIds || [];
-          const newArr = Array.from({ length: totalPanels }, () => '');
-          // Place locked agents that are within bounds
-          current.forEach((id, idx) => {
-            if (id && lockedIds.includes(id) && idx < totalPanels) {
-              newArr[idx] = id;
-            }
-          });
-          // Collect unlocked agents (non-empty, not already placed)
-          const placed = new Set(newArr.filter(id => id !== ''));
-          const unlocked = current.filter(id => id && !lockedIds.includes(id) && !placed.has(id));
-          // Fill unlocked into remaining empty slots
-          let ui = 0;
-          for (let i = 0; i < totalPanels && ui < unlocked.length; i++) {
-            if (newArr[i] === '') {
-              newArr[i] = unlocked[ui++];
-            }
-          }
-          ws.updateWorkspace(activeWorkspace.id, { selectedAgentIds: newArr });
-        } else {
-          // Grid grew — pad with empty strings
-          const padded = [...current];
-          while (padded.length < totalPanels) padded.push('');
-          ws.updateWorkspace(activeWorkspace.id, { selectedAgentIds: padded });
+        if (!sameSlots(activeWorkspace.selectedAgentIds || [], displayAgents)) {
+          ws.updateWorkspace(activeWorkspace.id, { selectedAgentIds: displayAgents });
         }
-      }, [columns, rows, activeWorkspace?.id]);
-
-      const displayAgents = [...selectedAgents];
-      // Auto-fill remaining slots with workspace agents not yet selected
-      workspaceAgents.forEach(agent => {
-        if (!displayAgents.includes(agent.id) && displayAgents.length < totalPanels) {
-          displayAgents.push(agent.id);
-        }
-      });
-      // Trim trailing empty placeholders beyond agent count (cosmetic)
-      while (displayAgents.length > 0 && displayAgents[displayAgents.length - 1] === '' && displayAgents.length > totalPanels) {
-        displayAgents.pop();
-      }
+      }, [activeWorkspace?.id, activeWorkspace?.selectedAgentIds, columns, rows, agents.length, minimizedAgents]);
 
       // Split into minimized and non-minimized (skip empty placeholders for minimized bar)
-      const minimizedDisplayAgents = displayAgents.filter(id => id && minimizedAgents.has(id));
+      const minimizedDisplayAgents = workspaceAgentIds.filter(id => minimizedAgents.has(id));
 
       const handleMinimize = (agentId) => {
         setMinimizedAgents(prev => { const next = new Set(prev); next.add(agentId); return next; });
+        if (activeWorkspace) {
+          const excluded = new Set(minimizedAgents);
+          excluded.add(agentId);
+          ws.updateWorkspace(activeWorkspace.id, { selectedAgentIds: normalizeGridSlots(activeWorkspace.selectedAgentIds || [], excluded) });
+        }
       };
       const handleRestore = (agentId) => {
         setMinimizedAgents(prev => { const next = new Set(prev); next.delete(agentId); return next; });
         setUnreadCounts(prev => { const n = { ...prev }; delete n[agentId]; return n; });
+        if (activeWorkspace) {
+          const excluded = new Set(minimizedAgents);
+          excluded.delete(agentId);
+          const current = (activeWorkspace.selectedAgentIds || []).filter(id => id && id !== agentId);
+          const appended = [...current.slice(0, Math.max(0, totalPanels - 1)), agentId];
+          ws.updateWorkspace(activeWorkspace.id, { selectedAgentIds: normalizeGridSlots(appended, excluded) });
+        }
       };
       // Feature 4: Toggle maximize
       const handleToggleMaximize = (agentId) => {
@@ -3754,7 +3782,7 @@
       const handleDragOver = (slotIndex, ev) => {
         if (!draggedAgent) return;
         const lockedIds = activeWorkspace ? activeWorkspace.lockedAgentIds || [] : [];
-        const nonMinimized = displayAgents.filter(id => id === '' || !minimizedAgents.has(id));
+        const nonMinimized = displayAgents;
         const targetAgentId = nonMinimized[slotIndex];
         if (targetAgentId && targetAgentId !== '' && lockedIds.includes(targetAgentId)) return;
         ev.preventDefault();
@@ -3767,7 +3795,7 @@
       const handleDrop = (targetSlotIndex) => {
         if (!draggedAgent || !activeWorkspace) return;
         const lockedIds = activeWorkspace.lockedAgentIds || [];
-        const nonMinimized = displayAgents.filter(id => id === '' || !minimizedAgents.has(id));
+        const nonMinimized = displayAgents;
         // Build a full slot array (length = totalPanels), empty string for empty slots
         const slots = Array.from({ length: totalPanels }, (_, i) => nonMinimized[i] || '');
         const targetAgentId = slots[targetSlotIndex];
@@ -3781,12 +3809,7 @@
         slots[fromIndex] = slots[toIndex];
         slots[toIndex] = draggedAgent;
 
-        // Re-append minimized agents so they aren't lost from selectedAgentIds
-        const minimizedIds = displayAgents.filter(id => id && minimizedAgents.has(id));
-        const newSelected = [...slots, ...minimizedIds];
-        // Trim trailing empty strings
-        while (newSelected.length > 0 && newSelected[newSelected.length - 1] === '') newSelected.pop();
-        ws.updateWorkspace(activeWorkspace.id, { selectedAgentIds: newSelected });
+        ws.updateWorkspace(activeWorkspace.id, { selectedAgentIds: normalizeGridSlots(slots) });
         setDraggedAgent(null);
         setDragOverSlot(null);
       };
@@ -3804,7 +3827,7 @@
       // Grid uses user-chosen columns/rows — override when maximized
       const gridStyle = maximizedAgent
         ? { gridTemplateColumns: '1fr', gridTemplateRows: '1fr' }
-        : { gridTemplateColumns: 'repeat(' + columns + ', 1fr)', gridTemplateRows: 'repeat(' + rows + ', 1fr)' };
+        : { gridTemplateColumns: 'repeat(' + columns + ', minmax(0, 1fr))', gridTemplateRows: 'repeat(' + rows + ', minmax(0, 1fr))' };
 
       // Feature 3: Cost dashboard — aggregate all token usage
       const handleBroadcast = () => {
@@ -3821,10 +3844,10 @@
 
       const toggleAgent = (agentId) => {
         if (!activeWorkspace) return;
-        const current = activeWorkspace.selectedAgentIds;
-        const updated = current.includes(agentId)
-          ? current.filter(id => id !== agentId)
-          : current.length < totalPanels ? [...current, agentId] : current;
+        const current = (activeWorkspace.selectedAgentIds || []).filter(id => id && id !== agentId);
+        const updated = (activeWorkspace.selectedAgentIds || []).includes(agentId)
+          ? normalizeGridSlots(current)
+          : normalizeGridSlots([...current.slice(0, Math.max(0, totalPanels - 1)), agentId]);
         ws.updateWorkspace(activeWorkspace.id, { selectedAgentIds: updated });
       };
 
@@ -3854,11 +3877,11 @@
           e('button', {
             className: 'activity-bar-btn kill-all',
             onClick: () => {
-              if (confirm('Kill ALL Claude processes on this machine?')) {
+              if (confirm('Force kill all Claude and Codex processes started on this machine?')) {
                 ws.killAll();
               }
             },
-            title: 'Kill All Claude Processes'
+            title: 'Force kill all agent CLI processes'
           }, '\u2620'),
           e('button', {
             className: 'activity-bar-btn activity-bar-bottom',
@@ -3985,6 +4008,7 @@
                   queuedMessages: queued[maximizedAgent] || [],
                   fileChanges: fileChanges[maximizedAgent] || [],
                   thinkingOutput: thinkingOutput[maximizedAgent] || '',
+                  agentActivity: agentActivity[maximizedAgent] || null,
                   statusStartTime: statusStartTimes[maximizedAgent],
                   tokenUsage: tokenUsage[maximizedAgent],
                   terminals,
@@ -4014,8 +4038,7 @@
                   onUpdateAgent: ws.updateAgent,
                 });
               }
-              // Keep empty-string placeholders (intentional empty slots); only filter out minimized agents
-              const nonMinimized = displayAgents.filter(id => id === '' || !minimizedAgents.has(id));
+              const nonMinimized = displayAgents;
               const lockedIds = activeWorkspace ? activeWorkspace.lockedAgentIds || [] : [];
               return Array.from({ length: totalPanels }).map((_, i) => {
                 const agentId = nonMinimized[i];
@@ -4038,6 +4061,7 @@
                   queuedMessages: queued[agentId] || [],
                   fileChanges: fileChanges[agentId] || [],
                   thinkingOutput: thinkingOutput[agentId] || '',
+                  agentActivity: agentActivity[agentId] || null,
                   statusStartTime: statusStartTimes[agentId],
                   tokenUsage: tokenUsage[agentId],
                   terminals,

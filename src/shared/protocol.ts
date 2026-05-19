@@ -283,6 +283,7 @@ export type ServerMessage =
   | { type: 'agent_removed'; agentId: string }
   | { type: 'agents_list'; agents: AgentInfo[] }
   | { type: 'output'; agentId: string; content: string; stream: 'stdout' | 'stderr' }
+  | { type: 'agent_activity'; agentId: string; label: string; timestamp: number }
   | { type: 'thinking_output'; agentId: string; content: string }
   | { type: 'message'; message: ChatMessage }
   | { type: 'history'; agentId: string; messages: ChatMessage[] }

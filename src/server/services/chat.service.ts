@@ -118,24 +118,9 @@ function handleEvent(agentId: string, event: AgentEvent): void {
 
     case 'tool-call-start': {
       // Sniff Write/Edit on .plans/*.md and forward to documentService for the
-      // live-document sync. Other tool calls are surfaced as inline breadcrumbs.
+      // live-document sync. Other tool calls stay hidden to keep chat readable.
       sniffPlanWrite(agentId, event.toolName, event.input);
-
-      // Render `[ToolName: useful summary]` when we have something useful, or
-      // just `[ToolName]` when we don't — avoids the [Glob: Glob] redundancy
-      // when the summarizer can't extract anything specific from the input.
-      const summary = (event.summary ?? '').trim();
-      const breadcrumb = summary && summary !== event.toolName
-        ? `\n[${event.toolName}: ${summary}]\n`
-        : `\n[${event.toolName}]\n`;
-
-      // Accumulate into the turn buffer so the breadcrumb survives in the
-      // final assistant message (legacy parity — tool calls were part of the
-      // saved chat record, not just transient live output).
-      const turn = turnBuffers.get(agentId);
-      if (turn) turn.accumulatedText += breadcrumb;
-
-      broadcast({ type: 'output', agentId, content: breadcrumb, stream: 'stdout' });
+      broadcast({ type: 'agent_activity', agentId, label: 'Using tools...', timestamp: Date.now() });
       return;
     }
 
