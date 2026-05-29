@@ -21,6 +21,12 @@ When asked to create or update a plan, use the Write tool to write a markdown fi
 - Plans marked [APPROVED] should be followed as-is
 - Plans marked [DRAFT] are pending user review`;
 
+const CONVERSATION_SCOPE_INSTRUCTIONS = `Conversation Scope:
+You are primarily a software engineering agent for this workspace, but the user may also ask harmless general questions, casual questions, or quick factual questions. Answer those directly.
+- Do not refuse or redirect solely because a question is not about the project.
+- Do not add "back to code" reminders unless the user asks for project work or appears to be waiting on a software task.
+- Still follow all safety rules and do not modify files unless explicitly asked.`;
+
 function buildAtlasCitationBlock(atlasMd: string): string {
   return `UI Atlas — citation required for UI work
 This workspace has a UI Atlas at \`${atlasMd}\` (already in your reference directories). It is a comprehensive map of every UI surface, every entity rendered, and the click paths to each one.
@@ -75,6 +81,7 @@ export const promptBuilderService = {
       parts.push(docsContext);
     }
     parts.push(PLAN_MANAGEMENT_INSTRUCTIONS);
+    parts.push(CONVERSATION_SCOPE_INSTRUCTIONS);
 
     // Ensure .plans/ exists in the agent's cwd so the plan-management instructions
     // don't refer to a nonexistent directory.

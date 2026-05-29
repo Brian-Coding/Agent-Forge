@@ -170,6 +170,16 @@ export const claudeAdapter: AgentAdapter<undefined> = {
           proc = null;
 
           const stderrText = (await stderrPromise).trim();
+          if (!killed && exitCode !== 0 && /No conversation found with session ID/i.test(stderrText)) {
+            ctx.emitAgentEvent({
+              type: 'finish',
+              reason: 'stale-session',
+            });
+            return {
+              recoverableError: 'stale-session',
+              errorMessage: stderrText,
+            };
+          }
           if (!killed && exitCode !== 0 && stderrText) {
             ctx.emitAgentEvent({ type: 'error', message: stderrText });
           }

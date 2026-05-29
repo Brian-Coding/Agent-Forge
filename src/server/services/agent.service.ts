@@ -324,12 +324,22 @@ export const agentService = {
   }): void {
     const agent = agents.get(agentId);
     if (!agent) return;
-    if (typeof usage.contextTokens === 'number') agent.contextTokens = usage.contextTokens;
-    if (typeof usage.contextLimit === 'number') agent.contextLimit = usage.contextLimit;
-    if (typeof usage.inputTokensDelta === 'number') agent.totalInputTokens += usage.inputTokensDelta;
-    if (typeof usage.outputTokensDelta === 'number') agent.totalOutputTokens += usage.outputTokensDelta;
-    if (typeof usage.costUsdDelta === 'number') agent.totalCostUsd += usage.costUsdDelta;
-    if (typeof usage.turnsDelta === 'number') agent.numTurns += usage.turnsDelta;
+    if (typeof usage.contextLimit === 'number' && usage.contextLimit > 0) {
+      agent.contextLimit = usage.contextLimit;
+    }
+    if (typeof usage.contextTokens === 'number' && usage.contextTokens >= 0) {
+      const limit = agent.contextLimit > 0 ? agent.contextLimit : 200000;
+      agent.contextTokens = Math.min(usage.contextTokens, limit);
+    }
+    const saneDeltaCeiling = Math.max(agent.contextLimit || 200000, 200000) * 2;
+    if (typeof usage.inputTokensDelta === 'number' && usage.inputTokensDelta > 0) {
+      agent.totalInputTokens += Math.min(usage.inputTokensDelta, saneDeltaCeiling);
+    }
+    if (typeof usage.outputTokensDelta === 'number' && usage.outputTokensDelta > 0) {
+      agent.totalOutputTokens += Math.min(usage.outputTokensDelta, saneDeltaCeiling);
+    }
+    if (typeof usage.costUsdDelta === 'number' && usage.costUsdDelta > 0) agent.totalCostUsd += usage.costUsdDelta;
+    if (typeof usage.turnsDelta === 'number' && usage.turnsDelta > 0) agent.numTurns += usage.turnsDelta;
     persistenceService.save();
   },
 
@@ -498,6 +508,15 @@ export const agentService = {
     if (agent.currentSessionId === sessionId && agent.currentSessionProvider === provider) return;
     agent.currentSessionId = sessionId;
     agent.currentSessionProvider = provider;
+    persistenceService.save();
+  },
+
+  /** Clear the saved provider session after the CLI reports it is stale/missing. */
+  clearCurrentSession(agentId: string): void {
+    const agent = agents.get(agentId);
+    if (!agent) return;
+    agent.currentSessionId = null;
+    agent.currentSessionProvider = null;
     persistenceService.save();
   },
 
@@ -715,6 +734,9 @@ export const agentService = {
         totalCostUsd: agentData.totalCostUsd || 0,
         numTurns: agentData.numTurns || 0,
       };
+      if (managed.contextLimit > 0 && managed.contextTokens > managed.contextLimit) {
+        managed.contextTokens = managed.contextLimit;
+      }
       agents.set(agentData.id, managed);
       startFileWatcher(agentData.id);
       documentService.startPlansWatcher(agentData.id, agentData.cwd);
