@@ -456,6 +456,8 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
             const decoder = new TextDecoder();
             let acc = '';
             let pendingLine = '';
+            let suppressRouterBlock = false;
+            let suppressedRouterLines = 0;
             try {
               while (true) {
                 const { done, value } = await reader.read();
@@ -469,12 +471,30 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
                 while ((nlIdx = pendingLine.indexOf('\n')) >= 0) {
                   const line = pendingLine.slice(0, nlIdx + 1);
                   pendingLine = pendingLine.slice(nlIdx + 1);
+                  if (/codex_core::tools::router/i.test(line)) {
+                    suppressRouterBlock = true;
+                    suppressedRouterLines = 0;
+                    continue;
+                  }
+                  if (suppressRouterBlock) {
+                    suppressedRouterLines++;
+                    if (line.trim() === '' || suppressedRouterLines > 40) {
+                      suppressRouterBlock = false;
+                      suppressedRouterLines = 0;
+                    }
+                    continue;
+                  }
                   if (!STDERR_NOISE_PATTERNS.some(re => re.test(line))) {
                     ctx.emitAgentEvent({ type: 'stderr', text: line });
                   }
                 }
               }
-              if (pendingLine && !STDERR_NOISE_PATTERNS.some(re => re.test(pendingLine))) {
+              if (
+                pendingLine
+                && !suppressRouterBlock
+                && !/codex_core::tools::router/i.test(pendingLine)
+                && !STDERR_NOISE_PATTERNS.some(re => re.test(pendingLine))
+              ) {
                 ctx.emitAgentEvent({ type: 'stderr', text: pendingLine });
               }
             } catch {

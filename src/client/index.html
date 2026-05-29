@@ -1106,9 +1106,10 @@
 
     // Tool message filter (Feature 7)
     const TOOL_ANNOTATION_RE = /\n?\[(?:Using tool|exec|patch|Read|Write|Edit|Bash|Glob|Grep|LS|WebSearch|WebFetch):[^\]]+\]\n?/g;
+    const CODEX_ROUTER_NOISE_RE = /\n?\d{4}-\d{2}-\d{2}T[^\n]*ERROR codex_core::tools::router[^\n]*(?:\n(?:Wall time:[^\n]*|Output:|Too many revisions specified:[^\n]*))*\n?/g;
     function filterToolMessages(text, show) {
       if (show) return text;
-      return text.replace(TOOL_ANNOTATION_RE, '');
+      return text.replace(TOOL_ANNOTATION_RE, '').replace(CODEX_ROUTER_NOISE_RE, '');
     }
     function countToolMessages(text) {
       const matches = text.match(TOOL_ANNOTATION_RE);
