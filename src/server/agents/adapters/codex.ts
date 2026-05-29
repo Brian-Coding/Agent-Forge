@@ -53,6 +53,7 @@ const MAX_INLINE_DIFF_CHARS = 80_000;
 // stderr lines containing this phrase are dropped (harmless noise on every run).
 const STDERR_NOISE_PATTERNS = [
   /failed to record rollout items/i,
+  /failed to refresh available models/i,
 ];
 
 function extractText(value: any): string {

@@ -112,6 +112,7 @@ function handleEvent(agentId: string, event: AgentEvent): void {
     }
 
     case 'stderr': {
+      if (/No conversation found with session ID/i.test(event.text)) return;
       broadcast({ type: 'output', agentId, content: event.text, stream: 'stderr' });
       return;
     }
@@ -120,7 +121,8 @@ function handleEvent(agentId: string, event: AgentEvent): void {
       // Sniff Write/Edit on .plans/*.md and forward to documentService for the
       // live-document sync. Other tool calls stay hidden to keep chat readable.
       sniffPlanWrite(agentId, event.toolName, event.input);
-      broadcast({ type: 'agent_activity', agentId, label: 'Using tools...', timestamp: Date.now() });
+      const label = event.summary ? `${event.toolName}: ${event.summary}` : `Using ${event.toolName}`;
+      broadcast({ type: 'agent_activity', agentId, label, timestamp: Date.now() });
       return;
     }
 
@@ -274,14 +276,14 @@ async function runChatTurn(agentId: string, content: string, source?: 'qa'): Pro
   const previousSessionProvider = agentService.getCurrentSessionProvider(agentId);
   const previousSessionId = agentService.getCurrentSessionId(agentId);
   const isProviderMatch = previousSessionProvider === provider && !!previousSessionId;
-  const sessionIdForAdapter = isProviderMatch ? previousSessionId : null;
+  let sessionIdForAdapter = isProviderMatch ? previousSessionId : null;
 
   // Build the prompt body. On a swap, prepend the prior conversation as
   // delimited context so the new provider sees what the previous provider
   // saw. We re-fetch messages here so it includes the user turn we just
   // appended (which is correct — the model sees its own user prompt as
   // "User: ..." within the history block, mirroring the live conversation).
-  const promptBody = isProviderMatch
+  let promptBody = isProviderMatch
     ? content
     : prependPriorHistory(agentId, content);
 
@@ -330,13 +332,33 @@ async function runChatTurn(agentId: string, content: string, source?: 'qa'): Pro
     },
   };
 
-  // 7) Create handle, register, run.
-  const state = adapter.createState(ctx);
-  const handle = adapter.createHandle(promptBody, ctx, state);
-  currentHandles.set(agentId, handle);
-
   try {
-    await handle.run();
+    let didStaleSessionRetry = false;
+    while (true) {
+      // 7) Create handle, register, run.
+      const state = adapter.createState(ctx);
+      const handle = adapter.createHandle(promptBody, ctx, state);
+      currentHandles.set(agentId, handle);
+      const result = await handle.run();
+      currentHandles.delete(agentId);
+
+      if (result?.recoverableError === 'stale-session' && !didStaleSessionRetry) {
+        didStaleSessionRetry = true;
+        console.warn(`[chat] stale ${provider} session for ${agentId}; clearing saved session and retrying fresh`);
+        agentService.clearCurrentSession(agentId);
+        sessionIdForAdapter = null;
+        promptBody = prependPriorHistory(agentId, content);
+        continue;
+      }
+      if (result?.recoverableError === 'stale-session') {
+        const sysMsg = agentService.addSystemMessage(
+          agentId,
+          `Claude session recovery failed: ${result.errorMessage || 'session was not found'}`,
+        );
+        broadcast({ type: 'message', message: sysMsg });
+      }
+      break;
+    }
   } catch (e: any) {
     console.error(`[chat] adapter run failed for ${agentId}:`, e);
     const sysMsg = agentService.addSystemMessage(agentId, `Agent run failed: ${e?.message || String(e)}`);

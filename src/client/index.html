@@ -1105,12 +1105,13 @@
     // ======================== COMPONENTS ========================
 
     // Tool message filter (Feature 7)
+    const TOOL_ANNOTATION_RE = /\n?\[(?:Using tool|exec|patch|Read|Write|Edit|Bash|Glob|Grep|LS|WebSearch|WebFetch):[^\]]+\]\n?/g;
     function filterToolMessages(text, show) {
       if (show) return text;
-      return text.replace(/\n?\[Using tool: [^\]]+\]\n?/g, '');
+      return text.replace(TOOL_ANNOTATION_RE, '');
     }
     function countToolMessages(text) {
-      const matches = text.match(/\[Using tool: [^\]]+\]/g);
+      const matches = text.match(TOOL_ANNOTATION_RE);
       return matches ? matches.length : 0;
     }
 
@@ -1839,6 +1840,12 @@
       const files = fileChanges || [];
       const thinking = thinkingOutput || '';
       const activity = isWorking ? agentActivity : null;
+      const rawContextLimit = Number(tokenUsage?.contextLimit || 0);
+      const rawContextTokens = Number(tokenUsage?.contextTokens || 0);
+      const safeContextLimit = rawContextLimit > 0 ? rawContextLimit : 0;
+      const safeContextTokens = safeContextLimit > 0 ? Math.max(0, Math.min(rawContextTokens, safeContextLimit)) : 0;
+      const contextRatio = safeContextLimit > 0 ? safeContextTokens / safeContextLimit : 0;
+      const contextLeft = safeContextLimit > 0 ? Math.max(0, safeContextLimit - safeContextTokens) : 0;
 
       // Status text for header (Feature 5)
       const statusTextMap = { idle: 'Idle', working: 'Working...', thinking: 'Thinking...', error: 'Error', stopped: 'Stopped' };
@@ -1900,14 +1907,14 @@
           )
         ),
         // Context bar + token info
-        tokenUsage && tokenUsage.contextLimit > 0 && e(React.Fragment, null,
-          e('div', { className: 'context-bar', title: 'Context: ' + Math.round((tokenUsage.contextTokens / tokenUsage.contextLimit) * 100) + '% used' },
-            e('div', { className: 'context-bar-fill' + (tokenUsage.contextTokens / tokenUsage.contextLimit > 0.9 ? ' high' : tokenUsage.contextTokens / tokenUsage.contextLimit > 0.7 ? ' medium' : ' low'), style: { width: Math.min(100, (tokenUsage.contextTokens / tokenUsage.contextLimit) * 100) + '%' } })
+        tokenUsage && safeContextLimit > 0 && e(React.Fragment, null,
+          e('div', { className: 'context-bar', title: 'Context: ' + Math.round(contextRatio * 100) + '% used' },
+            e('div', { className: 'context-bar-fill' + (contextRatio > 0.9 ? ' high' : contextRatio > 0.7 ? ' medium' : ' low'), style: { width: Math.round(contextRatio * 100) + '%' } })
           ),
           e('div', { className: 'token-info' },
-            e('span', null, Math.round(((tokenUsage.contextLimit - tokenUsage.contextTokens) / 1000)) + 'k left'),
+            e('span', null, Math.round(contextLeft / 1000) + 'k left'),
             e('span', null, '\u00B7'),
-            e('span', null, Math.round(tokenUsage.contextTokens / 1000) + 'k / ' + Math.round(tokenUsage.contextLimit / 1000) + 'k ctx'),
+            e('span', null, Math.round(safeContextTokens / 1000) + 'k / ' + Math.round(safeContextLimit / 1000) + 'k ctx'),
             tokenUsage.totalCostUsd > 0 && e('span', null, '\u00B7'),
             tokenUsage.totalCostUsd > 0 && e('span', null, '$' + tokenUsage.totalCostUsd.toFixed(2)),
             tokenUsage.numTurns > 0 && e('span', null, '\u00B7'),

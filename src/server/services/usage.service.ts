@@ -167,8 +167,10 @@ export const usageService = {
     costUsd?: number;
     turns?: number;
   }): void {
-    const inputTokens = Math.max(0, deltas.inputTokens ?? 0);
-    const outputTokens = Math.max(0, deltas.outputTokens ?? 0);
+    const usage = agentService.getTokenUsage(agentId);
+    const saneDeltaCeiling = Math.max(usage?.contextLimit || 200000, 200000) * 2;
+    const inputTokens = Math.min(Math.max(0, deltas.inputTokens ?? 0), saneDeltaCeiling);
+    const outputTokens = Math.min(Math.max(0, deltas.outputTokens ?? 0), saneDeltaCeiling);
     const costUsd = Math.max(0, deltas.costUsd ?? 0);
     const turns = Math.max(0, deltas.turns ?? 0);
     if (inputTokens === 0 && outputTokens === 0 && costUsd === 0 && turns === 0) return;

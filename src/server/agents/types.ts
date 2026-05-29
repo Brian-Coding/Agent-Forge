@@ -36,6 +36,8 @@ export interface AgentHandle {
 
 export interface AgentRunResult {
   lastAssistantMessage?: string;
+  recoverableError?: 'stale-session';
+  errorMessage?: string;
 }
 
 export interface AgentAdapter<State = unknown> {
