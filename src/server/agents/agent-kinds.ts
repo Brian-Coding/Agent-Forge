@@ -1,6 +1,6 @@
 /**
- * Provider/model registry. Adding a new model = one line here.
- * The UI's inline dropdowns read directly from `MODELS[provider]`.
+ * Provider/model registry. Static fallback used when dynamic CLI/API model
+ * discovery is unavailable.
  */
 
 export type ChatAgentKind = 'claude' | 'codex';
@@ -23,39 +23,40 @@ export interface AgentDefinition {
   defaultReasoningLevel?: string;
 }
 
-const CLAUDE_DEFINITION: AgentDefinition = {
-  kind: 'claude',
-  label: 'Claude',
-  supportsResume: true,
-  supportsReasoningLevel: false,
-  models: [
-    { id: 'claude-opus-4-7',         label: 'Opus 4.7' },
-    { id: 'claude-opus-4-6',         label: 'Opus 4.6' },
-    { id: 'claude-sonnet-4-6',       label: 'Sonnet 4.6' },
-    { id: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5' },
-  ],
-  defaultModel: 'claude-opus-4-7',
-};
-
-const CODEX_DEFINITION: AgentDefinition = {
-  kind: 'codex',
-  label: 'Codex',
-  supportsResume: true,
-  supportsReasoningLevel: true,
-  models: [
-    { id: 'gpt-5.5',           label: 'GPT-5.5' },
-    { id: 'gpt-5.4',           label: 'GPT-5.4' },
-    { id: 'gpt-5.2-codex',     label: 'GPT-5.2 Codex' },
-    { id: 'gpt-5.1-codex-max', label: 'GPT-5.1 Codex Max' },
-  ],
-  defaultModel: 'gpt-5.5',
-  reasoningLevels: ['low', 'medium', 'high', 'xhigh'],
-  defaultReasoningLevel: 'medium',
+export const STATIC_AGENT_DEFINITIONS: Record<ChatAgentKind, AgentDefinition> = {
+  claude: {
+    kind: 'claude',
+    label: 'Claude',
+    supportsResume: true,
+    supportsReasoningLevel: false,
+    models: [
+      { id: 'claude-opus-4-8',           label: 'Opus 4.8' },
+      { id: 'claude-opus-4-7',           label: 'Opus 4.7' },
+      { id: 'claude-opus-4-6',           label: 'Opus 4.6' },
+      { id: 'claude-sonnet-4-6',         label: 'Sonnet 4.6' },
+      { id: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5' },
+    ],
+    defaultModel: 'claude-opus-4-8',
+  },
+  codex: {
+    kind: 'codex',
+    label: 'Codex',
+    supportsResume: true,
+    supportsReasoningLevel: true,
+    models: [
+      { id: 'gpt-5.5',           label: 'GPT-5.5' },
+      { id: 'gpt-5.4',           label: 'GPT-5.4' },
+      { id: 'gpt-5.2-codex',     label: 'GPT-5.2 Codex' },
+      { id: 'gpt-5.1-codex-max', label: 'GPT-5.1 Codex Max' },
+    ],
+    defaultModel: 'gpt-5.5',
+    reasoningLevels: ['low', 'medium', 'high', 'xhigh'],
+    defaultReasoningLevel: 'medium',
+  },
 };
 
 export const AGENT_DEFINITIONS: Record<ChatAgentKind, AgentDefinition> = {
-  claude: CLAUDE_DEFINITION,
-  codex: CODEX_DEFINITION,
+  ...STATIC_AGENT_DEFINITIONS,
 };
 
 export function getAgentDefinition(kind: ChatAgentKind): AgentDefinition {

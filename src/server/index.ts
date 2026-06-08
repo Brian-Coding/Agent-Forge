@@ -18,6 +18,7 @@ import { websocketHandlers } from './ws';
 import { handleDirectories } from './routes/directories.routes';
 import { handleGetPorts, handleKillPort } from './routes/ports.routes';
 import { handleGitBranch } from './routes/git.routes';
+import { handleGetModels } from './routes/models.routes';
 import { handleListSimulators, handleBootSimulator, handleShutdownSimulator, handleEraseSimulator, handleCleanDerivedData } from './routes/simulator.routes';
 import { handleBrowserNavigate, handleBrowserScreenshot, handleBrowserClick, handleBrowserType, handleBrowserWaitForReady, handleBrowserConsoleGet, handleBrowserConsoleClear, handleBrowserStatus, handleBrowserEvaluate, handleQaScreenshot, handleAtlasFile } from './routes/browser.routes';
 
@@ -320,6 +321,7 @@ function startServer(preferredPort: number) {
           if (url.pathname === '/api/ports' && req.method === 'GET') return handleGetPorts(req);
           if (url.pathname === '/api/ports/kill' && req.method === 'POST') return handleKillPort(req);
           if (url.pathname === '/api/git-branch' && req.method === 'GET') return handleGitBranch(req);
+          if (url.pathname === '/api/models' && req.method === 'GET') return handleGetModels(req);
           if (url.pathname === '/api/simulators' && req.method === 'GET') return handleListSimulators(req);
           if (url.pathname === '/api/simulators/boot' && req.method === 'POST') return handleBootSimulator(req);
           if (url.pathname === '/api/simulators/shutdown' && req.method === 'POST') return handleShutdownSimulator(req);

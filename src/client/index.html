@@ -315,7 +315,9 @@
     .tool-hidden-count { font-size: 10px; color: var(--text-muted); padding: 2px 14px; font-style: italic; }
 
     /* Minimized panels (Feature 2) */
-    .panel-minimized { height: 36px; flex-shrink: 0; background: var(--bg-secondary); border-bottom: 1px solid var(--border); display: flex; align-items: center; padding: 0 12px; gap: 8px; cursor: pointer; }
+    .minimized-panels-bar { height: 36px; flex-shrink: 0; display: flex; min-width: 0; }
+    .panel-minimized { height: 36px; flex: 1 1 0; min-width: 0; background: var(--bg-secondary); border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); display: flex; align-items: center; padding: 0 12px; gap: 8px; cursor: pointer; }
+    .panel-minimized:last-child { border-right: none; }
     .panel-minimized:hover { background: var(--bg-tertiary); }
     .panel-minimized-name { font-size: 12px; font-weight: 500; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .panel-unread-badge { background: var(--accent); color: white; font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 8px; min-width: 16px; text-align: center; }
@@ -717,21 +719,20 @@
       return (template || '').replace(/\{args\}/g, SLASH_DEFAULT_ARGS).trim();
     }
 
-    // Provider + model definitions for the inline dropdowns under each agent's
-    // chat input. Mirrors the server-side AGENT_DEFINITIONS in
-    // src/server/agents/agent-kinds.ts — keep them in sync when adding models.
-    const AGENT_PROVIDERS = [
+    // Static fallback for model dropdowns; /api/models is authoritative when available.
+    const FALLBACK_AGENT_PROVIDERS = [
       {
         kind: 'claude',
         label: 'Claude',
         icon: '✦',
         models: [
+          { id: 'claude-opus-4-8',           label: 'opus 4.8' },
           { id: 'claude-opus-4-7',           label: 'opus 4.7' },
           { id: 'claude-opus-4-6',           label: 'opus 4.6' },
           { id: 'claude-sonnet-4-6',         label: 'sonnet 4.6' },
           { id: 'claude-haiku-4-5-20251001', label: 'haiku 4.5' },
         ],
-        defaultModel: 'claude-opus-4-7',
+        defaultModel: 'claude-opus-4-8',
         reasoningLevels: null,
       },
       {
@@ -749,7 +750,26 @@
         defaultReasoningLevel: 'medium',
       },
     ];
-    const PROVIDER_BY_KIND = Object.fromEntries(AGENT_PROVIDERS.map(p => [p.kind, p]));
+    let AGENT_PROVIDERS = FALLBACK_AGENT_PROVIDERS;
+    let PROVIDER_BY_KIND = Object.fromEntries(AGENT_PROVIDERS.map(p => [p.kind, p]));
+
+    function normalizeProviderCatalog(providersByKind) {
+      const withIcons = FALLBACK_AGENT_PROVIDERS.map(fallback => {
+        const provider = providersByKind?.[fallback.kind] || fallback;
+        return {
+          ...fallback,
+          ...provider,
+          icon: fallback.icon,
+          reasoningLevels: provider.reasoningLevels || fallback.reasoningLevels,
+          defaultReasoningLevel: provider.defaultReasoningLevel || fallback.defaultReasoningLevel,
+          models: Array.isArray(provider.models) && provider.models.length ? provider.models : fallback.models,
+          defaultModel: provider.defaultModel || fallback.defaultModel,
+        };
+      });
+      AGENT_PROVIDERS = withIcons;
+      PROVIDER_BY_KIND = Object.fromEntries(AGENT_PROVIDERS.map(p => [p.kind, p]));
+      return withIcons;
+    }
 
     // ======================== HOOKS ========================
 
@@ -792,6 +812,7 @@
       const [documents, setDocuments] = useState([]);
       const [settings, setSettings] = useState({});
       const [workspaces, setWorkspaces] = useState([]);
+      const [providerCatalog, setProviderCatalog] = useState(AGENT_PROVIDERS);
       const [statusStartTimes, setStatusStartTimes] = useState({});
       const [tokenUsage, setTokenUsage] = useState({});
       // Full cross-provider token report for the Tokens sidebar tab.
@@ -835,7 +856,16 @@
         function connect() {
           const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
           const ws = new WebSocket(protocol + '//' + location.host);
-          ws.onopen = () => { setConnected(true); reconnectAttempt.current = 0; };
+          ws.onopen = () => {
+            setConnected(true);
+            reconnectAttempt.current = 0;
+            fetch('/api/models')
+              .then(r => r.ok ? r.json() : null)
+              .then(data => {
+                if (data?.providers) setProviderCatalog(normalizeProviderCatalog(data.providers));
+              })
+              .catch(() => {});
+          };
           ws.onclose = () => {
             setConnected(false);
             const delay = Math.min(1000 * Math.pow(2, reconnectAttempt.current), 30000);
@@ -1050,7 +1080,7 @@
       }, [drainQueue, sendRaw]);
 
       return {
-        connected, agents, messages, liveOutput, queued, sharedContext, fileChanges, thinkingOutput, agentActivity, notes, documents, settings, workspaces, statusStartTimes, tokenUsage, usageReport, terminals, terminalOutput, errorToasts, qaUnread, qaLiveShots,
+        connected, agents, messages, liveOutput, queued, sharedContext, fileChanges, thinkingOutput, agentActivity, notes, documents, settings, workspaces, providerCatalog, statusStartTimes, tokenUsage, usageReport, terminals, terminalOutput, errorToasts, qaUnread, qaLiveShots,
         createAgent: (name, cwd, referencePaths, systemPrompt, workspaceId) => {
           sendRaw({ type: 'create_agent', name, cwd, referencePaths, systemPrompt, workspaceId });
         },
@@ -3601,6 +3631,9 @@
       const workspaceAgents = activeWorkspace ? agents.filter(a => a.workspaceId === activeWorkspace.id && !a.hideFromGrid) : [];
       const workspaceAgentIds = workspaceAgents.map(a => a.id);
       const workspaceAgentIdSet = new Set(workspaceAgentIds);
+      const workspaceAgentIdsKey = workspaceAgentIds.join('|');
+      const minimizedStorageKey = activeWorkspace ? `agent-forge:minimized-agents:${activeWorkspace.id}` : null;
+      const minimizedWorkspaceRef = useRef(null);
 
       const sameSlots = (a, b) => a.length === b.length && a.every((id, i) => id === b[i]);
       const normalizeGridSlots = (rawIds, excludedIds = minimizedAgents) => {
@@ -3675,6 +3708,29 @@
           if (data.home) window.__HOME_PATH = data.home;
         }).catch(() => {});
       }, []);
+
+      // Persist minimized agents per workspace so refreshes keep the compact bar.
+      useEffect(() => {
+        if (!activeWorkspace || minimizedWorkspaceRef.current === activeWorkspace.id) return;
+        minimizedWorkspaceRef.current = activeWorkspace.id;
+        try {
+          const raw = localStorage.getItem(`agent-forge:minimized-agents:${activeWorkspace.id}`);
+          const ids = raw ? JSON.parse(raw) : [];
+          setMinimizedAgents(new Set(Array.isArray(ids) ? ids.filter(id => workspaceAgentIdSet.has(id)) : []));
+        } catch {
+          setMinimizedAgents(new Set());
+        }
+      }, [activeWorkspace?.id, workspaceAgentIdsKey]);
+
+      useEffect(() => {
+        if (!minimizedStorageKey || minimizedWorkspaceRef.current !== activeWorkspace?.id) return;
+        try {
+          localStorage.setItem(
+            minimizedStorageKey,
+            JSON.stringify([...minimizedAgents].filter(id => workspaceAgentIdSet.has(id))),
+          );
+        } catch {}
+      }, [minimizedStorageKey, activeWorkspace?.id, minimizedAgents, workspaceAgentIdsKey]);
 
       // Track unread messages for minimized agents (Feature 2)
       const prevMessagesRef = useRef({});
@@ -3988,7 +4044,7 @@
           ),
 
           // Minimized panels bar (Feature 2)
-          !maximizedAgent && minimizedDisplayAgents.length > 0 && e('div', { style: { flexShrink: 0 } },
+          !maximizedAgent && minimizedDisplayAgents.length > 0 && e('div', { className: 'minimized-panels-bar' },
             minimizedDisplayAgents.map(agentId => {
               const agent = agents.find(a => a.id === agentId);
               if (!agent) return null;

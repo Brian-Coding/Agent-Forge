@@ -457,7 +457,9 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
             let acc = '';
             let pendingLine = '';
             let suppressRouterBlock = false;
+            let suppressSkillsLoaderBlock = false;
             let suppressedRouterLines = 0;
+            let suppressedSkillsLoaderLines = 0;
             try {
               while (true) {
                 const { done, value } = await reader.read();
@@ -476,11 +478,24 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
                     suppressedRouterLines = 0;
                     continue;
                   }
+                  if (/codex_core_skills::loader/i.test(line) && /failed to read/i.test(line)) {
+                    suppressSkillsLoaderBlock = true;
+                    suppressedSkillsLoaderLines = 0;
+                    continue;
+                  }
                   if (suppressRouterBlock) {
                     suppressedRouterLines++;
                     if (line.trim() === '' || suppressedRouterLines > 40) {
                       suppressRouterBlock = false;
                       suppressedRouterLines = 0;
+                    }
+                    continue;
+                  }
+                  if (suppressSkillsLoaderBlock) {
+                    suppressedSkillsLoaderLines++;
+                    if (/\(os error 3\)/i.test(line) || line.trim() === '' || suppressedSkillsLoaderLines > 8) {
+                      suppressSkillsLoaderBlock = false;
+                      suppressedSkillsLoaderLines = 0;
                     }
                     continue;
                   }
@@ -492,7 +507,9 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
               if (
                 pendingLine
                 && !suppressRouterBlock
+                && !suppressSkillsLoaderBlock
                 && !/codex_core::tools::router/i.test(pendingLine)
+                && !/codex_core_skills::loader/i.test(pendingLine)
                 && !STDERR_NOISE_PATTERNS.some(re => re.test(pendingLine))
               ) {
                 ctx.emitAgentEvent({ type: 'stderr', text: pendingLine });
