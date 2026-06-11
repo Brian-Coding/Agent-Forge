@@ -44,14 +44,21 @@ function estimateArgvBytes(args: string[]): number {
 // Every long-running child (claude, codex, terminal sessions that pass large
 // payloads) should go through this so a pathological prompt or doc-heavy
 // system context cannot panic the host process.
-export function safeSpawn(
-  args: string[],
-  opts: SpawnOptions.OptionsObject<'pipe', 'pipe', 'pipe'>,
-): Subprocess<'pipe', 'pipe', 'pipe'> {
+// Throw a catchable ArgvTooLongError if the serialized argv would exceed the
+// Windows command-line limit. Call this before any raw Bun.spawn whose stdio
+// shape differs from safeSpawn's pipe/pipe/pipe (e.g. terminal sessions).
+export function assertArgvWithinLimit(args: string[]): void {
   const bytes = estimateArgvBytes(args);
   if (bytes > MAX_ARGV_BYTES) {
     throw new ArgvTooLongError(bytes, MAX_ARGV_BYTES, args[0] ?? 'unknown');
   }
+}
+
+export function safeSpawn(
+  args: string[],
+  opts: SpawnOptions.OptionsObject<'pipe', 'pipe', 'pipe'>,
+): Subprocess<'pipe', 'pipe', 'pipe'> {
+  assertArgvWithinLimit(args);
   return Bun.spawn(args, opts) as Subprocess<'pipe', 'pipe', 'pipe'>;
 }
 

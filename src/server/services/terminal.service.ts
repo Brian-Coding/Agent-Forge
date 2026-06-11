@@ -1,6 +1,6 @@
 import type { Subprocess } from 'bun';
 import type { TerminalSession } from '../../shared/protocol';
-import { generateId, killProcessTree } from '../utils';
+import { generateId, killProcessTree, assertArgvWithinLimit } from '../utils';
 import { persistenceService } from './persistence.service';
 import { broadcast } from '../broadcast';
 
@@ -32,7 +32,9 @@ export const terminalService = {
     };
 
     try {
-      const proc = Bun.spawn(['sh', '-c', command], {
+      const spawnArgs = ['sh', '-c', command];
+      assertArgvWithinLimit(spawnArgs);
+      const proc = Bun.spawn(spawnArgs, {
         cwd,
         stdin: 'ignore',
         stdout: 'pipe',

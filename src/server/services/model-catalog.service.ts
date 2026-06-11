@@ -22,20 +22,10 @@ function dedupeModels(primary: readonly ModelOption[], fallback: readonly ModelO
   return out;
 }
 
-function mergeDefinition(
-  kind: ChatAgentKind,
-  discovered: readonly ModelOption[],
-  defaultModel?: string,
-): AgentDefinition {
+function mergeDefinition(kind: ChatAgentKind, discovered: readonly ModelOption[]): AgentDefinition {
   const fallback = STATIC_AGENT_DEFINITIONS[kind];
-  const models = dedupeModels(discovered, fallback.models);
-  return {
-    ...fallback,
-    models,
-    defaultModel: models.some(m => m.id === (defaultModel ?? fallback.defaultModel))
-      ? (defaultModel ?? fallback.defaultModel)
-      : fallback.defaultModel,
-  };
+  // fallback.models are always merged in, so fallback.defaultModel is always present.
+  return { ...fallback, models: dedupeModels(discovered, fallback.models) };
 }
 
 function normalizeOpenAiName(value: unknown): string {

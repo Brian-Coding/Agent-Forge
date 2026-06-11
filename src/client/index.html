@@ -7,6 +7,7 @@
   <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.2.4/purify.min.js" integrity="sha512-Y1p/STLW/B+l+MPJ5K5OdILMwJa2gMFXXmC/qsyDuGH9uc1MZMUo6/8YQUg9Ut4ns8KGCrCtt+58UwmNFFiVvA==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github-dark.min.css">
   <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"></script>
   <style>
@@ -720,12 +721,15 @@
     }
 
     // Static fallback for model dropdowns; /api/models is authoritative when available.
+    // Must be kept in lockstep with STATIC_AGENT_DEFINITIONS in src/server/agents/agent-kinds.ts.
     const FALLBACK_AGENT_PROVIDERS = [
       {
         kind: 'claude',
         label: 'Claude',
         icon: '✦',
         models: [
+          { id: 'claude-fable-5',            label: 'fable 5' },
+          { id: 'claude-mythos-5',           label: 'mythos 5' },
           { id: 'claude-opus-4-8',           label: 'opus 4.8' },
           { id: 'claude-opus-4-7',           label: 'opus 4.7' },
           { id: 'claude-opus-4-6',           label: 'opus 4.6' },
@@ -1146,6 +1150,25 @@
       return matches ? matches.length : 0;
     }
 
+    // Render untrusted markdown (agent output, doc content) to sanitized HTML.
+    // Agent responses can contain arbitrary HTML/JS; DOMPurify strips it before
+    // it reaches dangerouslySetInnerHTML. If DOMPurify failed to load, fall back
+    // to escaped plain text rather than raw HTML so a CDN miss can't reopen XSS.
+    function renderMarkdown(content) {
+      const src = content || '';
+      let html;
+      try {
+        html = marked.parse(src);
+      } catch {
+        html = src.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+        return html;
+      }
+      if (window.DOMPurify && typeof window.DOMPurify.sanitize === 'function') {
+        return window.DOMPurify.sanitize(html);
+      }
+      return src.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    }
+
     // Highlight search query in HTML string (outside of tags)
     function highlightInHtml(html, query) {
       if (!query) return html;
@@ -1179,11 +1202,9 @@
         }
       }, [content, searchQuery]);
       const html = useMemo(() => {
-        try {
-          let parsed = marked.parse(content);
-          if (searchQuery) parsed = highlightInHtml(parsed, searchQuery);
-          return parsed;
-        } catch { return content; }
+        let parsed = renderMarkdown(content);
+        if (searchQuery) parsed = highlightInHtml(parsed, searchQuery);
+        return parsed;
       }, [content, searchQuery]);
       return e('div', { ref, className: 'chat-turn-content', dangerouslySetInnerHTML: { __html: html } });
     });
@@ -3386,9 +3407,7 @@
         setCreating(false);
       };
 
-      const previewHtml = useMemo(() => {
-        try { return marked.parse(editContent || ''); } catch { return editContent; }
-      }, [editContent]);
+      const previewHtml = useMemo(() => renderMarkdown(editContent), [editContent]);
 
       const statusBadge = (doc) => {
         const status = doc.status || 'draft';

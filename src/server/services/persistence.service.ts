@@ -39,6 +39,11 @@ export const persistenceService = {
       renameSync(tmpFile, DATA_FILE);
     } catch (e) {
       console.error('Failed to persist data:', e);
+      // Re-arm so a later save() retries, and rethrow so saveNow() callers
+      // (notably the shutdown flush) learn the write failed instead of
+      // believing data was saved — common on OneDrive/Windows EPERM locks.
+      persistDirty = true;
+      throw e;
     }
   },
 
@@ -60,10 +65,12 @@ export const persistenceService = {
   async saveNow(): Promise<void> {
     if (persistTimer) { clearTimeout(persistTimer); persistTimer = null; }
     persistDirty = false;
-    persistChain = persistChain
-      .then(() => persistenceService._writeData())
-      .catch(e => console.error('Persist error:', e));
-    return persistChain;
+    // `write` reflects this write's real outcome and is returned to the caller
+    // (rejects on failure). persistChain is kept resolved so a failed write
+    // doesn't poison the serialized chain and block all future saves.
+    const write = persistChain.then(() => persistenceService._writeData());
+    persistChain = write.catch(() => {});
+    return write;
   },
 
   // --- PID tracking ---
@@ -159,6 +166,19 @@ export const persistenceService = {
       }
     } catch (e) {
       console.error('Failed to load persisted data:', e);
+      // The file exists but is unreadable/corrupt (e.g. truncated by a crash
+      // mid-write). Preserve it before the first mutation calls saveNow() and
+      // overwrites recoverable bytes with empty state.
+      try {
+        const { renameSync, existsSync } = await import('fs');
+        if (existsSync(DATA_FILE)) {
+          const backup = `${DATA_FILE}.corrupt-${Date.now()}`;
+          renameSync(DATA_FILE, backup);
+          console.error(`[persistence] preserved corrupt data file at ${backup}`);
+        }
+      } catch (backupErr) {
+        console.error('Failed to back up corrupt data file:', backupErr);
+      }
     }
     return null;
   },
