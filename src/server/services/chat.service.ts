@@ -33,6 +33,23 @@ interface TurnBuffer {
 }
 const turnBuffers: Map<string, TurnBuffer> = (globalThis as any).__chatTurnBuffers ??= new Map();
 
+// Per-agent epoch counter. Bumped by resetLock() (stop/kill/remove) so sends
+// queued behind a cancelled turn detect the bump when they finally dequeue
+// and no-op instead of firing a turn the user already abandoned. Replaces the
+// old "delete the lock chain" approach, which didn't actually cancel queued
+// continuations AND let a brand-new send run concurrently with the old
+// turn's teardown (clobbering turnBuffers/currentHandles).
+const turnEpochs: Map<string, number> = (globalThis as any).__chatTurnEpochs ??= new Map();
+
+// Inactivity watchdog: if an adapter subprocess emits nothing for this long,
+// kill it and finalize the turn — a hung CLI (network stall, auth prompt,
+// stdin deadlock) must not wedge the agent forever, since every subsequent
+// message queues behind the dead turn.
+const TURN_INACTIVITY_TIMEOUT_MS = (() => {
+  const fromEnv = parseInt(process.env.AGENT_TURN_INACTIVITY_MS || '', 10);
+  return Number.isFinite(fromEnv) && fromEnv > 0 ? fromEnv : 15 * 60_000;
+})();
+
 // --- Cross-provider history prepend ---------------------------------------
 // When the user swaps provider mid-conversation, the new provider has no
 // session yet, so we feed it the prior UI chat history as a delimited
@@ -295,6 +312,9 @@ async function runChatTurn(agentId: string, content: string, source?: 'qa'): Pro
   };
   turnBuffers.set(agentId, turn);
 
+  // Watchdog activity clock — any adapter event counts as liveness.
+  let lastActivity = Date.now();
+
   const ctx: AgentRunContext = {
     paneId: agentId,
     cwd: info.cwd,
@@ -317,6 +337,7 @@ async function runChatTurn(agentId: string, content: string, source?: 'qa'): Pro
       // future plugins (e.g. transcript logging, debug dumps).
     },
     emitAgentEvent(event: AgentEvent): void {
+      lastActivity = Date.now();
       handleEvent(agentId, event);
     },
     emitStatus(status: string): void {
@@ -335,12 +356,31 @@ async function runChatTurn(agentId: string, content: string, source?: 'qa'): Pro
   try {
     let didStaleSessionRetry = false;
     while (true) {
-      // 7) Create handle, register, run.
+      // 7) Create handle, register, run — under an inactivity watchdog so a
+      //    hung CLI can't wedge the agent (and its send queue) forever.
       const state = adapter.createState(ctx);
       const handle = adapter.createHandle(promptBody, ctx, state);
       currentHandles.set(agentId, handle);
-      const result = await handle.run();
-      currentHandles.delete(agentId);
+      lastActivity = Date.now();
+      const watchdog = setInterval(() => {
+        if (Date.now() - lastActivity > TURN_INACTIVITY_TIMEOUT_MS) {
+          console.warn(`[chat] ${provider} turn for ${agentId} silent for ${Math.round(TURN_INACTIVITY_TIMEOUT_MS / 60000)}min — killing hung process`);
+          if (!turn.abortReason) turn.abortReason = 'timeout';
+          try { handle.kill(); } catch (e) { console.error(`[chat] watchdog kill(${agentId}) failed:`, e); }
+          // Re-arm so a process that survives the kill gets re-killed next
+          // window instead of being hammered every 30s tick.
+          lastActivity = Date.now();
+        }
+      }, 30_000);
+
+      let result;
+      try {
+        result = await handle.run();
+      } finally {
+        clearInterval(watchdog);
+        // Identity-guarded: never clobber a newer turn's handle.
+        if (currentHandles.get(agentId) === handle) currentHandles.delete(agentId);
+      }
 
       if (result?.recoverableError === 'stale-session' && !didStaleSessionRetry) {
         didStaleSessionRetry = true;
@@ -348,12 +388,16 @@ async function runChatTurn(agentId: string, content: string, source?: 'qa'): Pro
         agentService.clearCurrentSession(agentId);
         sessionIdForAdapter = null;
         promptBody = prependPriorHistory(agentId, content);
+        // Drop anything streamed before the resume failure surfaced, so the
+        // retried turn's output isn't duplicated in the flushed message.
+        turn.accumulatedText = '';
+        turn.lastResultEmitted = null;
         continue;
       }
       if (result?.recoverableError === 'stale-session') {
         const sysMsg = agentService.addSystemMessage(
           agentId,
-          `Claude session recovery failed: ${result.errorMessage || 'session was not found'}`,
+          `${provider === 'codex' ? 'Codex' : 'Claude'} session recovery failed: ${result.errorMessage || 'session was not found'}`,
         );
         broadcast({ type: 'message', message: sysMsg });
       }
@@ -364,11 +408,11 @@ async function runChatTurn(agentId: string, content: string, source?: 'qa'): Pro
     const sysMsg = agentService.addSystemMessage(agentId, `Agent run failed: ${e?.message || String(e)}`);
     broadcast({ type: 'message', message: sysMsg });
   } finally {
-    currentHandles.delete(agentId);
-
     // Flush the final assistant message. Prefer streamed text-delta accumulation;
     // fall back to the result event's text if nothing streamed (rare path).
-    const turnState = turnBuffers.get(agentId);
+    // Use the local `turn` (not the map) so this turn always flushes its own
+    // buffer even if a newer turn has since replaced the map entry.
+    const turnState = turn;
     const streamed = (turnState?.accumulatedText ?? '').trim();
     const resultText = (turnState?.lastResultEmitted ?? '').trim();
     let finalText = streamed.length >= resultText.length ? streamed : resultText;
@@ -396,12 +440,17 @@ async function runChatTurn(agentId: string, content: string, source?: 'qa'): Pro
       usageService.record(agentId, provider, turnState.turnUsage);
     }
 
-    turnBuffers.delete(agentId);
+    // Identity-guarded: never delete a newer turn's buffer.
+    if (turnBuffers.get(agentId) === turn) turnBuffers.delete(agentId);
 
     await documentService.releaseLocksForAgent(agentId);
-    agentService.setStatus(agentId, 'idle');
+    // If a newer turn is already running (stop + immediate resend race),
+    // don't clobber its status or fire idle hooks under it — it will run
+    // its own finalization when it completes.
+    const newerTurnRunning = currentHandles.has(agentId);
+    if (!newerTurnRunning) agentService.setStatus(agentId, 'idle');
     await persistenceService.saveNow();
-    await agentService.notifyIdle(agentId);
+    if (!newerTurnRunning) await agentService.notifyIdle(agentId);
   }
 }
 
@@ -414,11 +463,19 @@ export const chatService = {
    * concurrent calls don't interleave.
    */
   async sendMessage(agentId: string, content: string, source?: 'qa'): Promise<void> {
+    // Capture the epoch at enqueue time. If resetLock() bumps it while this
+    // send waits in the queue (user hit Stop), the send no-ops on dequeue.
+    const epochAtEnqueue = turnEpochs.get(agentId) ?? 0;
+    const runIfCurrent = () => {
+      if ((turnEpochs.get(agentId) ?? 0) !== epochAtEnqueue) {
+        console.warn(`[chat] dropping queued message for ${agentId} — agent was stopped while it waited`);
+        return Promise.resolve();
+      }
+      return runChatTurn(agentId, content, source);
+    };
     const prev = sendLocks.get(agentId) ?? Promise.resolve();
-    const current = prev.then(
-      () => runChatTurn(agentId, content, source),
-      () => runChatTurn(agentId, content, source),
-    ).catch(e => { console.error(`[chat] sendMessage(${agentId}) error:`, e); });
+    const current = prev.then(runIfCurrent, runIfCurrent)
+      .catch(e => { console.error(`[chat] sendMessage(${agentId}) error:`, e); });
     sendLocks.set(agentId, current);
     return current;
   },
@@ -446,10 +503,30 @@ export const chatService = {
   },
 
   /**
-   * Drop the per-agent sendLock chain. Called from agent.service when stop /
-   * kill / remove runs so queued sends behind a cancelled turn don't fire.
+   * Cancel queued sends for an agent. Called from agent.service when stop /
+   * kill / remove runs. Bumps the epoch so already-queued continuations
+   * no-op on dequeue; deliberately does NOT delete the lock chain — new sends
+   * must stay serialized behind the cancelled turn's teardown, otherwise they
+   * race it for the shared turn buffer and handle registry.
    */
   resetLock(agentId: string): void {
-    sendLocks.delete(agentId);
+    turnEpochs.set(agentId, (turnEpochs.get(agentId) ?? 0) + 1);
+  },
+
+  /** True if an adapter handle is currently running a turn for this agent. */
+  hasActiveTurn(agentId: string): boolean {
+    return currentHandles.has(agentId);
+  },
+
+  /**
+   * Wait (capped) for all in-flight turns to finish unwinding. Used at
+   * shutdown so killed turns' finally blocks (which flush partial assistant
+   * messages and persist) get a chance to run before the final save.
+   */
+  async waitForAllTurns(capMs = 3000): Promise<void> {
+    await Promise.race([
+      Promise.allSettled([...sendLocks.values()]),
+      new Promise<void>(resolve => setTimeout(resolve, capMs)),
+    ]);
   },
 };

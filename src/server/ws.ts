@@ -34,6 +34,11 @@ setInterval(() => {
 // Handle incoming WebSocket messages
 async function handleMessage(ws: ServerWebSocket<unknown>, message: ClientMessage) {
   switch (message.type) {
+    case 'ping': {
+      sendTo(ws, { type: 'pong' });
+      break;
+    }
+
     case 'create_agent': {
       try {
         const agent = await agentService.createAgent(

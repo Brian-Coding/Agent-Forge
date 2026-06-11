@@ -294,7 +294,10 @@ export type ClientMessage =
   | { type: 'kill_terminal'; id: string }
   | { type: 'get_terminals' }
   // Kill all
-  | { type: 'kill_all' };
+  | { type: 'kill_all' }
+  // App-level heartbeat — browsers can't send protocol-level pings, so the
+  // client uses this to detect half-open sockets (e.g. after sleep/resume).
+  | { type: 'ping' };
 
 // Server -> Client messages
 export type ServerMessage =
@@ -341,7 +344,9 @@ export type ServerMessage =
   | { type: 'terminals_list'; terminals: TerminalSession[] }
   | { type: 'terminal_created'; terminal: TerminalSession }
   | { type: 'terminal_output'; terminalId: string; content: string }
-  | { type: 'terminal_exited'; terminalId: string; exitCode: number | null };
+  | { type: 'terminal_exited'; terminalId: string; exitCode: number | null }
+  // Heartbeat reply
+  | { type: 'pong' };
 
 // Persistence types
 export interface PersistedData {

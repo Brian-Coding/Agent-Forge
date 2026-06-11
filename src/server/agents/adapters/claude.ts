@@ -1,5 +1,5 @@
 import { existsSync } from 'fs';
-import { ArgvTooLongError, createCliEnv, resolveCliBinary, safeSpawn } from '../../utils';
+import { ArgvTooLongError, createCliEnv, killProcessTree, resolveCliBinary, safeSpawn } from '../../utils';
 import { persistenceService } from '../../services/persistence.service';
 import { summarizeToolInput, type AgentEvent } from '../events';
 import { drainStreamToString, parseNdjsonLines, flushNdjsonLeftover } from '../stream-utils';
@@ -106,6 +106,12 @@ export const claudeAdapter: AgentAdapter<undefined> = {
 
           if (proc.pid) persistenceService.trackPid(proc.pid);
 
+          // A stop/kill may have landed between handle registration and the
+          // spawn above — honor it now instead of running a full orphan turn.
+          if (killed) {
+            void killProcessTree(proc);
+          }
+
           // Feed the prompt via stdin then close, so the CLI processes a single turn
           // and exits. This matches the agent-forge convention; --print + stdin is the
           // shape Claude CLI expects for non-interactive batch use.
@@ -113,7 +119,10 @@ export const claudeAdapter: AgentAdapter<undefined> = {
             proc.stdin.write(prompt + '\n');
             proc.stdin.end();
           } catch (e) {
-            console.warn('[claude] stdin write failed:', e);
+            // If stdin is broken the CLI would sit waiting for input forever —
+            // kill it so the turn unwinds instead of wedging the agent.
+            console.warn('[claude] stdin write failed; killing process:', e);
+            void killProcessTree(proc);
           }
 
           // Stream stderr live so the UI can show error output as it arrives.
@@ -129,6 +138,9 @@ export const claudeAdapter: AgentAdapter<undefined> = {
                 const text = decoder.decode(value, { stream: true });
                 if (text) {
                   acc += text;
+                  // Keep only the tail — a chatty/looping CLI can otherwise
+                  // balloon memory and later broadcast a megabyte error blob.
+                  if (acc.length > 64_000) acc = acc.slice(-64_000);
                   ctx.emitAgentEvent({ type: 'stderr', text });
                 }
               }
@@ -161,6 +173,12 @@ export const claudeAdapter: AgentAdapter<undefined> = {
               if (done) break;
               leftover += decoder.decode(value, { stream: true });
               leftover = parseNdjsonLines(leftover, handleEvent);
+              // A single newline-free line growing without bound means the CLI
+              // is emitting something we'll never parse — drop it rather than OOM.
+              if (leftover.length > 10_000_000) {
+                console.error('[claude] dropping >10MB unterminated stdout line');
+                leftover = '';
+              }
             }
             flushNdjsonLeftover(leftover, handleEvent);
           } finally {
@@ -182,8 +200,13 @@ export const claudeAdapter: AgentAdapter<undefined> = {
               errorMessage: stderrText,
             };
           }
-          if (!killed && exitCode !== 0 && stderrText) {
-            ctx.emitAgentEvent({ type: 'error', message: stderrText });
+          if (!killed && exitCode !== 0) {
+            // Even with empty stderr the user must see that the turn failed —
+            // otherwise a crash looks like "Claude said nothing".
+            ctx.emitAgentEvent({
+              type: 'error',
+              message: stderrText || `Claude CLI exited with code ${exitCode} and no output`,
+            });
           }
 
           ctx.emitAgentEvent({
@@ -203,23 +226,29 @@ export const claudeAdapter: AgentAdapter<undefined> = {
       },
 
       stop() {
+        // Set killed even before proc exists — run() checks it post-spawn so a
+        // stop landing in the spawn window doesn't produce an orphan turn.
+        killed = true;
         if (!proc) return;
         try {
-          // SIGINT lets the CLI flush + exit gracefully. If it ignores us, the
-          // event loop will still resolve when the kernel reaps it. We do NOT
-          // escalate to SIGKILL here — that's what kill() is for.
-          killed = true;
-          proc.kill('SIGINT');
+          if (process.platform === 'win32') {
+            // SIGINT isn't deliverable on Windows; Bun's kill() only terminates
+            // the npm .cmd shim, leaving the real CLI running. Kill the tree.
+            void killProcessTree(proc);
+          } else {
+            // SIGINT lets the CLI flush + exit gracefully on POSIX.
+            proc.kill('SIGINT');
+          }
         } catch (e) {
           console.warn('[claude] stop() failed:', e);
         }
       },
 
       kill() {
+        killed = true;
         if (!proc) return;
         try {
-          killed = true;
-          proc.kill();
+          void killProcessTree(proc);
         } catch (e) {
           console.warn('[claude] kill() failed:', e);
         }

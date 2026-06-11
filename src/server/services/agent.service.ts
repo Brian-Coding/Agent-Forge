@@ -193,8 +193,9 @@ async function _stopAgentImpl(agentId: string, reason: 'user' | 'timeout' | 'sys
   clearAgentTimeouts(agentId);
   // Note: chat.service's finally block releases plan locks + sets status to
   // 'idle' + fires onIdle hooks after the adapter unwinds. We don't repeat
-  // those side effects here. If no turn is in flight, set status defensively.
-  if (agent.info.status !== 'idle') {
+  // those side effects here — only run the defensive idle path when no turn
+  // is actually in flight, otherwise QA/Atlas idle hooks fire twice per stop.
+  if (agent.info.status !== 'idle' && !chatService.hasActiveTurn(agentId)) {
     agent.info.status = 'idle';
     broadcast({ type: 'agent_updated', agent: agent.info });
     await documentService.releaseLocksForAgent(agentId);
@@ -636,11 +637,10 @@ export const agentService = {
       clearAgentTimeouts(agentId);
       chatService.kill(agentId);
     }
-    // Adapters own their subprocess lifetime now — the kill() calls above tell
-    // each in-flight handle to terminate. PID tracking is handled inside each
-    // adapter, so the persistence layer's pids.json is kept consistent without
-    // any work here.
-    await new Promise<void>(resolve => setTimeout(resolve, 200));
+    // Wait (capped) for killed turns to finish unwinding — their finally
+    // blocks flush partial assistant messages into history, which must land
+    // before index.ts's final saveNow() or those messages are lost.
+    await chatService.waitForAllTurns(3000);
   },
 
   async killAllProcesses(): Promise<{ success: boolean; message: string }> {

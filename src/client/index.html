@@ -4,12 +4,12 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Agent Forge</title>
-  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
-  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
-  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" integrity="sha384-DGyLxAyjq0f9SPpVevD6IgztCFlnMF6oW/XQGmfe+IsZ8TqEiDrcHkMLKI6fiB/Z" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" integrity="sha384-gTGxhz21lVGYNMcdJOyq01Edg0jhn/c22nsx0kyqP0TxaV5WVdsSH1fSDUf5YJj1" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js" integrity="sha384-948ahk4ZmxYVYOc+rxN1H2gM1EJ2Duhp7uHtZ4WSLkV4Vtx5MUqnV+l7u9B+jFv+" crossorigin="anonymous"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.2.4/purify.min.js" integrity="sha512-Y1p/STLW/B+l+MPJ5K5OdILMwJa2gMFXXmC/qsyDuGH9uc1MZMUo6/8YQUg9Ut4ns8KGCrCtt+58UwmNFFiVvA==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github-dark.min.css">
-  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github-dark.min.css" integrity="sha384-wH75j6z1lH97ZOpMOInqhgKzFkAInZPPSPlZpYKYTOqsaizPvhQZmAtLcPKXpLyH" crossorigin="anonymous">
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js" integrity="sha384-F/bZzf7p3Joyp5psL90p/p89AZJsndkSoGwRpXcZhleCWhd8SnRuoYo4d0yirjJp" crossorigin="anonymous"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
@@ -857,12 +857,34 @@
       const reconnectAttempt = useRef(0);
 
       useEffect(() => {
+        // disposed guards against the cleanup race: closing the socket fires
+        // onclose, which would otherwise schedule a reconnect for a dead
+        // component (leaked timer + setState after unmount).
+        let disposed = false;
+        let reconnectTimer = null;
+        let heartbeatTimer = null;
+        let lastServerActivity = Date.now();
         function connect() {
+          if (disposed) return;
           const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
           const ws = new WebSocket(protocol + '//' + location.host);
           ws.onopen = () => {
             setConnected(true);
             reconnectAttempt.current = 0;
+            lastServerActivity = Date.now();
+            // App-level heartbeat: after Windows sleep/resume the socket can be
+            // half-open (looks connected, delivers nothing). Ping every 15s and
+            // force-close if the server has been silent for 45s — onclose then
+            // drives the normal reconnect path.
+            heartbeatTimer = setInterval(() => {
+              if (Date.now() - lastServerActivity > 45000) {
+                try { ws.close(); } catch {}
+                return;
+              }
+              if (ws.readyState === WebSocket.OPEN) {
+                try { ws.send(JSON.stringify({ type: 'ping' })); } catch {}
+              }
+            }, 15000);
             fetch('/api/models')
               .then(r => r.ok ? r.json() : null)
               .then(data => {
@@ -872,16 +894,32 @@
           };
           ws.onclose = () => {
             setConnected(false);
+            if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
+            if (disposed) return;
             const delay = Math.min(1000 * Math.pow(2, reconnectAttempt.current), 30000);
             reconnectAttempt.current++;
-            setTimeout(connect, delay);
+            reconnectTimer = setTimeout(connect, delay);
           };
           ws.onmessage = (event) => {
-            const msg = JSON.parse(event.data);
+            let msg;
+            try {
+              msg = JSON.parse(event.data);
+            } catch (err) {
+              console.warn('Dropping malformed WS frame:', err);
+              return;
+            }
+            lastServerActivity = Date.now();
             switch (msg.type) {
+              case 'pong':
+                break;
               case 'agents_list':
                 setAgents(msg.agents);
-                msg.agents.forEach(a => sendRaw({ type: 'get_history', agentId: a.id }));
+                msg.agents.forEach(a => {
+                  sendRaw({ type: 'get_history', agentId: a.id });
+                  // Drain messages queued while disconnected once we know the
+                  // agent is actually idle (reconnect resync path).
+                  if (a.status === 'idle') drainQueue(a.id);
+                });
                 sendRaw({ type: 'get_shared_context' });
                 break;
               case 'agent_created':
@@ -954,12 +992,17 @@
               case 'agent_activity':
                 setAgentActivity(prev => ({ ...prev, [msg.agentId]: { label: msg.label, timestamp: msg.timestamp } }));
                 break;
-              case 'thinking_output':
-                setThinkingOutput(prev => ({
-                  ...prev,
-                  [msg.agentId]: (prev[msg.agentId] || '') + msg.content
-                }));
+              case 'thinking_output': {
+                const MAX_THINKING_OUTPUT = 512000; // same 500KB cap as live output
+                setThinkingOutput(prev => {
+                  let updated = (prev[msg.agentId] || '') + msg.content;
+                  if (updated.length > MAX_THINKING_OUTPUT) {
+                    updated = updated.slice(updated.length - MAX_THINKING_OUTPUT);
+                  }
+                  return { ...prev, [msg.agentId]: updated };
+                });
                 break;
+              }
               case 'shared_context':
                 setSharedContext(msg.content);
                 break;
@@ -1080,7 +1123,12 @@
           wsRef.current = ws;
         }
         connect();
-        return () => wsRef.current?.close();
+        return () => {
+          disposed = true;
+          if (reconnectTimer) clearTimeout(reconnectTimer);
+          if (heartbeatTimer) clearInterval(heartbeatTimer);
+          wsRef.current?.close();
+        };
       }, [drainQueue, sendRaw]);
 
       return {
@@ -1095,7 +1143,12 @@
         clearQaUnread: (sourceAgentId) => setQaUnread(prev => { if (!prev[sourceAgentId]) return prev; const { [sourceAgentId]: _, ...rest } = prev; return rest; }),
         sendMessage: (agentId, content) => {
           const agent = agentsRef.current.find(a => a.id === agentId);
-          if (agent && (agent.status === 'working' || agent.status === 'thinking')) {
+          const socketOpen = wsRef.current?.readyState === WebSocket.OPEN;
+          // Queue when the agent is busy OR the socket is down — sendRaw
+          // silently drops frames on a closed socket, which used to destroy
+          // messages typed while disconnected. Queued messages drain on
+          // reconnect (agents_list) / when the agent goes idle.
+          if (!socketOpen || (agent && (agent.status === 'working' || agent.status === 'thinking'))) {
             setQueued(prev => ({ ...prev, [agentId]: [...(prev[agentId] || []), content] }));
           } else {
             sendRaw({ type: 'send_message', agentId, content });
@@ -1724,14 +1777,18 @@
         prevStatus.current = agent?.status;
       }, [agent?.status]);
 
-      // Focus input on window focus and visibility change (Feature 8)
+      // Focus input on window focus and visibility change (Feature 8).
+      // Gated on isFocused — with multiple panels mounted, every panel
+      // registers this listener, and without the gate whichever mounted last
+      // steals focus from the panel the user was actually working in.
       useEffect(() => {
+        if (!isFocused) return;
         const focusInput = () => { if (inputRef.current) inputRef.current.focus(); };
         window.addEventListener('focus', focusInput);
         const onVis = () => { if (!document.hidden) focusInput(); };
         document.addEventListener('visibilitychange', onVis);
         return () => { window.removeEventListener('focus', focusInput); document.removeEventListener('visibilitychange', onVis); };
-      }, []);
+      }, [isFocused]);
 
       const handleSubmit = () => {
         if (!agent) return;
@@ -1783,6 +1840,10 @@
           }
           if (ev.key === 'Escape') {
             ev.preventDefault();
+            // Without stopPropagation the global Escape handler also fires and
+            // stops the focused agent's in-flight turn — closing an autocomplete
+            // popup must never kill work.
+            ev.stopPropagation();
             setInput('');
             return;
           }
@@ -1955,7 +2016,15 @@
             e('button', { className: 'panel-btn', onClick: () => { setSearchVisible(prev => !prev); setTimeout(() => searchInputRef.current?.focus(), 50); }, title: 'Search (Ctrl+F)' }, '\uD83D\uDD0D'),
             isWorking && e('button', { className: 'panel-btn panel-btn-stop', onClick: () => onStop(agent.id), title: 'Stop current turn (Esc)' }, 'Stop turn'),
             !isMaximized && onMinimize && e('button', { className: 'panel-btn panel-minimize-btn', onClick: () => onMinimize(agent.id), title: 'Minimize' }, '_'),
-            e('button', { className: 'panel-btn', onClick: () => onClearHistory(agent.id), title: 'Clear chat' }, 'Clear'),
+            e('button', {
+              className: 'panel-btn',
+              onClick: () => {
+                if (confirm('Clear the entire chat history for "' + agent.name + '"? This also resets the provider session and cannot be undone.')) {
+                  onClearHistory(agent.id);
+                }
+              },
+              title: 'Clear chat',
+            }, 'Clear'),
           )
         ),
         // Context bar + token info

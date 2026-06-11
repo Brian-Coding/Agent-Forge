@@ -290,6 +290,40 @@ await acquireProcessLock();
 
 await init();
 
+// --- Network guard --------------------------------------------------------
+// The server executes code on behalf of whoever can reach it (agents run
+// with permissions bypassed, terminals run arbitrary shell commands), so the
+// HTTP/WS surface must not be reachable cross-origin. Two layers:
+//   1. Bind to loopback by default (HOST env opts into LAN exposure).
+//   2. Reject requests whose Host/Origin isn't loopback — blocks DNS
+//      rebinding and cross-site WebSocket hijacking from malicious pages
+//      running in the user's own browser.
+
+const bindHostname = process.env.HOST || '127.0.0.1';
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
+// If the user explicitly bound a non-loopback interface, they opted into LAN
+// access — skip the strict Host check (Origin check still applies).
+const enforceLoopbackHost = LOOPBACK_HOSTS.has(bindHostname);
+
+function isRequestAllowed(req: Request): boolean {
+  try {
+    if (enforceLoopbackHost) {
+      const host = new URL(req.url).hostname;
+      if (!LOOPBACK_HOSTS.has(host)) return false;
+    }
+    // Browsers attach Origin on WS upgrades and cross-origin fetches.
+    // Non-browser clients (agent callbacks, curl) send none — allowed.
+    const origin = req.headers.get('origin');
+    if (origin) {
+      const originHost = new URL(origin).hostname;
+      if (!LOOPBACK_HOSTS.has(originHost)) return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // --- Server bind with port fallback -------------------------------------
 // Try preferredPort first; if Windows has the socket locked (typically an
 // orphan our scan missed, or a non-bun process), walk forward through
@@ -304,11 +338,16 @@ function startServer(preferredPort: number) {
     try {
       return Bun.serve({
         port,
+        hostname: bindHostname,
         routes: {
           '/': index,
         },
         fetch(req, server) {
           const url = new URL(req.url);
+
+          if (!isRequestAllowed(req)) {
+            return new Response('Forbidden', { status: 403 });
+          }
 
           if (req.headers.get('upgrade') === 'websocket') {
             const success = server.upgrade(req, { data: {} });
