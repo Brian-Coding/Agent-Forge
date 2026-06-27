@@ -1,5 +1,5 @@
 import { existsSync } from 'fs';
-import { ArgvTooLongError, resolveCliBinary, safeSpawn } from '../../utils';
+import { ArgvTooLongError, createCliEnv, resolveCliBinary, safeSpawn } from '../../utils';
 import { persistenceService } from '../../services/persistence.service';
 import { summarizeToolInput, type AgentEvent } from '../events';
 import { drainStreamToString, parseNdjsonLines, flushNdjsonLeftover } from '../stream-utils';
@@ -43,8 +43,9 @@ export const claudeAdapter: AgentAdapter<undefined> = {
 
     // Resolve to absolute path so Bun.spawn doesn't have to probe PATHEXT
     // from the agent's cwd (which fails on Windows for npm shim files).
+    const claudeBin = resolveCliBinary('claude');
     const args: string[] = [
-      resolveCliBinary('claude'),
+      claudeBin,
       '--print',
       '--output-format', 'stream-json',
       '--verbose',
@@ -74,14 +75,15 @@ export const claudeAdapter: AgentAdapter<undefined> = {
     return {
       async run() {
         try {
-          // CLAUDECODE env var leaks "I'm running inside Claude Code already" signals
-          // that confuse a freshly-spawned Claude CLI — strip it. The rest of process.env
-          // (PATH, USERPROFILE, etc.) is preserved so the CLI can find its bin shims and
-          // home-dir config on Windows.
-          const env: Record<string, string> = {};
-          for (const [k, v] of Object.entries(process.env)) {
-            if (k === 'CLAUDECODE') continue;
-            if (typeof v === 'string') env[k] = v;
+          // CLAUDECODE leaks "already inside Claude Code" signals. createCliEnv
+          // strips it and augments PATH for GUI/editor-launched servers.
+          const env = createCliEnv();
+          const authError = await getClaudeAuthError(claudeBin, env);
+          if (authError) {
+            ctx.emitAgentEvent({ type: 'error', message: authError });
+            ctx.emitSystemMessage(authError);
+            ctx.emitAgentEvent({ type: 'finish', reason: 'auth-error' });
+            return undefined;
           }
 
           try {
@@ -225,6 +227,87 @@ export const claudeAdapter: AgentAdapter<undefined> = {
     };
   },
 };
+
+const CLAUDE_AUTH_CHECK_TIMEOUT_MS = 5_000;
+
+async function getClaudeAuthError(claudeBin: string, env: Record<string, string>): Promise<string | null> {
+  if (env.AGENT_FORGE_SKIP_CLAUDE_AUTH_CHECK === '1') return null;
+
+  // API-key/token environments do not need Claude Code's persisted first-party login.
+  if (env.ANTHROPIC_API_KEY || env.ANTHROPIC_AUTH_TOKEN || env.CLAUDE_CODE_OAUTH_TOKEN) {
+    return null;
+  }
+
+  try {
+    const result = await getClaudeAuthStatus(claudeBin, env);
+    if (!result) return null;
+
+    const { status, detail } = result;
+
+    if (status?.loggedIn === true) return null;
+    if (status?.loggedIn !== false) return null;
+
+    return [
+      'Claude Code is not authenticated for non-interactive Agent Forge runs.',
+      `Fresh CLI auth check failed (${detail}).`,
+      'Run `claude auth login` in a normal terminal, then verify `claude auth status` reports loggedIn=true.',
+      'If you use a Claude subscription token instead, run `claude setup-token`; if you use the Anthropic API, start Agent Forge with `ANTHROPIC_API_KEY` set.',
+    ].join('\n');
+  } catch (e: any) {
+    console.warn('[claude] auth status check skipped:', e?.message || e);
+    return null;
+  }
+}
+
+async function getClaudeAuthStatus(
+  claudeBin: string,
+  env: Record<string, string>,
+): Promise<{ status: any; detail: string } | null> {
+  let timedOut = false;
+  const proc = Bun.spawn([claudeBin, 'auth', 'status'], {
+    stdout: 'pipe',
+    stderr: 'pipe',
+    env,
+  });
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    try { proc.kill(); } catch {}
+  }, CLAUDE_AUTH_CHECK_TIMEOUT_MS);
+
+  try {
+    const [, stdout] = await Promise.all([
+      proc.exited,
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ]);
+
+    if (timedOut) {
+      console.warn(`[claude] auth status check timed out after ${CLAUDE_AUTH_CHECK_TIMEOUT_MS}ms`);
+      return null;
+    }
+
+    let status: any = null;
+    try {
+      status = stdout ? JSON.parse(stdout) : null;
+    } catch {
+      console.warn('[claude] auth status returned non-JSON output');
+      return null;
+    }
+
+    if (!status || typeof status !== 'object') return null;
+
+    return {
+      status,
+      detail: `status=${JSON.stringify({
+        loggedIn: status.loggedIn,
+        authMethod: status.authMethod,
+        apiProvider: status.apiProvider,
+      })}`,
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 
 /**
  * Translate a single Claude stream-json event into one or more normalized

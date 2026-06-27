@@ -1,4 +1,4 @@
-import { resolveCliBinary } from '../utils';
+import { createCliEnv, resolveCliBinary } from '../utils';
 import {
   AGENT_DEFINITIONS,
   STATIC_AGENT_DEFINITIONS,
@@ -37,6 +37,7 @@ async function discoverCodexModels(): Promise<ModelOption[]> {
     const proc = Bun.spawn([resolveCliBinary('codex'), 'debug', 'models'], {
       stdout: 'pipe',
       stderr: 'pipe',
+      env: createCliEnv(),
     });
     const [exitCode, stdout] = await Promise.all([
       proc.exited,

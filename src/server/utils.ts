@@ -107,9 +107,74 @@ export async function killProcessTree(proc: Subprocess<any, any, any>): Promise<
 //   * Cache per-name forever — npm/bun bin paths don't move during a run
 
 import { existsSync as _existsSync } from 'fs';
-import { join as _pathJoin, sep as _pathSep } from 'path';
+import { homedir as _homedir } from 'os';
+import { join as _pathJoin } from 'path';
 
 const _binaryCache: Map<string, string> = (globalThis as any).__cliBinaryCache ??= new Map<string, string>();
+
+function _pathDelimiter(isWin: boolean): string {
+  return isWin ? ';' : ':';
+}
+
+function _defaultCliDirs(isWin: boolean): string[] {
+  if (isWin) return [];
+
+  const home = _homedir();
+  return [
+    _pathJoin(home, '.local', 'bin'),
+    _pathJoin(home, '.bun', 'bin'),
+    '/opt/homebrew/bin',
+    '/opt/homebrew/sbin',
+    '/usr/local/bin',
+    '/usr/bin',
+    '/bin',
+    '/usr/sbin',
+    '/sbin',
+  ];
+}
+
+function _cliSearchDirs(): string[] {
+  const isWin = process.platform === 'win32';
+  const pathRaw = process.env.PATH ?? process.env.Path ?? '';
+  const dirs = pathRaw.split(_pathDelimiter(isWin)).filter(Boolean);
+  const seen = new Set<string>();
+
+  return dirs.concat(_defaultCliDirs(isWin)).filter((dir) => {
+    if (seen.has(dir)) return false;
+    seen.add(dir);
+    return true;
+  });
+}
+
+/**
+ * Build an environment for spawned agent CLIs.
+ *
+ * GUI-launched shells and editor tasks on macOS often start Bun with a minimal
+ * PATH that omits Homebrew and ~/.local/bin. Resolve/spawn use the same
+ * augmented PATH so absolute shim scripts can still find `node` and helper
+ * binaries through `/usr/bin/env`.
+ */
+export function createCliEnv(extra: Record<string, string | undefined> = {}): Record<string, string> {
+  const isWin = process.platform === 'win32';
+  const env: Record<string, string> = {};
+
+  for (const [k, v] of Object.entries(process.env)) {
+    if (k === 'CLAUDECODE') continue;
+    if (k === '__CFBundleIdentifier') continue;
+    if (k === 'INIT_CWD' || k === 'NODE' || k === 'TERM_PROGRAM' || k === 'TERM_PROGRAM_VERSION') continue;
+    if (k.startsWith('VSCODE_') || k.startsWith('npm_')) continue;
+    if (typeof v === 'string') env[k] = v;
+  }
+
+  const pathKey = isWin ? (env.Path !== undefined ? 'Path' : 'PATH') : 'PATH';
+  env[pathKey] = _cliSearchDirs().join(_pathDelimiter(isWin));
+
+  for (const [k, v] of Object.entries(extra)) {
+    if (typeof v === 'string') env[k] = v;
+  }
+
+  return env;
+}
 
 export function resolveCliBinary(name: string): string {
   const cached = _binaryCache.get(name);
@@ -129,10 +194,7 @@ export function resolveCliBinary(name: string): string {
       ))
     : [''];
 
-  const pathRaw = process.env.PATH ?? process.env.Path ?? '';
-  const dirs = pathRaw.split(isWin ? ';' : ':').filter(Boolean);
-
-  for (const dir of dirs) {
+  for (const dir of _cliSearchDirs()) {
     for (const ext of exts) {
       const candidate = _pathJoin(dir, name + ext);
       try {

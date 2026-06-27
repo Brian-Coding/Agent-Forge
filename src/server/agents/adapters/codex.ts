@@ -2,7 +2,7 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import { unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { isAbsolute, relative, resolve } from 'node:path';
-import { ArgvTooLongError, resolveCliBinary, safeSpawn } from '../../utils';
+import { ArgvTooLongError, createCliEnv, resolveCliBinary, safeSpawn } from '../../utils';
 import { persistenceService } from '../../services/persistence.service';
 import { summarizeToolInput, type AgentEvent } from '../events';
 import { drainStreamToString, parseNdjsonLines, flushNdjsonLeftover } from '../stream-utils';
@@ -416,11 +416,7 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
     return {
       async run() {
         try {
-          const env: Record<string, string> = {};
-          for (const [k, v] of Object.entries(process.env)) {
-            if (k === 'CLAUDECODE') continue;
-            if (typeof v === 'string') env[k] = v;
-          }
+          const env = createCliEnv();
 
           try {
             proc = safeSpawn(args, {
