@@ -15,6 +15,13 @@ interface ManagedTerminal {
 // HMR-safe state
 const terminals: Map<string, ManagedTerminal> = (globalThis as any).__terminalsMap ??= new Map<string, ManagedTerminal>();
 
+function getShellCommand(command: string): string[] {
+  if (process.platform === 'win32') {
+    return [process.env.ComSpec || 'cmd.exe', '/d', '/s', '/c', command];
+  }
+  return [process.env.SHELL || 'sh', '-c', command];
+}
+
 export const terminalService = {
   getAll(): TerminalSession[] {
     return Array.from(terminals.values()).map(t => t.info);
@@ -32,7 +39,7 @@ export const terminalService = {
     };
 
     try {
-      const spawnArgs = ['sh', '-c', command];
+      const spawnArgs = getShellCommand(command);
       assertArgvWithinLimit(spawnArgs);
       const proc = Bun.spawn(spawnArgs, {
         cwd,

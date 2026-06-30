@@ -69,14 +69,24 @@ export function jsonResponse(data: any, status = 200): Response {
   });
 }
 
-// Kill an entire process tree on Windows using taskkill /T /F
+// Kill an entire process tree. Windows needs taskkill /T; POSIX gets a direct
+// process kill fallback because spawned CLIs are not always in their own group.
 export async function treeKill(pid: number): Promise<void> {
   try {
-    const proc = Bun.spawn(['taskkill', '/T', '/F', '/PID', String(pid)], {
-      stdout: 'pipe',
-      stderr: 'pipe',
-    });
-    await proc.exited;
+    if (process.platform === 'win32') {
+      const proc = Bun.spawn(['taskkill', '/T', '/F', '/PID', String(pid)], {
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
+      await proc.exited;
+      return;
+    }
+
+    try {
+      process.kill(-pid, 'SIGKILL');
+    } catch {
+      process.kill(pid, 'SIGKILL');
+    }
   } catch (e) {
     console.error(`treeKill(${pid}) failed (process may already be dead):`, e);
   }

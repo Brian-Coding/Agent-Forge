@@ -52,18 +52,15 @@ export async function handleEraseSimulator(req: Request): Promise<Response> {
 }
 
 export async function handleCleanDerivedData(req: Request): Promise<Response> {
+  if (process.platform !== 'darwin') {
+    return jsonResponse({ ok: false, message: 'DerivedData cleanup is only available on macOS' }, 400);
+  }
+
   const derivedDataPath = join(homedir(), 'Library', 'Developer', 'Xcode', 'DerivedData');
   try {
-    const proc = Bun.spawn(['rm', '-rf', derivedDataPath], {
-      stdout: 'pipe',
-      stderr: 'pipe',
-    });
-    const exitCode = await proc.exited;
-    const stderr = await new Response(proc.stderr).text();
-    if (exitCode === 0) {
-      return jsonResponse({ ok: true, message: 'Derived data cleaned' });
-    }
-    return jsonResponse({ ok: false, message: stderr || 'Failed to clean derived data' }, 500);
+    const { rm } = await import('node:fs/promises');
+    await rm(derivedDataPath, { recursive: true, force: true });
+    return jsonResponse({ ok: true, message: 'Derived data cleaned' });
   } catch (e: any) {
     return jsonResponse({ ok: false, message: e.message }, 500);
   }
