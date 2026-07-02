@@ -728,7 +728,10 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
             await unlink(state.outputPath).catch(() => {});
           }
 
-          if (finalText && !state.sawAssistantStream && !state.hasFinalAssistantMessage) {
+          // Always emit the canonical final answer. The live stream can include
+          // progress/status narration; chat.service uses this result as the
+          // persisted Codex assistant message and keeps streamed deltas live-only.
+          if (finalText) {
             ctx.emitAgentEvent({ type: 'result', text: finalText });
           }
 
