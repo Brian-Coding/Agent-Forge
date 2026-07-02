@@ -48,6 +48,7 @@ export type AgentEvent =
       outputTokensDelta?: number;    // accumulate
       costUsdDelta?: number;         // accumulate
       turnsDelta?: number;           // accumulate
+      modelRan?: string;             // snapshot: the model the CLI actually ran (from result.modelUsage)
     }
   | {
       type: 'raw';

@@ -125,6 +125,54 @@ async function emitContextFromRollout(ctx: AgentRunContext, threadId: string): P
   }
 }
 
+async function emitSnapshotFromRollout(ctx: AgentRunContext, threadId: string): Promise<void> {
+  const path = await findRolloutPath(threadId);
+  if (!path) return;
+  const f = Bun.file(path);
+  const size = f.size;
+  if (!size) return;
+  const start = Math.max(0, size - 262_144);
+  const text = await f.slice(start, size).text();
+  const lines = text.split('\n');
+  let modelRan: string | undefined;
+  let contextTokens: number | undefined;
+  let contextLimit: number | undefined;
+
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i];
+    if (!line) continue;
+    try {
+      const event = JSON.parse(line);
+      const payload = event?.payload;
+
+      if (!modelRan && event?.type === 'turn_context' && typeof payload?.model === 'string' && payload.model) {
+        modelRan = payload.model;
+      }
+
+      if ((contextTokens === undefined || contextLimit === undefined) && payload?.type === 'token_count' && payload.info) {
+        const total = payload.info.last_token_usage?.total_tokens;
+        const window = payload.info.model_context_window;
+        contextTokens = typeof total === 'number' && total >= 0 ? total : contextTokens;
+        contextLimit = typeof window === 'number' && window > 0 ? window : contextLimit;
+      }
+
+      if (modelRan && (contextTokens !== undefined || contextLimit !== undefined)) break;
+    } catch {
+      // first line of the slice may be cut mid-JSON; keep walking back
+    }
+  }
+
+  if (modelRan || contextTokens !== undefined || contextLimit !== undefined) {
+    ctx.emitAgentEvent({ type: 'usage', contextTokens, contextLimit, modelRan });
+    if (modelRan && ctx.model && modelRan !== ctx.model) {
+      ctx.emitSystemMessage(
+        `Requested Codex model "${ctx.model}" but the CLI actually ran "${modelRan}". ` +
+        `This turn has been stamped with the actual model.`,
+      );
+    }
+  }
+}
+
 function extractText(value: any): string {
   if (!value) return '';
   if (typeof value === 'string') return value;
@@ -479,9 +527,19 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
     // prepend the agent-forge system prompt (guardrails + persona + notes
     // + docs + atlas citation) to the user message with clear markers so
     // the model can distinguish system context from the user's actual turn.
+    const runtimeContext = [
+      '=== AGENT-FORGE RUNTIME CONTEXT ===',
+      'Provider: Codex',
+      ctx.model ? `Configured model id for this turn: ${ctx.model}` : null,
+      'If the user asks what model you are, answer from this runtime context instead of generic base instructions.',
+      '=== END AGENT-FORGE RUNTIME CONTEXT ===',
+    ].filter(Boolean).join('\n');
     const fullPrompt = ctx.systemPrompt
       ? `=== SYSTEM CONTEXT (provided by agent-forge — these instructions are load-bearing) ===\n${ctx.systemPrompt}\n=== END SYSTEM CONTEXT ===\n\n=== USER MESSAGE ===\n${prompt}`
       : prompt;
+    const fullPromptWithRuntime = ctx.systemPrompt
+      ? `${runtimeContext}\n\n${fullPrompt}`
+      : `${runtimeContext}\n\n=== USER MESSAGE ===\n${fullPrompt}`;
 
     return {
       async run() {
@@ -516,7 +574,7 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
 
           // Pipe the (system + user) prompt via stdin.
           try {
-            proc.stdin.write(fullPrompt);
+            proc.stdin.write(fullPromptWithRuntime);
             proc.stdin.end();
           } catch (e) {
             // Codex with `-` blocks reading stdin forever if the write failed —
@@ -678,7 +736,7 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
           // Pull the real context-window snapshot from the session rollout.
           const threadId = ctx.getSessionId();
           if (!killed && threadId) {
-            await emitContextFromRollout(ctx, threadId).catch(() => {});
+            await emitSnapshotFromRollout(ctx, threadId).catch(() => {});
           }
 
           if (!killed && exitCode !== 0 && !state.hasFinalAssistantMessage && !state.sawAssistantStream) {

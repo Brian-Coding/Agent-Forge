@@ -104,7 +104,7 @@
     .panel-notification-done { background: rgba(63, 185, 80, 0.15); color: var(--success); }
     .panel-notification-files { background: rgba(210, 153, 34, 0.15); color: var(--warning); cursor: pointer; }
 
-    /* Panel content — chat area */
+    /* Panel content â€” chat area */
     .panel-content { flex: 1; overflow-y: auto; padding: 0; font-family: 'SF Mono', Monaco, Consolas, monospace; font-size: 13px; line-height: 1.6; }
     .panel-empty { display: flex; align-items: center; justify-content: center; height: 100%; color: var(--text-muted); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
 
@@ -191,6 +191,14 @@
     /* Connection status */
     .connection-error { padding: 8px 16px; background: var(--error); color: white; text-align: center; font-size: 12px; flex-shrink: 0; }
 
+    /* Model-mismatch blocking banner */
+    .model-mismatch-banner { background: rgba(220, 60, 60, 0.12); border: 1px solid var(--error); border-radius: 6px; margin: 6px 8px 0 8px; padding: 8px 10px; font-size: 12px; }
+    .model-mismatch-text { color: var(--error); font-weight: 600; margin-bottom: 6px; }
+    .model-mismatch-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    .model-mismatch-btn { background: var(--bg-tertiary); border: 1px solid var(--border); color: var(--text-primary); border-radius: 4px; padding: 4px 10px; font-size: 12px; cursor: pointer; }
+    .model-mismatch-btn:hover { border-color: var(--text-secondary); }
+    .model-mismatch-btn-primary { border-color: var(--error); }
+
     /* Error toasts */
     .error-toast-container { position: fixed; top: 16px; right: 16px; z-index: 200; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
     .error-toast { background: var(--error); color: white; padding: 10px 16px; border-radius: 8px; font-size: 13px; max-width: 400px; pointer-events: auto; box-shadow: 0 4px 12px rgba(0,0,0,0.4); animation: toast-in 0.3s ease-out; }
@@ -247,7 +255,7 @@
     .slash-autocomplete-slug { font-family: var(--font-mono, ui-monospace, monospace); font-size: 11px; color: var(--accent); font-weight: 600; min-width: 80px; flex-shrink: 0; }
     .slash-autocomplete-desc { font-size: 11px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
 
-    /* Tokens panel — sidebar tab with per-window per-provider rollups */
+    /* Tokens panel â€” sidebar tab with per-window per-provider rollups */
     .tokens-panel { flex: 1; display: flex; flex-direction: column; overflow-y: auto; padding: 8px; gap: 4px; }
     .tokens-header { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); padding: 4px 4px 8px; }
     .tokens-window-row { padding: 8px 10px; border-radius: 6px; background: var(--bg-primary); border: 1px solid var(--border); margin-bottom: 4px; }
@@ -416,7 +424,7 @@
     .maximize-btn { font-size: 13px; }
 
     /* Cost dashboard (Feature 3) */
-    /* cost-dashboard styles removed — token data moved to the Tokens sidebar tab */
+    /* cost-dashboard styles removed â€” token data moved to the Tokens sidebar tab */
 
     /* Broadcast toggle (Feature 10) */
     .broadcast-toggle { display: flex; align-items: center; gap: 6px; background: var(--bg-tertiary); border: 1px solid var(--border); color: var(--text-secondary); padding: 4px 10px; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 500; }
@@ -538,9 +546,9 @@
     /* ChatTurn styling for QA-originated messages in the coding agent's chat */
     .chat-turn[data-source="qa"] { border-left: 2px solid var(--qa-accent); padding-left: 8px; background: rgba(86, 211, 100, 0.04); }
     .chat-turn[data-source="qa"] .chat-turn-role { color: var(--qa-accent); }
-    .chat-turn[data-source="qa"] .chat-turn-role::before { content: '🧪 '; }
+    .chat-turn[data-source="qa"] .chat-turn-role::before { content: 'ðŸ§ª '; }
 
-    /* QA verdict dashboard — three pills always visible; the agent's chosen
+    /* QA verdict dashboard â€” three pills always visible; the agent's chosen
        verdict lights up with summary, the other two stay grey/dim. */
     .qa-verdict-row { display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; }
     .qa-verdict { display: inline-block; padding: 3px 10px; border-radius: 4px; font-size: 12px; font-weight: 700; letter-spacing: 0.3px; white-space: nowrap; }
@@ -549,7 +557,7 @@
     .qa-verdict-active.qa-verdict-fail { background: rgba(248, 81, 73, 0.18); color: var(--error); border: 1px solid rgba(248, 81, 73, 0.4); }
     .qa-verdict-inactive { background: var(--bg-tertiary); color: var(--text-muted); border: 1px solid var(--border); opacity: 0.5; font-weight: 500; text-transform: lowercase; }
 
-    /* QA test stats strip — renders directly under the QA panel header */
+    /* QA test stats strip â€” renders directly under the QA panel header */
     .qa-subpanel-stats { display: flex; gap: 14px; padding: 4px 12px; background: rgba(86, 211, 100, 0.05); border-bottom: 1px solid var(--qa-accent-strong); font-size: 10px; color: var(--text-secondary); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; flex-shrink: 0; }
 
     /* Inline screenshots in QA panel content */
@@ -585,7 +593,7 @@
     .qa-resizer:hover, .qa-resizer.dragging { background: var(--qa-accent); }
     .qa-resizer::after { content: ''; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 2px; height: 28px; background: var(--text-muted); border-radius: 1px; opacity: 0.4; }
 
-    /* QA agent — distinct lime/test-pass green identity so it never reads as "just another panel" */
+    /* QA agent â€” distinct lime/test-pass green identity so it never reads as "just another panel" */
     :root { --qa-accent: #56d364; --qa-accent-dim: rgba(86, 211, 100, 0.12); --qa-accent-strong: rgba(86, 211, 100, 0.28); }
     .qa-subpanel { display: flex; flex-direction: column; flex-shrink: 0; min-width: 240px; min-height: 180px; background: var(--bg-primary); border-left: 3px solid var(--qa-accent); border-right: 3px solid var(--qa-accent); box-shadow: inset 0 0 0 1px rgba(86, 211, 100, 0.08); }
     /* When stacked (QA below coding) */
@@ -611,20 +619,20 @@
     .qa-suggestion-title { color: var(--qa-accent); font-weight: 500; margin-bottom: 2px; }
     .qa-suggestion-desc { color: var(--text-muted); font-size: 10px; }
 
-    /* Status pill in QA header — only rendered for non-idle states to avoid clutter */
+    /* Status pill in QA header â€” only rendered for non-idle states to avoid clutter */
     .qa-status-pill { display: inline-flex; align-items: center; gap: 4px; padding: 1px 6px; background: rgba(86, 211, 100, 0.2); color: var(--qa-accent); font-size: 9px; font-weight: 500; border-radius: 8px; letter-spacing: 0.4px; text-transform: uppercase; flex-shrink: 0; }
     .qa-status-pill.error { background: rgba(248, 81, 73, 0.2); color: var(--error); }
 
-    /* QA test URL link — ellipsizes on narrow panels */
+    /* QA test URL link â€” ellipsizes on narrow panels */
     .qa-test-url { font-size: 10px; color: var(--text-muted); font-weight: 400; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; text-decoration: none; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .qa-test-url:hover { color: var(--qa-accent); text-decoration: underline; }
 
-    /* Run-again button in QA header — icon-only to save space */
+    /* Run-again button in QA header â€” icon-only to save space */
     .qa-rerun-btn { background: none; border: 1px solid var(--qa-accent-strong); color: var(--qa-accent); cursor: pointer; padding: 1px 6px; border-radius: 3px; font-size: 11px; font-weight: 500; flex-shrink: 0; transition: all 0.15s; line-height: 1; }
     .qa-rerun-btn:hover:not(:disabled) { background: var(--qa-accent); color: #0d1117; }
     .qa-rerun-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 
-    /* Abort-test button — only visible when a test is in flight */
+    /* Abort-test button â€” only visible when a test is in flight */
     .qa-abort-btn { background: rgba(248, 81, 73, 0.15); border: 1px solid rgba(248, 81, 73, 0.5); color: var(--error); cursor: pointer; padding: 1px 8px; border-radius: 3px; font-size: 11px; font-weight: 600; flex-shrink: 0; transition: all 0.15s; line-height: 1; }
     .qa-abort-btn:hover { background: var(--error); color: white; }
 
@@ -698,7 +706,7 @@
       commands: ['M4 17l6-6-6-6', 'M12 19h8'],
     };
 
-    // Slash commands — loaded from <script type="application/json" id="slash-commands-data">
+    // Slash commands â€” loaded from <script type="application/json" id="slash-commands-data">
     // at the top of the body. Each command has: id, name, command (slug), category,
     // description, promptTemplate (with optional {args} placeholder).
     const SLASH_COMMANDS = (() => {
@@ -726,14 +734,16 @@
       {
         kind: 'claude',
         label: 'Claude',
-        icon: '✦',
+        icon: 'âœ¦',
         models: [
+          // Lockstep with STATIC_AGENT_DEFINITIONS â€” phantom ids (claude-mythos-5,
+          // claude-sonnet-5) must NOT appear here: the server resolver rejects
+          // anything outside its catalog and runs the default instead, so listing
+          // them makes the dropdown offer models that can never actually run.
           { id: 'claude-fable-5',            label: 'fable 5' },
-          { id: 'claude-mythos-5',           label: 'mythos 5' },
           { id: 'claude-opus-4-8',           label: 'opus 4.8' },
           { id: 'claude-opus-4-7',           label: 'opus 4.7' },
           { id: 'claude-opus-4-6',           label: 'opus 4.6' },
-          { id: 'claude-sonnet-5',           label: 'sonnet 5' },
           { id: 'claude-sonnet-4-6',         label: 'sonnet 4.6' },
           { id: 'claude-haiku-4-5-20251001', label: 'haiku 4.5' },
         ],
@@ -743,7 +753,7 @@
       {
         kind: 'codex',
         label: 'Codex',
-        icon: '⚙',
+        icon: 'âš™',
         models: [
           { id: 'gpt-5.5',           label: 'gpt-5.5' },
           { id: 'gpt-5.4',           label: 'gpt-5.4' },
@@ -875,7 +885,7 @@
             lastServerActivity = Date.now();
             // App-level heartbeat: after Windows sleep/resume the socket can be
             // half-open (looks connected, delivers nothing). Ping every 15s and
-            // force-close if the server has been silent for 45s — onclose then
+            // force-close if the server has been silent for 45s â€” onclose then
             // drives the normal reconnect path.
             heartbeatTimer = setInterval(() => {
               if (Date.now() - lastServerActivity > 45000) {
@@ -937,15 +947,28 @@
                       setThinkingOutput(prev2 => { const n = {...prev2}; delete n[msg.agent.id]; return n; });
                       setAgentActivity(prev2 => { const n = {...prev2}; delete n[msg.agent.id]; return n; });
                     }
-                    // Toast when an Atlas agent finishes a scan (working/thinking → idle).
+                    // Toast when an Atlas agent finishes a scan (working/thinking â†’ idle).
                     if ((old.status === 'working' || old.status === 'thinking') && msg.agent.status === 'idle' && msg.agent.name === 'UI Atlas Agent') {
                       const toastId = 'atlas-done-' + Date.now();
                       setErrorToasts(prev2 => {
-                        const next = [...prev2, { id: toastId, message: '🗺️ Atlas scan complete — open the UI Atlas tab to view it.' }];
+                        const next = [...prev2, { id: toastId, message: 'ðŸ—ºï¸ Atlas scan complete â€” open the UI Atlas tab to view it.' }];
                         return next.slice(-5);
                       });
                       setTimeout(() => setErrorToasts(prev2 => prev2.filter(t => t.id !== toastId)), 12000);
                     }
+                  }
+                  // Toast the moment a model mismatch latches, independent of
+                  // status transitions â€” this is the loud, impossible-to-miss
+                  // signal that a turn was served by the wrong model.
+                  if (old && !old.modelMismatch && msg.agent.modelMismatch) {
+                    const mm = msg.agent.modelMismatch;
+                    const toastId = 'model-mismatch-' + msg.agent.id + '-' + mm.at;
+                    setErrorToasts(prev2 => {
+                      if (prev2.some(t => t.id === toastId)) return prev2;
+                      const next = [...prev2, { id: toastId, message: 'â›” ' + msg.agent.name + ': turn ran "' + mm.ran + '" instead of "' + mm.requested + '" â€” pane blocked until resolved.' }];
+                      return next.slice(-5);
+                    });
+                    setTimeout(() => setErrorToasts(prev2 => prev2.filter(t => t.id !== toastId)), 20000);
                   }
                   return prev.map(a => a.id === msg.agent.id ? msg.agent : a);
                 });
@@ -1051,7 +1074,7 @@
                 break;
               // Token usage
               case 'token_usage':
-                setTokenUsage(prev => ({ ...prev, [msg.agentId]: { contextTokens: msg.contextTokens, contextLimit: msg.contextLimit, totalInputTokens: msg.totalInputTokens, totalOutputTokens: msg.totalOutputTokens, totalCostUsd: msg.totalCostUsd, numTurns: msg.numTurns } }));
+                setTokenUsage(prev => ({ ...prev, [msg.agentId]: { contextTokens: msg.contextTokens, contextLimit: msg.contextLimit, totalInputTokens: msg.totalInputTokens, totalOutputTokens: msg.totalOutputTokens, totalCostUsd: msg.totalCostUsd, numTurns: msg.numTurns, modelRan: msg.modelRan } }));
                 break;
               case 'usage_report':
                 setUsageReport(msg.report);
@@ -1083,7 +1106,7 @@
                 break;
               case 'qa_stuck_warning': {
                 const toastId = 'stuck-' + Date.now() + Math.random();
-                const text = '⚠️ QA agent looping: /' + msg.endpoint + ' called ' + msg.repeatCount + 'x with same args. Try /evaluate or skip this surface.';
+                const text = 'âš ï¸ QA agent looping: /' + msg.endpoint + ' called ' + msg.repeatCount + 'x with same args. Try /evaluate or skip this surface.';
                 setErrorToasts(prev => {
                   const next = [...prev, { id: toastId, message: text }];
                   return next.slice(-5);
@@ -1145,7 +1168,7 @@
         sendMessage: (agentId, content) => {
           const agent = agentsRef.current.find(a => a.id === agentId);
           const socketOpen = wsRef.current?.readyState === WebSocket.OPEN;
-          // Queue when the agent is busy OR the socket is down — sendRaw
+          // Queue when the agent is busy OR the socket is down â€” sendRaw
           // silently drops frames on a closed socket, which used to destroy
           // messages typed while disconnected. Queued messages drain on
           // reconnect (agents_list) / when the agent goes idle.
@@ -1178,6 +1201,8 @@
         sendImages: (agentId, images, prompt) => sendRaw({ type: 'send_images', agentId, images, prompt }),
         // Update agent
         updateAgent: (id, updates) => sendRaw({ type: 'update_agent', id, ...updates }),
+        // Resolve a latched model mismatch ('continue-actual' | 'fresh-requested')
+        resolveModelMismatch: (id, action) => sendRaw({ type: 'resolve_model_mismatch', id, action }),
         // Workspaces
         createWorkspace: (name) => sendRaw({ type: 'create_workspace', name }),
         updateWorkspace: (id, updates) => sendRaw({ type: 'update_workspace', id, ...updates }),
@@ -1468,13 +1493,13 @@
     }
 
     // Chat Turn (memoized for performance)
-    // Render the verdict dashboard — three pills always visible, the active one
+    // Render the verdict dashboard â€” three pills always visible, the active one
     // (matching the agent's verdict) lit; the other two greyed. Returns null if
     // the agent didn't emit a parseable verdict.
     const QA_VERDICT_KINDS = [
-      { kind: 'pass', label: 'PASS', emoji: '✅' },
-      { kind: 'warn', label: 'WARN', emoji: '⚠️' },
-      { kind: 'fail', label: 'FAIL', emoji: '❌' },
+      { kind: 'pass', label: 'PASS', emoji: 'âœ…' },
+      { kind: 'warn', label: 'WARN', emoji: 'âš ï¸' },
+      { kind: 'fail', label: 'FAIL', emoji: 'âŒ' },
     ];
     function renderQaVerdictRow(verdict) {
       if (!verdict) return null;
@@ -1483,7 +1508,7 @@
           const isActive = verdict.kind === kind;
           const className = 'qa-verdict ' + (isActive ? 'qa-verdict-active qa-verdict-' + kind : 'qa-verdict-inactive');
           const text = isActive
-            ? emoji + ' ' + label + (verdict.summary ? ' — ' + verdict.summary : '')
+            ? emoji + ' ' + label + (verdict.summary ? ' â€” ' + verdict.summary : '')
             : emoji + ' ' + label;
           return e('div', { key: kind, className }, text);
         })
@@ -1511,14 +1536,17 @@
       return { verdict: { kind, summary, raw: m[1].trim() }, body };
     }
 
-    const ChatTurn = React.memo(function ChatTurn({ role, content, isStreaming, imageData, imageMimeType, showToolMessages, searchQuery, showRetry, onRetry, source, provider }) {
+    const ChatTurn = React.memo(function ChatTurn({ role, content, isStreaming, imageData, imageMimeType, showToolMessages, searchQuery, showRetry, onRetry, source, provider, model }) {
       const [copied, setCopied] = useState(false);
       const isQa = source === 'qa';
       // Per-message provider stamp (newer messages); fall back to 'Claude' for
       // legacy messages that pre-date the per-provider stamping. Look up the
-      // provider definition so we can prefix with the icon (✦ Claude / ⚙ Codex).
+      // provider definition so we can prefix with the icon (âœ¦ Claude / âš™ Codex).
       const providerDef = provider ? PROVIDER_BY_KIND[provider] : null;
       const assistantLabel = providerDef ? providerDef.label : 'Claude';
+      const assistantModelLabel = model && providerDef?.models
+        ? (providerDef.models.find(m => m.id === model)?.label || model)
+        : model;
       const roleLabels = { user: isQa ? 'QA Tester' : 'You', assistant: assistantLabel, system: 'System' };
       const turnClass = isStreaming ? 'chat-turn chat-turn-streaming' : 'chat-turn chat-turn-' + role;
       // Filter [Using tool: ...] annotations for assistant messages AND for QA-source
@@ -1559,18 +1587,20 @@
 
       return e('div', { className: turnClass, 'data-source': source || undefined },
         e('button', { className: 'copy-msg-btn', onClick: handleCopy }, copied ? 'Copied!' : 'Copy'),
-        e('div', { className: 'chat-turn-role' }, roleLabels[role] || role),
+        e('div', { className: 'chat-turn-role', title: role === 'assistant' && assistantModelLabel ? 'Actual model: ' + model : undefined },
+          (roleLabels[role] || role) + (role === 'assistant' && assistantModelLabel ? ' Â· ' + assistantModelLabel : '')
+        ),
         renderQaVerdictRow(verdict),
         imageData && e('img', { className: 'chat-image', src: 'data:' + (imageMimeType || 'image/png') + ';base64,' + imageData, alt: 'Uploaded image', onClick: () => window.open('data:' + (imageMimeType || 'image/png') + ';base64,' + imageData) }),
         renderBody(),
         showRetry && onRetry && e('button', { className: 'retry-btn', onClick: onRetry }, '\u21BB Retry')
       );
     }, (prev, next) => {
-      return prev.content === next.content && prev.role === next.role && prev.isStreaming === next.isStreaming && prev.searchQuery === next.searchQuery && prev.showToolMessages === next.showToolMessages && prev.showRetry === next.showRetry && prev.imageData === next.imageData && prev.source === next.source && prev.provider === next.provider;
+      return prev.content === next.content && prev.role === next.role && prev.isStreaming === next.isStreaming && prev.searchQuery === next.searchQuery && prev.showToolMessages === next.showToolMessages && prev.showRetry === next.showRetry && prev.imageData === next.imageData && prev.source === next.source && prev.provider === next.provider && prev.model === next.model;
     });
 
     // Terminal Panel
-    function TerminalPanel({ agent, messages, liveOutput, queuedMessages, fileChanges, thinkingOutput, agentActivity, statusStartTime, tokenUsage, terminals, terminalOutput, workspace, qaAgent, qaMessages, qaTokenUsage, qaHasUnread, qaLiveShots, onQaSend, onQaAbort, onClearQaUnread, onSendMessage, onSendImage, onSendImages, onStop, onClearHistory, onClearFileChanges, onMinimize, onMaximize, isMaximized, onFocus, isFocused, onCreateTerminal, onKillTerminal, onUpdateAgent, isLocked, onToggleLock, isDragging, isDragOver, onDragStart, onDragEnd, onDragOver, onDragLeave, onDrop }) {
+    function TerminalPanel({ agent, messages, liveOutput, queuedMessages, fileChanges, thinkingOutput, agentActivity, statusStartTime, tokenUsage, terminals, terminalOutput, workspace, qaAgent, qaMessages, qaTokenUsage, qaHasUnread, qaLiveShots, onQaSend, onQaAbort, onClearQaUnread, onSendMessage, onSendImage, onSendImages, onStop, onClearHistory, onClearFileChanges, onMinimize, onMaximize, isMaximized, onFocus, isFocused, onCreateTerminal, onKillTerminal, onUpdateAgent, onResolveModelMismatch, isLocked, onToggleLock, isDragging, isDragOver, onDragStart, onDragEnd, onDragOver, onDragLeave, onDrop }) {
       const [input, setInput] = useState('');
       const [inputHistory, setInputHistory] = useState([]);
       const [historyIdx, setHistoryIdx] = useState(-1);
@@ -1636,7 +1666,7 @@
         scrollQaToBottom();
       }, [qaMessages?.length]);
 
-      // Stats for the most recent QA test — surfaced as a strip under the QA panel header.
+      // Stats for the most recent QA test â€” surfaced as a strip under the QA panel header.
       const qaLastAssistantMsg = (qaMessages && qaMessages.length > 0) ? [...qaMessages].reverse().find(m => m.role === 'assistant') : null;
       const qaLastUserMsg = (qaMessages && qaMessages.length > 0) ? [...qaMessages].reverse().find(m => m.role === 'user') : null;
       const qaDurationMs = (qaLastAssistantMsg && qaLastUserMsg && qaLastAssistantMsg.timestamp > qaLastUserMsg.timestamp)
@@ -1669,7 +1699,7 @@
         { title: 'Check console for errors', desc: 'Inspect runtime errors and warnings', prompt: 'Navigate to the test URL, wait for the page to load, then check the browser console for any errors or warnings. Report what you find with screenshots if helpful.' },
       ];
 
-      // QA agent status — real read from the workspace's QA agent (lazily provisioned on first send).
+      // QA agent status â€” real read from the workspace's QA agent (lazily provisioned on first send).
       const qaStatus = qaAgent ? qaAgent.status : 'idle';
       const qaStatusLabel = qaStatus === 'working' ? 'Working' : qaStatus === 'thinking' ? 'Thinking' : qaStatus === 'error' ? 'Error' : qaStatus === 'stopped' ? 'Stopped' : 'Ready';
 
@@ -1779,7 +1809,7 @@
       }, [agent?.status]);
 
       // Focus input on window focus and visibility change (Feature 8).
-      // Gated on isFocused — with multiple panels mounted, every panel
+      // Gated on isFocused â€” with multiple panels mounted, every panel
       // registers this listener, and without the gate whichever mounted last
       // steals focus from the panel the user was actually working in.
       useEffect(() => {
@@ -1842,7 +1872,7 @@
           if (ev.key === 'Escape') {
             ev.preventDefault();
             // Without stopPropagation the global Escape handler also fires and
-            // stops the focused agent's in-flight turn — closing an autocomplete
+            // stops the focused agent's in-flight turn â€” closing an autocomplete
             // popup must never kill work.
             ev.stopPropagation();
             setInput('');
@@ -1881,7 +1911,7 @@
         }
       }, [input]);
 
-      // Image handling (Feature 3) — stage images, send on Enter
+      // Image handling (Feature 3) â€” stage images, send on Enter
       const handleImageUpload = useCallback((file) => {
         if (!file || !file.type.startsWith('image/') || !agent) return;
         const reader = new FileReader();
@@ -2039,8 +2069,22 @@
             e('span', null, Math.round(safeContextTokens / 1000) + 'k / ' + Math.round(safeContextLimit / 1000) + 'k ctx'),
             tokenUsage.totalCostUsd > 0 && e('span', null, '\u00B7'),
             tokenUsage.totalCostUsd > 0 && e('span', null, '$' + tokenUsage.totalCostUsd.toFixed(2)),
-            tokenUsage.numTurns > 0 && e('span', null, '\u00B7'),
-            tokenUsage.numTurns > 0 && e('span', null, tokenUsage.numTurns + ' turns')
+            tokenUsage.numTurns > 0 && e('span', null, tokenUsage.numTurns + ' turns'),
+            // Ground truth: the model the CLI ACTUALLY ran last turn (from the
+            // result event's modelUsage), not what the selector claims. Amber when
+            // it disagrees with the configured model, so a mismatch can never hide.
+            tokenUsage.modelRan && e('span', null, '\u00B7'),
+            tokenUsage.modelRan && (() => {
+              const providerDef = PROVIDER_BY_KIND[agent.provider] || PROVIDER_BY_KIND.claude;
+              const configuredModelId = agent.model || providerDef.defaultModel || (providerDef.models[0] && providerDef.models[0].id) || '';
+              const mismatch = !!configuredModelId && tokenUsage.modelRan.indexOf(configuredModelId) === -1 && configuredModelId.indexOf(tokenUsage.modelRan) === -1;
+              return e('span', {
+                style: { color: mismatch ? '#e5a000' : 'inherit' },
+                title: mismatch
+                  ? 'Selector resolves to "' + configuredModelId + '" but the CLI actually ran "' + tokenUsage.modelRan + '"'
+                  : 'Model the CLI actually ran last turn',
+              }, (mismatch ? '\u26A0 ran ' : 'ran ') + tokenUsage.modelRan);
+            })()
           )
         ),
         // Search bar (Feature 1)
@@ -2106,6 +2150,7 @@
                         imageMimeType: m.imageMimeType,
                         source: m.source,
                         provider: m.provider,
+                        model: m.model,
                         showToolMessages,
                         searchQuery: searchVisible ? searchQuery : '',
                         showRetry: realIdx === lastUserMsgIndex && m.role === 'user' && !isWorking,
@@ -2119,7 +2164,7 @@
                   e('span', { className: 'agent-activity-dot' }),
                   activity.label || 'Working...'
                 ),
-                liveOutput && e(ChatTurn, { key: 'live', role: 'assistant', content: liveOutput, isStreaming: isWorking, showToolMessages, provider: agent.provider }),
+                liveOutput && e(ChatTurn, { key: 'live', role: 'assistant', content: liveOutput, isStreaming: isWorking, showToolMessages, provider: agent.provider, model: agent.model }),
                 queued.map((q, i) => e('div', { key: 'q' + i, className: 'chat-turn chat-turn-queued' },
                   e('div', { className: 'chat-turn-role' }, 'Queued'),
                   e('div', { className: 'chat-turn-content' }, q)
@@ -2157,6 +2202,27 @@
         })(),
         // Input
         e('div', { className: 'panel-input-container' },
+          // Model-mismatch hard stop. Server refuses sends while this is set;
+          // the two buttons are the only ways forward, so the wrong model can
+          // never keep serving a conversation unnoticed.
+          agent.modelMismatch && e('div', { className: 'model-mismatch-banner' },
+            e('div', { className: 'model-mismatch-text' },
+              'â›” Model mismatch: this conversation was served by "' + agent.modelMismatch.ran +
+              '" but you selected "' + agent.modelMismatch.requested + '". Sends are blocked until you choose.'
+            ),
+            e('div', { className: 'model-mismatch-actions' },
+              e('button', {
+                className: 'model-mismatch-btn',
+                onClick: () => onResolveModelMismatch && onResolveModelMismatch(agent.id, 'continue-actual'),
+                title: 'Accept the model that actually ran and keep this conversation/session',
+              }, 'Continue on ' + agent.modelMismatch.ran),
+              e('button', {
+                className: 'model-mismatch-btn model-mismatch-btn-primary',
+                onClick: () => onResolveModelMismatch && onResolveModelMismatch(agent.id, 'fresh-requested'),
+                title: 'Start a fresh session â€” fresh spawns honor the selected model (note: if the substitution was context-size-driven, it can recur as the new session grows)',
+              }, 'Fresh session on ' + agent.modelMismatch.requested)
+            )
+          ),
           pendingImages.length > 0 && e('div', { style: { display: 'flex', alignItems: 'center', gap: 8, padding: '4px 12px', fontSize: 11, color: 'var(--text-secondary)', flexWrap: 'wrap' } },
             pendingImages.map((img, idx) =>
               e('div', { key: idx, style: { position: 'relative', display: 'inline-block' } },
@@ -2175,11 +2241,14 @@
               onChange: (ev) => { setInput(ev.target.value); setHistoryIdx(-1); },
               onKeyDown: handleKeyDown,
               onPaste: handlePaste,
-              placeholder: pendingImages.length > 0
-                ? 'Add context for the image' + (pendingImages.length > 1 ? 's' : '') + '... (Enter to send)'
-                : isWorking
-                  ? (queued.length > 0 ? queued.length + ' queued \u2014 type more...' : 'Type to queue...')
-                  : 'Message... (Enter to send, Shift+Enter for newline)',
+              disabled: !!agent.modelMismatch,
+              placeholder: agent.modelMismatch
+                ? 'Blocked \u2014 resolve the model mismatch above first'
+                : pendingImages.length > 0
+                  ? 'Add context for the image' + (pendingImages.length > 1 ? 's' : '') + '... (Enter to send)'
+                  : isWorking
+                    ? (queued.length > 0 ? queued.length + ' queued \u2014 type more...' : 'Type to queue...')
+                    : 'Message... (Enter to send, Shift+Enter for newline)',
               rows: 1,
               autoFocus: true,
             }),
@@ -2201,7 +2270,18 @@
           // each provider keeps its own sessionId so swapping preserves both threads.
           (() => {
             const currentProvider = PROVIDER_BY_KIND[agent.provider] || PROVIDER_BY_KIND.claude;
-            const currentModel = currentProvider.models.find(m => m.id === agent.model) || currentProvider.models[0];
+            // The model this agent is ACTUALLY configured with. Never fall back to
+            // models[0] for display â€” that used to render "Fable 5" (first in the
+            // list) for any agent whose model was unset, while the server actually
+            // ran the provider default (Opus). An unset model resolves to the
+            // provider default server-side, so show THAT; an id missing from the
+            // catalog is surfaced verbatim so the selector can never claim a model
+            // that isn't really set.
+            const configuredModelId = agent.model || currentProvider.defaultModel || (currentProvider.models[0] && currentProvider.models[0].id) || '';
+            const modelInCatalog = currentProvider.models.some(m => m.id === configuredModelId);
+            const modelOptions = modelInCatalog
+              ? currentProvider.models
+              : [{ id: configuredModelId, label: configuredModelId + ' (not in catalog)' }].concat(currentProvider.models);
             const currentReasoning = agent.reasoningLevel || currentProvider.defaultReasoningLevel || '';
             return e('div', { className: 'agent-provider-row' },
               e('select', {
@@ -2219,17 +2299,17 @@
                   }
                   onUpdateAgent(agent.id, updates);
                 },
-                title: 'Provider — swap any time; each provider keeps its own session',
+                title: 'Provider â€” swap any time; each provider keeps its own session',
               },
                 AGENT_PROVIDERS.map(p => e('option', { key: p.kind, value: p.kind }, p.icon + ' ' + p.label))
               ),
               e('select', {
                 className: 'agent-provider-select agent-provider-select-model',
-                value: currentModel ? currentModel.id : '',
+                value: configuredModelId,
                 onChange: (ev) => { if (onUpdateAgent) onUpdateAgent(agent.id, { model: ev.target.value }); },
                 title: 'Model',
               },
-                currentProvider.models.map(m => e('option', { key: m.id, value: m.id }, m.label))
+                modelOptions.map(m => e('option', { key: m.id, value: m.id }, m.label))
               ),
               currentProvider.reasoningLevels && e('select', {
                 className: 'agent-provider-select agent-provider-select-reasoning',
@@ -2243,13 +2323,13 @@
           })()
         )
           ),
-          // Resizer (only meaningful when split — CSS hides it when stacked)
+          // Resizer (only meaningful when split â€” CSS hides it when stacked)
           qaPanelOpen && e('div', {
             className: 'qa-resizer' + (qaResizing ? ' dragging' : ''),
             onMouseDown: (ev) => { ev.preventDefault(); setQaResizing(true); },
             title: 'Drag to resize QA panel',
           }),
-          // QA sub-panel — sibling of .panel-main inside .panel-body
+          // QA sub-panel â€” sibling of .panel-main inside .panel-body
           qaPanelOpen && e('div', {
             className: 'qa-subpanel',
             style: { width: qaPanelWidthPct + '%', flexBasis: qaPanelWidthPct + '%' },
@@ -2257,7 +2337,7 @@
             e('div', { className: 'qa-subpanel-header' },
               e('div', { className: 'qa-subpanel-status' },
                 e('span', { className: 'qa-subpanel-pulse' }),
-                e('span', { className: 'qa-subpanel-badge' }, '🧪 QA'),
+                e('span', { className: 'qa-subpanel-badge' }, 'ðŸ§ª QA'),
                 qaStatus !== 'idle' && e('span', { className: 'qa-status-pill' + (qaStatus === 'error' ? ' error' : '') }, qaStatusLabel),
                 workspace && workspace.testUrl && e('a', {
                   className: 'qa-test-url',
@@ -2273,7 +2353,7 @@
                 disabled: !qaMessages || qaMessages.length === 0,
                 onClick: scrollQaToBottom,
                 title: 'Scroll to latest message',
-              }, '↓'),
+              }, 'â†“'),
               e('button', {
                 className: 'qa-rerun-btn',
                 disabled: !qaAgent,
@@ -2285,23 +2365,23 @@
                 disabled: !lastQaPrompt || !(workspace && workspace.testUrl),
                 onClick: () => { if (lastQaPrompt) setQaInput(lastQaPrompt); },
                 title: lastQaPrompt ? 'Run last prompt again' : 'No previous test to repeat',
-              }, '↻'),
+              }, 'â†»'),
               (qaStatus === 'working' || qaStatus === 'thinking') && e('button', {
                 className: 'qa-abort-btn',
                 onClick: () => { if (workspace && onQaAbort) onQaAbort(workspace.id); },
                 title: 'Abort the in-flight QA test (partial report will be relayed)',
-              }, '◼ Abort'),
-              e('button', { className: 'qa-subpanel-close', onClick: () => setQaPanelOpen(false), title: 'Close QA panel' }, '×')
+              }, 'â—¼ Abort'),
+              e('button', { className: 'qa-subpanel-close', onClick: () => setQaPanelOpen(false), title: 'Close QA panel' }, 'Ã—')
             ),
             qaHasStats && e('div', { className: 'qa-subpanel-stats' },
-              qaDurationMs > 0 && e('span', null, '⏱ ' + qaFmtDuration(qaDurationMs)),
-              qaTokens > 0 && e('span', null, '🪙 ' + qaFmtTokens(qaTokens) + ' tokens'),
-              qaCost > 0 && e('span', null, '💰 ' + qaFmtCost(qaCost))
+              qaDurationMs > 0 && e('span', null, 'â± ' + qaFmtDuration(qaDurationMs)),
+              qaTokens > 0 && e('span', null, 'ðŸª™ ' + qaFmtTokens(qaTokens) + ' tokens'),
+              qaCost > 0 && e('span', null, 'ðŸ’° ' + qaFmtCost(qaCost))
             ),
             e('div', { className: 'qa-subpanel-content', ref: qaContentRef },
               // Live screenshots streamed during an in-flight test. Cleared by qa_results_ready.
               qaStatus === 'working' && qaLiveShots && qaLiveShots.length > 0 && e('div', { className: 'qa-live-shots' },
-                e('div', { className: 'qa-live-shots-heading' }, '🔴 Live screenshots (' + qaLiveShots.length + ')'),
+                e('div', { className: 'qa-live-shots-heading' }, 'ðŸ”´ Live screenshots (' + qaLiveShots.length + ')'),
                 e('div', { className: 'qa-live-shots-row' },
                   qaLiveShots.map((shot, i) => e('img', {
                     key: shot.timestamp + '-' + i,
@@ -2321,7 +2401,7 @@
                       // and a small toggle. When expanded, show all assistant turns plus user prompts
                       // stripped to just the user's actual instruction (drops the chat-summary envelope).
                       const lastAssistant = [...qaMessages].reverse().find(m => m.role === 'assistant');
-                      // Find the assistant message before the most recent — used for verdict-change indicator.
+                      // Find the assistant message before the most recent â€” used for verdict-change indicator.
                       const prevAssistant = (() => {
                         const seen = [];
                         for (let i = qaMessages.length - 1; i >= 0; i--) {
@@ -2366,12 +2446,12 @@
                         if (verdict && prevVerdict) {
                           if (verdict.kind === prevVerdict.kind) {
                             verdictChangeNote = e('span', { className: 'qa-verdict-change qa-verdict-change-same' },
-                              '↔ same as last run'
+                              'â†” same as last run'
                             );
                           } else {
                             const direction = (prevVerdict.kind === 'fail' || (prevVerdict.kind === 'warn' && verdict.kind === 'pass')) ? 'better' : 'worse';
                             verdictChangeNote = e('span', { className: 'qa-verdict-change qa-verdict-change-' + direction },
-                              (direction === 'better' ? '↗ improved: ' : '↘ regressed: ') + prevVerdict.kind.toUpperCase() + ' → ' + verdict.kind.toUpperCase()
+                              (direction === 'better' ? 'â†— improved: ' : 'â†˜ regressed: ') + prevVerdict.kind.toUpperCase() + ' â†’ ' + verdict.kind.toUpperCase()
                             );
                           }
                         }
@@ -2391,18 +2471,18 @@
                               e('div', { className: 'qa-inline-shot-caption' }, p)
                             ))
                           ),
-                          // Continue-testing nudge — only after a completed test
+                          // Continue-testing nudge â€” only after a completed test
                           isIdle && e('div', { className: 'qa-continue-row' },
                             e('button', {
                               className: 'qa-continue-btn',
                               onClick: () => setQaInput('Building on what you just tested, dig deeper. Look for edge cases I missed, click less obvious elements, check error states, exercise interactive elements you skipped, and report anything new you find. Do not re-do the same checks you already covered.'),
-                              title: 'Load a follow-up prompt that continues from this test’s context',
-                            }, '↳ Continue testing'),
+                              title: 'Load a follow-up prompt that continues from this testâ€™s context',
+                            }, 'â†³ Continue testing'),
                             e('button', {
                               className: 'qa-continue-btn',
                               onClick: () => setQaInput('Take a fresh screenshot of the current page state and tell me what changed, if anything, since the last screenshot you reported.'),
                               title: 'Re-screenshot and diff against the previous state',
-                            }, '↻ Re-check current state')
+                            }, 'â†» Re-check current state')
                           )
                         );
                       };
@@ -2413,7 +2493,7 @@
                             className: 'qa-activity-toggle-btn',
                             onClick: () => setQaShowActivity(v => !v),
                             title: qaShowActivity ? 'Hide intermediate steps; show only the report' : 'Show all messages from the QA agent',
-                          }, qaShowActivity ? '▴ Hide activity' : '▾ Show activity'),
+                          }, qaShowActivity ? 'â–´ Hide activity' : 'â–¾ Show activity'),
                           e('span', { className: 'qa-activity-meta' },
                             qaMessages.filter(m => m.role === 'assistant').length + ' message' + (qaMessages.filter(m => m.role === 'assistant').length === 1 ? '' : 's')
                           )
@@ -2675,11 +2755,11 @@
                       return m + 'm' + (s ? ' ' + s + 's' : '');
                     };
                     if (atlasIsRunning) {
-                      // State C — running
+                      // State C â€” running
                       return e('div', { className: 'workspace-atlas workspace-atlas-running', onClick: (ev) => ev.stopPropagation() },
                         e('div', { className: 'workspace-atlas-status' },
                           e('span', { className: 'workspace-atlas-pulse' }),
-                          e('span', { className: 'workspace-atlas-label' }, '🗺️ Atlas: ' + runShots.length + ' shots · ' + fmtElapsed(elapsedMs)),
+                          e('span', { className: 'workspace-atlas-label' }, 'ðŸ—ºï¸ Atlas: ' + runShots.length + ' shots Â· ' + fmtElapsed(elapsedMs)),
                           e('button', {
                             className: 'workspace-atlas-stop',
                             onClick: (ev) => { ev.stopPropagation(); if (confirm('Abort the in-flight Atlas scan? Partial output will remain.')) onStopAtlas(atlasAgent.id); },
@@ -2690,7 +2770,7 @@
                     }
                     // State B vs A: idle with prior atlas vs no atlas yet
                     if (ws.atlasLastScanAt && atlasAgent) {
-                      // State B — atlas exists, idle. Show freshness + Re-scan + View.
+                      // State B â€” atlas exists, idle. Show freshness + Re-scan + View.
                       const ageMs = Date.now() - ws.atlasLastScanAt;
                       const ageBucket = ageMs < 24 * 60 * 60 * 1000 ? 'fresh'
                         : ageMs < 7 * 24 * 60 * 60 * 1000 ? 'aging'
@@ -2704,9 +2784,9 @@
                       return e('div', { className: 'workspace-atlas workspace-atlas-idle workspace-atlas-' + ageBucket, onClick: (ev) => ev.stopPropagation() },
                         e('div', { className: 'workspace-atlas-status' },
                           e('span', { className: 'workspace-atlas-label' },
-                            '🗺️ Atlas · ',
+                            'ðŸ—ºï¸ Atlas Â· ',
                             e('span', { className: 'workspace-atlas-age' }, fmtAgo(ageMs)),
-                            ageBucket === 'stale' && e('span', { className: 'workspace-atlas-stale-hint', title: 'Atlas is older than 7 days; re-scan recommended' }, ' · stale')
+                            ageBucket === 'stale' && e('span', { className: 'workspace-atlas-stale-hint', title: 'Atlas is older than 7 days; re-scan recommended' }, ' Â· stale')
                           )
                         ),
                         e('div', { className: 'workspace-atlas-actions' },
@@ -2724,13 +2804,13 @@
                         )
                       );
                     }
-                    // State A — no atlas yet
+                    // State A â€” no atlas yet
                     return e('div', { className: 'workspace-atlas', onClick: (ev) => ev.stopPropagation() },
                       e('button', {
                         className: 'workspace-atlas-btn',
                         disabled: !ws.testUrl,
                         title: !ws.testUrl
-                          ? 'Set a Test URL first — the Atlas Agent walks the live app at that URL'
+                          ? 'Set a Test URL first â€” the Atlas Agent walks the live app at that URL'
                           : 'Build the UI Atlas for this workspace. You will be prompted for the project repo path.',
                         onClick: () => {
                           if (!ws.testUrl) return;
@@ -2742,7 +2822,7 @@
                           );
                           if (cwd && cwd.trim()) onProvisionAtlas(ws.id, cwd.trim());
                         },
-                      }, '🗺️ Build UI Atlas')
+                      }, 'ðŸ—ºï¸ Build UI Atlas')
                     );
                   })(),
                   isActive && wsAgents.length > 0 && e('div', { className: 'workspace-agents' },
@@ -2813,7 +2893,7 @@
     }
 
     // Notes Panel
-    // Slug-ify heading text the same way Github / common-mark anchor schemes do —
+    // Slug-ify heading text the same way Github / common-mark anchor schemes do â€”
     // lowercase, alphanumerics + dashes only. Used to wire TOC links to anchors.
     function atlasSlug(text) {
       return String(text || '').toLowerCase().trim()
@@ -2983,14 +3063,14 @@
         const recentMsgs = atlasMsgs.slice(-8); // last few turns
         return e('div', { className: 'atlas-panel' },
           e('div', { className: 'atlas-header' },
-            e('div', { className: 'atlas-title' }, '🗺️ UI Atlas'),
+            e('div', { className: 'atlas-title' }, 'ðŸ—ºï¸ UI Atlas'),
             e('div', { className: 'atlas-status atlas-status-running' },
-              'Scanning... ' + liveCount + ' shots · ' + Math.floor(elapsedMs / 60000) + 'm elapsed'
+              'Scanning... ' + liveCount + ' shots Â· ' + Math.floor(elapsedMs / 60000) + 'm elapsed'
             )
           ),
           e('div', { className: 'atlas-running-body' },
             e('div', { className: 'atlas-running-explainer' },
-              'The agent is working through its passes (project structure → code reading → browser walkthrough → state construction → reconciliation → self-verification → write atlas). The first ~10 minutes are typically code reading with no browser activity. Screenshots accumulate during the walkthrough phase.'
+              'The agent is working through its passes (project structure â†’ code reading â†’ browser walkthrough â†’ state construction â†’ reconciliation â†’ self-verification â†’ write atlas). The first ~10 minutes are typically code reading with no browser activity. Screenshots accumulate during the walkthrough phase.'
             ),
             recentMsgs.length > 0 && e('div', { className: 'atlas-activity-feed' },
               e('div', { className: 'atlas-activity-heading' }, 'Recent activity'),
@@ -2999,7 +3079,7 @@
                 const text = (m.content || '').replace(/\n?\[Using tool: [^\]]+\]\n?/g, '').trim();
                 const preview = text.length > 280 ? text.slice(0, 280) + '...' : text;
                 return e('div', { key: m.id || i, className: 'atlas-activity-msg atlas-activity-' + m.role },
-                  e('div', { className: 'atlas-activity-role' }, m.role === 'user' ? '→ Trigger' : 'Atlas'),
+                  e('div', { className: 'atlas-activity-role' }, m.role === 'user' ? 'â†’ Trigger' : 'Atlas'),
                   e('div', { className: 'atlas-activity-text' }, preview || '(no text content)')
                 );
               })
@@ -3011,7 +3091,7 @@
       if (!wsHasAtlas) {
         return e('div', { className: 'atlas-panel' },
           e('div', { className: 'atlas-header' },
-            e('div', { className: 'atlas-title' }, '🗺️ UI Atlas'),
+            e('div', { className: 'atlas-title' }, 'ðŸ—ºï¸ UI Atlas'),
             e('div', { className: 'atlas-status' }, 'Not built yet')
           ),
           e('div', { className: 'atlas-empty' },
@@ -3045,14 +3125,14 @@
       if (qaTouchedCount > 0) coverageBits.push(qaTouchedCount + ' QA-touched');
 
       // Limit TOC to top-level sections (h2). h3 entries (per-entity, per-surface)
-      // would balloon the list — search handles that case.
+      // would balloon the list â€” search handles that case.
       const tocItems = overview.headings.filter(h => h.level === 2);
 
       return e('div', { className: 'atlas-panel' },
         e('div', { className: 'atlas-header' },
-          e('div', { className: 'atlas-title' }, '🗺️ UI Atlas — ' + activeWorkspace.name),
+          e('div', { className: 'atlas-title' }, 'ðŸ—ºï¸ UI Atlas â€” ' + activeWorkspace.name),
           e('div', { className: 'atlas-status atlas-status-' + ageBucket },
-            'Last scan ' + fmtAgo(ageMs) + (ageBucket === 'stale' ? ' · stale' : '')
+            'Last scan ' + fmtAgo(ageMs) + (ageBucket === 'stale' ? ' Â· stale' : '')
           ),
           e('button', {
             className: 'atlas-rescan-btn',
@@ -3071,11 +3151,11 @@
             value: query,
             onChange: (ev) => setQuery(ev.target.value),
           }),
-          query && e('button', { className: 'atlas-search-clear', onClick: () => setQuery('') }, '×')
+          query && e('button', { className: 'atlas-search-clear', onClick: () => setQuery('') }, 'Ã—')
         ),
         tocItems.length > 0 && !query && e('div', { className: 'atlas-toc' + (tocOpen ? '' : ' collapsed') },
           e('div', { className: 'atlas-toc-header', onClick: () => setTocOpen(o => !o) },
-            e('span', { className: 'atlas-toc-chevron' }, tocOpen ? '▾' : '▸'),
+            e('span', { className: 'atlas-toc-chevron' }, tocOpen ? 'â–¾' : 'â–¸'),
             e('span', null, 'Contents (' + tocItems.length + ')')
           ),
           tocOpen && e('div', { className: 'atlas-toc-list' },
@@ -3184,7 +3264,7 @@
       );
     }
 
-    // Slash Commands Panel — list of pre-made prompts. Click to copy.
+    // Slash Commands Panel â€” list of pre-made prompts. Click to copy.
     function CommandsPanel({ commands }) {
       const [query, setQuery] = useState('');
       const [activeCategory, setActiveCategory] = useState('all');
@@ -3276,7 +3356,7 @@
       );
     }
 
-    // Emulators Panel — with default simulator setting (Feature 9)
+    // Emulators Panel â€” with default simulator setting (Feature 9)
     function EmulatorsPanel({ settings, onUpdateSettings }) {
       const [devices, setDevices] = useState({});
       const [loading, setLoading] = useState(false);
@@ -3589,7 +3669,7 @@
       );
     }
 
-    // Token usage panel — sidebar tab showing cross-provider, time-windowed
+    // Token usage panel â€” sidebar tab showing cross-provider, time-windowed
     // token spend. Server (usage.service) computes the report from the
     // append-only usageEvents log; client just renders. Tokens-only by
     // design (cost numbers are unreliable since only Claude reports them).
@@ -3601,7 +3681,7 @@
       }
 
       const fmt = (n) => formatTokens(n || 0);
-      const fmtInOut = (b) => fmt(b.inputTokens) + ' in · ' + fmt(b.outputTokens) + ' out';
+      const fmtInOut = (b) => fmt(b.inputTokens) + ' in Â· ' + fmt(b.outputTokens) + ' out';
       const fmtRel = (ts) => {
         if (!ts) return 'never';
         const ms = Date.now() - ts;
@@ -3621,19 +3701,19 @@
           e('div', { className: 'tokens-window-label' }, label),
           e('div', { className: 'tokens-window-providers' },
             e('div', { className: 'tokens-provider-line' + (claudeActive ? '' : ' inactive') },
-              e('span', { className: 'tokens-provider-icon' }, '✦'),
+              e('span', { className: 'tokens-provider-icon' }, 'âœ¦'),
               e('span', { className: 'tokens-provider-name' }, 'Claude'),
-              e('span', { className: 'tokens-provider-value' }, claudeActive ? fmtInOut(w.claude) : '—'),
+              e('span', { className: 'tokens-provider-value' }, claudeActive ? fmtInOut(w.claude) : 'â€”'),
               claudeActive && e('span', { className: 'tokens-provider-turns' }, w.claude.turns + ' turns')
             ),
             e('div', { className: 'tokens-provider-line' + (codexActive ? '' : ' inactive') },
-              e('span', { className: 'tokens-provider-icon' }, '⚙'),
+              e('span', { className: 'tokens-provider-icon' }, 'âš™'),
               e('span', { className: 'tokens-provider-name' }, 'Codex'),
-              e('span', { className: 'tokens-provider-value' }, codexActive ? fmtInOut(w.codex) : '—'),
+              e('span', { className: 'tokens-provider-value' }, codexActive ? fmtInOut(w.codex) : 'â€”'),
               codexActive && e('span', { className: 'tokens-provider-turns' }, w.codex.turns + ' turns')
             ),
             e('div', { className: 'tokens-provider-line tokens-total' },
-              e('span', { className: 'tokens-provider-icon' }, '∑'),
+              e('span', { className: 'tokens-provider-icon' }, 'âˆ‘'),
               e('span', { className: 'tokens-provider-name' }, 'Total'),
               e('span', { className: 'tokens-provider-value' }, fmtInOut(w.total)),
               w.total.turns > 0 && e('span', { className: 'tokens-provider-turns' }, w.total.turns + ' turns')
@@ -3657,13 +3737,13 @@
             return e('div', { className: 'tokens-per-agent-row', key: a.agentId },
               e('div', { className: 'tokens-per-agent-name' }, a.agentName || a.agentId),
               e('div', { className: 'tokens-per-agent-tokens' },
-                cTok > 0 && e('span', { title: a.claude.turns + ' Claude turns · ' + fmtInOut(a.claude) },
-                  e('span', { className: 'tokens-provider-icon' }, '✦'),
+                cTok > 0 && e('span', { title: a.claude.turns + ' Claude turns Â· ' + fmtInOut(a.claude) },
+                  e('span', { className: 'tokens-provider-icon' }, 'âœ¦'),
                   ' ',
                   fmt(cTok)
                 ),
-                xTok > 0 && e('span', { title: a.codex.turns + ' Codex turns · ' + fmtInOut(a.codex), style: { marginLeft: 8 } },
-                  e('span', { className: 'tokens-provider-icon' }, '⚙'),
+                xTok > 0 && e('span', { title: a.codex.turns + ' Codex turns Â· ' + fmtInOut(a.codex), style: { marginLeft: 8 } },
+                  e('span', { className: 'tokens-provider-icon' }, 'âš™'),
                   ' ',
                   fmt(xTok)
                 ),
@@ -3977,12 +4057,12 @@
         ws.updateWorkspace(activeWorkspace.id, { lockedAgentIds: updated });
       };
 
-      // Grid uses user-chosen columns/rows — override when maximized
+      // Grid uses user-chosen columns/rows â€” override when maximized
       const gridStyle = maximizedAgent
         ? { gridTemplateColumns: '1fr', gridTemplateRows: '1fr' }
         : { gridTemplateColumns: 'repeat(' + columns + ', minmax(0, 1fr))', gridTemplateRows: 'repeat(' + rows + ', minmax(0, 1fr))' };
 
-      // Feature 3: Cost dashboard — aggregate all token usage
+      // Feature 3: Cost dashboard â€” aggregate all token usage
       const handleBroadcast = () => {
         const targets = Array.from(broadcastTargets);
         if (broadcastInput.trim() && targets.length > 0) {
@@ -4004,15 +4084,15 @@
         ws.updateWorkspace(activeWorkspace.id, { selectedAgentIds: updated });
       };
 
-      // Activity bar tabs — Workspaces replaces Agents
+      // Activity bar tabs â€” Workspaces replaces Agents
       const tabs = [
         { id: 'agents', icon: ICONS.agents, label: 'Workspaces' },
-        { id: 'atlas', icon: null, emoji: '🗺️', label: 'UI Atlas' },
+        { id: 'atlas', icon: null, emoji: 'ðŸ—ºï¸', label: 'UI Atlas' },
         { id: 'notes', icon: ICONS.notes, label: 'Notes' },
         { id: 'plans', icon: ICONS.plans, label: 'Plans' },
         { id: 'commands', icon: ICONS.commands, label: 'Slash Commands' },
         { id: 'emulators', icon: ICONS.emulators, label: 'Emulators' },
-        { id: 'tokens', icon: null, emoji: '🪙', label: 'Token Usage' },
+        { id: 'tokens', icon: null, emoji: 'ðŸª™', label: 'Token Usage' },
       ];
 
       return e('div', { className: 'app' },
@@ -4102,7 +4182,7 @@
         e('div', { className: 'main-content' },
           !connected && e('div', { className: 'connection-error' }, 'Disconnected. Reconnecting...'),
 
-          // Broadcast bar (enhanced — Feature 10 + Feature 8)
+          // Broadcast bar (enhanced â€” Feature 10 + Feature 8)
           showBroadcast && e('div', { className: 'broadcast-bar-enhanced' },
             e('label', null, 'Broadcast'),
             // Feature 8: Selective broadcast chips
@@ -4146,7 +4226,7 @@
             })
           ),
 
-          // Terminal grid — fill all col*row slots, skip minimized agents
+          // Terminal grid â€” fill all col*row slots, skip minimized agents
           e('div', { className: 'terminal-grid', style: gridStyle },
             (() => {
               // When maximized, only show that agent
@@ -4189,6 +4269,7 @@
                   onCreateTerminal: ws.createTerminal,
                   onKillTerminal: ws.killTerminal,
                   onUpdateAgent: ws.updateAgent,
+                  onResolveModelMismatch: ws.resolveModelMismatch,
                 });
               }
               const nonMinimized = displayAgents;
@@ -4242,6 +4323,7 @@
                   onCreateTerminal: ws.createTerminal,
                   onKillTerminal: ws.killTerminal,
                   onUpdateAgent: ws.updateAgent,
+                  onResolveModelMismatch: ws.resolveModelMismatch,
                   isLocked,
                   onToggleLock: toggleLock,
                   isDragging: draggedAgent === agentId,

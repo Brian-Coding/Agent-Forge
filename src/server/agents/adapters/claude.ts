@@ -1,5 +1,6 @@
 import { existsSync } from 'fs';
 import { ArgvTooLongError, createCliEnv, killProcessTree, resolveCliBinary, safeSpawn } from '../../utils';
+import { stripModelTier } from '../agent-kinds';
 import { persistenceService } from '../../services/persistence.service';
 import { summarizeToolInput, type AgentEvent } from '../events';
 import { drainStreamToString, parseNdjsonLines, flushNdjsonLeftover } from '../stream-utils';
@@ -362,6 +363,11 @@ function normalizeClaudeEvent(
 
   // assistant: contains usage stats + content blocks (text / thinking / tool_use).
   if (event.type === 'assistant') {
+    // Every assistant message carries the model that produced it — ground
+    // truth per API call, available even when the turn dies before the final
+    // result event (kill, crash, max-turns). The result-event modelUsage
+    // check below stays as the authoritative end-of-turn snapshot.
+    const messageModel = event.message?.model;
     const usage = event.message?.usage;
     if (usage && typeof usage === 'object') {
       const inputTokens = (usage.input_tokens || 0)
@@ -372,7 +378,10 @@ function normalizeClaudeEvent(
         contextTokens: inputTokens > 0 ? inputTokens : undefined,
         inputTokensDelta: inputTokens > 0 ? inputTokens : undefined,
         outputTokensDelta: typeof usage.output_tokens === 'number' ? usage.output_tokens : undefined,
+        modelRan: typeof messageModel === 'string' && messageModel ? messageModel : undefined,
       });
+    } else if (typeof messageModel === 'string' && messageModel) {
+      ctx.emitAgentEvent({ type: 'usage', modelRan: messageModel });
     }
 
     const content = event.message?.content;
@@ -436,8 +445,13 @@ function normalizeClaudeEvent(
     }
 
     let contextLimit: number | undefined;
+    let modelRan: string | undefined;
     if (event.modelUsage && typeof event.modelUsage === 'object') {
-      for (const model of Object.values(event.modelUsage) as any[]) {
+      // modelUsage is keyed by the model the CLI ACTUALLY ran this turn — the
+      // ground truth we surface so the UI can never silently misreport the model
+      // (e.g. show "Fable 5" while Opus actually ran).
+      for (const [id, model] of Object.entries(event.modelUsage) as [string, any][]) {
+        if (!modelRan) modelRan = id;
         if (model && typeof model.contextWindow === 'number') {
           contextLimit = model.contextWindow;
           break;
@@ -445,9 +459,26 @@ function normalizeClaudeEvent(
       }
     }
 
+    // Silent-substitution guard: if the model that actually ran differs from what
+    // the user requested, the service quietly served something else. Confirmed
+    // 2026-07-01: large-context claude-fable-5 requests are served by
+    // claude-opus-4-8[1m]; phantom ids (claude-sonnet-5) get downgraded too.
+    // chat.service latches this same comparison into agent.modelMismatch, which
+    // BLOCKS further sends until the user resolves it — this message is the
+    // in-conversation explanation of why.
+    if (modelRan && ctx.model && stripModelTier(modelRan) !== stripModelTier(ctx.model)) {
+      ctx.emitSystemMessage(
+        `⚠ Requested model "${ctx.model}" but the CLI actually ran "${modelRan}". ` +
+        `The service substituted it silently (this happens when the id isn't available ` +
+        `on this account, or when a large-context Fable request is served by Opus). ` +
+        `This agent is now blocked until you resolve the mismatch banner.`,
+      );
+    }
+
     ctx.emitAgentEvent({
       type: 'usage',
       contextLimit,
+      modelRan,
       costUsdDelta: typeof event.total_cost_usd === 'number' ? event.total_cost_usd : undefined,
       turnsDelta: typeof event.num_turns === 'number' ? event.num_turns : undefined,
     });

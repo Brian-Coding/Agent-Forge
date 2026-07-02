@@ -1,6 +1,6 @@
 import type { AgentEvent } from '../agents/events';
 import type { AgentHandle, AgentRunContext } from '../agents/types';
-import type { ChatAgentKind } from '../agents/agent-kinds';
+import { stripModelTier, type ChatAgentKind } from '../agents/agent-kinds';
 import { getAgentAdapter, resolveAgentModel } from '../agents/registry';
 import { broadcast } from '../broadcast';
 import { agentService } from './agent.service';
@@ -30,6 +30,7 @@ interface TurnBuffer {
   // log via usageService.record() — so the log grows at most one row per
   // turn, not one row per internal API sub-call.
   turnUsage: { inputTokens: number; outputTokens: number; costUsd: number; turns: number };
+  modelRan?: string;
 }
 const turnBuffers: Map<string, TurnBuffer> = (globalThis as any).__chatTurnBuffers ??= new Map();
 
@@ -157,6 +158,7 @@ function handleEvent(agentId: string, event: AgentEvent): void {
         outputTokensDelta: event.outputTokensDelta,
         costUsdDelta: event.costUsdDelta,
         turnsDelta: event.turnsDelta,
+        modelRan: event.modelRan,
       });
       // Accumulate into the per-turn buffer for the usage-log record at finalize.
       const turn = turnBuffers.get(agentId);
@@ -165,6 +167,7 @@ function handleEvent(agentId: string, event: AgentEvent): void {
         if (typeof event.outputTokensDelta === 'number') turn.turnUsage.outputTokens += event.outputTokensDelta;
         if (typeof event.costUsdDelta === 'number') turn.turnUsage.costUsd += event.costUsdDelta;
         if (typeof event.turnsDelta === 'number') turn.turnUsage.turns += event.turnsDelta;
+        if (typeof event.modelRan === 'string' && event.modelRan) turn.modelRan = event.modelRan;
       }
       const snap = agentService.getTokenUsage(agentId);
       if (snap) {
@@ -177,6 +180,7 @@ function handleEvent(agentId: string, event: AgentEvent): void {
           totalOutputTokens: snap.totalOutputTokens,
           totalCostUsd: snap.totalCostUsd,
           numTurns: snap.numTurns,
+          modelRan: snap.lastModelRan,
         });
       }
       return;
@@ -258,6 +262,22 @@ async function runChatTurn(agentId: string, content: string, source?: 'qa'): Pro
     return;
   }
 
+  // 0) Model-mismatch hard stop. A prior turn was served by a different model
+  // than the user selected; refuse to run more turns until they resolve it via
+  // the banner. The message is NOT appended to history so nothing is silently
+  // swallowed — the user resends after resolving.
+  if (info.modelMismatch) {
+    const mm = info.modelMismatch;
+    const sysMsg = agentService.addSystemMessage(
+      agentId,
+      `🛑 Message not sent. The last turn was served by "${mm.ran}" although "${mm.requested}" was selected. ` +
+      `Use the banner above the input to either continue on ${mm.ran} (keeps this conversation) or start a ` +
+      `fresh session on ${mm.requested} — then resend your message.`,
+    );
+    broadcast({ type: 'message', message: sysMsg });
+    return;
+  }
+
   // 1) Append user turn to history + broadcast.
   const userMsg = agentService.appendMessage(agentId, 'user', content, undefined, undefined, source);
   broadcast({ type: 'message', message: userMsg });
@@ -285,14 +305,17 @@ async function runChatTurn(agentId: string, content: string, source?: 'qa'): Pro
     agentService.getSharedContext(),
   );
 
+  const requestedResolvedModel = resolveAgentModel(provider, info.model);
+
   // 5) Decide --resume vs fresh start. We --resume only when the agent's
-  //    current session is owned by THIS provider; if the user just swapped
-  //    providers, we start fresh and prepend the prior UI chat history so
-  //    the new provider has cross-provider context. After this turn finishes,
-  //    setCurrentSession claims the session for the (now-current) provider.
+  //    current session is owned by THIS provider/model pair; if the user just
+  //    swapped either, we start fresh and prepend the prior UI chat history so
+  //    the new session has cross-boundary context. After this turn finishes,
+  //    setCurrentSession claims the session for the now-current provider/model.
   const previousSessionProvider = agentService.getCurrentSessionProvider(agentId);
+  const previousSessionModel = agentService.getCurrentSessionModel(agentId);
   const previousSessionId = agentService.getCurrentSessionId(agentId);
-  const isProviderMatch = previousSessionProvider === provider && !!previousSessionId;
+  const isProviderMatch = previousSessionProvider === provider && previousSessionModel === (requestedResolvedModel || null) && !!previousSessionId;
   let sessionIdForAdapter = isProviderMatch ? previousSessionId : null;
 
   // Build the prompt body. On a swap, prepend the prior conversation as
@@ -315,22 +338,35 @@ async function runChatTurn(agentId: string, content: string, source?: 'qa'): Pro
   // Watchdog activity clock — any adapter event counts as liveness.
   let lastActivity = Date.now();
 
+  // Never swap a requested model silently: if the resolver rejects the agent's
+  // configured model (not in the provider catalog), tell the user which model
+  // is actually about to run instead of letting the default masquerade as it.
+  const resolvedModel = requestedResolvedModel;
+  if (info.model && resolvedModel !== info.model) {
+    const sysMsg = agentService.addSystemMessage(
+      agentId,
+      `⚠ Configured model "${info.model}" is not in the ${provider} catalog — running "${resolvedModel}" instead. ` +
+      `Pick a model from the dropdown to clear this.`,
+    );
+    broadcast({ type: 'message', message: sysMsg });
+  }
+
   const ctx: AgentRunContext = {
     paneId: agentId,
     cwd: info.cwd,
     referencePaths: validReferencePaths,
     systemPrompt: appendedSystemPrompt,
-    model: resolveAgentModel(provider, info.model),
+    model: resolvedModel,
     reasoningLevel: info.reasoningLevel,
 
     getSessionId(): string | null {
       return sessionIdForAdapter;
     },
     updateSessionId(nextSessionId: string): void {
-      // Claim the new session for this turn's provider. If the user swaps
-      // providers again, this lookup will detect the mismatch on the next
-      // turn and start fresh.
-      agentService.setCurrentSession(agentId, provider, nextSessionId);
+      // Claim the new session for this turn's provider/model. If the user swaps
+      // either again, this lookup will detect the mismatch on the next turn and
+      // start fresh.
+      agentService.setCurrentSession(agentId, provider, resolvedModel, nextSessionId);
     },
     emitChatEvent(_event: unknown): void {
       // Raw provider events currently have no UI surface. Hook target for
@@ -429,8 +465,17 @@ async function runChatTurn(agentId: string, content: string, source?: 'qa'): Pro
       // Stamp the provider that produced this turn so the chat UI can render
       // the correct role label ('Claude' vs 'Codex') per-message — historic
       // messages without this field display 'Claude' for backward compat.
-      const assistantMsg = agentService.appendMessage(agentId, 'assistant', finalText, undefined, undefined, undefined, provider);
+      const assistantMsg = agentService.appendMessage(agentId, 'assistant', finalText, undefined, undefined, undefined, provider, turnState?.modelRan || resolvedModel);
       broadcast({ type: 'message', message: assistantMsg });
+    }
+
+    // Ground-truth model check: if the CLI reported serving this turn with a
+    // different model than we requested, latch the mismatch — this blocks all
+    // further sends on this agent until the user resolves it. Tier suffixes
+    // ("[1m]") are stripped so a context-tier difference alone doesn't trip it.
+    const ranModel = turnState?.modelRan;
+    if (ranModel && resolvedModel && stripModelTier(ranModel) !== stripModelTier(resolvedModel)) {
+      agentService.setModelMismatch(agentId, resolvedModel, ranModel);
     }
 
     // Persist the per-turn usage rollup. No-ops if every counter is zero

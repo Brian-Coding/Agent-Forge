@@ -71,6 +71,18 @@ async function handleMessage(ws: ServerWebSocket<unknown>, message: ClientMessag
       break;
     }
 
+    case 'resolve_model_mismatch': {
+      // Two explicit resolutions for a latched model mismatch:
+      //   'continue-actual'  — adopt the model that really ran, keep the session
+      //   'fresh-requested'  — keep the selection, drop the session, spawn fresh
+      const action = message.action === 'continue-actual' ? 'continue-actual' : 'fresh-requested';
+      const agent = await agentService.resolveModelMismatch(message.id, action);
+      if (!agent) {
+        sendTo(ws, { type: 'error', message: 'Agent not found', agentId: message.id });
+      }
+      break;
+    }
+
     case 'send_message': {
       await chatService.sendMessage(message.agentId, message.content);
       break;

@@ -30,12 +30,15 @@ export const STATIC_AGENT_DEFINITIONS: Record<ChatAgentKind, AgentDefinition> = 
     supportsResume: true,
     supportsReasoningLevel: false,
     models: [
+      // Only real, account-accessible ids belong here. Phantom ids are dangerous:
+      // the API silently downgrades some (claude-sonnet-5 → claude-sonnet-4-6) and
+      // hard-errors others (claude-mythos-5). The runtime modelRan-divergence warning
+      // in the claude adapter is the backstop if a listed id ever rots. When
+      // ANTHROPIC_API_KEY is set, discovered models are merged in ahead of these.
       { id: 'claude-fable-5',            label: 'Fable 5' },
-      { id: 'claude-mythos-5',           label: 'Mythos 5' },
       { id: 'claude-opus-4-8',           label: 'Opus 4.8' },
       { id: 'claude-opus-4-7',           label: 'Opus 4.7' },
       { id: 'claude-opus-4-6',           label: 'Opus 4.6' },
-      { id: 'claude-sonnet-5',           label: 'Sonnet 5' },
       { id: 'claude-sonnet-4-6',         label: 'Sonnet 4.6' },
       { id: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5' },
     ],
@@ -68,4 +71,14 @@ export function getAgentDefinition(kind: ChatAgentKind): AgentDefinition {
 
 export function isChatAgentKind(value: unknown): value is ChatAgentKind {
   return value === 'claude' || value === 'codex';
+}
+
+/**
+ * Strip a context-tier suffix like "[1m]" from a model id so
+ * "claude-opus-4-8[1m]" and "claude-opus-4-8" compare equal. Used everywhere
+ * a requested model is compared against the CLI-reported ground truth, so a
+ * tier difference alone never counts as a mismatch.
+ */
+export function stripModelTier(model: string): string {
+  return model.replace(/\[[^\]]*\]$/, '');
 }
