@@ -131,35 +131,42 @@ async function emitSnapshotFromRollout(ctx: AgentRunContext, threadId: string): 
   const f = Bun.file(path);
   const size = f.size;
   if (!size) return;
-  const start = Math.max(0, size - 262_144);
-  const text = await f.slice(start, size).text();
-  const lines = text.split('\n');
   let modelRan: string | undefined;
   let contextTokens: number | undefined;
   let contextLimit: number | undefined;
 
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const line = lines[i];
-    if (!line) continue;
+  const readLine = (line: string): void => {
+    if (!line) return;
     try {
       const event = JSON.parse(line);
       const payload = event?.payload;
-
       if (!modelRan && event?.type === 'turn_context' && typeof payload?.model === 'string' && payload.model) {
         modelRan = payload.model;
       }
-
       if ((contextTokens === undefined || contextLimit === undefined) && payload?.type === 'token_count' && payload.info) {
         const total = payload.info.last_token_usage?.total_tokens;
         const window = payload.info.model_context_window;
         contextTokens = typeof total === 'number' && total >= 0 ? total : contextTokens;
         contextLimit = typeof window === 'number' && window > 0 ? window : contextLimit;
       }
-
-      if (modelRan && (contextTokens !== undefined || contextLimit !== undefined)) break;
     } catch {
-      // first line of the slice may be cut mid-JSON; keep walking back
+      // Chunk boundaries can split a JSONL record; the next chunk completes it.
     }
+  };
+
+  const chunkSize = 1_048_576;
+  let end = size;
+  let suffix = '';
+  while (end > 0 && !(modelRan && (contextTokens !== undefined || contextLimit !== undefined))) {
+    const start = Math.max(0, end - chunkSize);
+    const text = await f.slice(start, end).text();
+    const lines = (text + suffix).split('\n');
+    suffix = start > 0 ? (lines.shift() ?? '') : '';
+    for (let i = lines.length - 1; i >= 0; i--) {
+      readLine(lines[i] ?? '');
+      if (modelRan && (contextTokens !== undefined || contextLimit !== undefined)) break;
+    }
+    end = start;
   }
 
   if (modelRan || contextTokens !== undefined || contextLimit !== undefined) {

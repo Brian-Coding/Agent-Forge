@@ -2,7 +2,7 @@
 import { join } from 'path';
 import { tmpdir } from 'os';
 import type { AgentInfo, AgentProvider, AgentStatus, ChatMessage } from '../../shared/protocol';
-import { STATIC_AGENT_DEFINITIONS } from '../agents/agent-kinds';
+import { STATIC_AGENT_DEFINITIONS, stripModelTier } from '../agents/agent-kinds';
 import { generateId } from '../utils';
 import { persistenceService } from './persistence.service';
 import { noteService } from './note.service';
@@ -552,8 +552,9 @@ export const agentService = {
     if (action === 'continue-actual') {
       // Deliberately NOT updateAgent(): that would invalidate the session, but
       // the session genuinely belongs to `ran` — adopt it, don't discard it.
-      agent.info.model = mm.ran;
-      agent.currentSessionModel = agent.currentSessionId ? mm.ran : null;
+      const actualModel = stripModelTier(mm.ran);
+      agent.info.model = actualModel;
+      agent.currentSessionModel = agent.currentSessionId ? actualModel : null;
     } else {
       agent.currentSessionId = null;
       agent.currentSessionProvider = null;
