@@ -447,14 +447,27 @@ function normalizeClaudeEvent(
     let contextLimit: number | undefined;
     let modelRan: string | undefined;
     if (event.modelUsage && typeof event.modelUsage === 'object') {
-      // modelUsage is keyed by the model the CLI ACTUALLY ran this turn — the
-      // ground truth we surface so the UI can never silently misreport the model
-      // (e.g. show "Fable 5" while Opus actually ran).
+      // modelUsage is keyed by EVERY model the CLI touched this turn — not just
+      // the main one. Claude Code fires the small/fast model (claude-haiku-4-5)
+      // for background chores (title/topic generation, quota checks) on nearly
+      // every turn, so haiku appears alongside the model doing the real work.
+      // Taking the first key blindly reported those auxiliary haiku calls as
+      // "the model that ran," which false-latched a mismatch and blocked all
+      // sends whenever a non-haiku model was selected. Pick the model with the
+      // most token usage instead: the main model always dwarfs the tiny
+      // auxiliary call, and a genuine silent substitution (e.g. Fable→Opus)
+      // still surfaces because the substitute does the real work and wins here.
+      const tokensOf = (m: any): number =>
+        !m || typeof m !== 'object' ? 0 :
+        (Number(m.inputTokens) || 0) + (Number(m.outputTokens) || 0) +
+        (Number(m.cacheReadInputTokens) || 0) + (Number(m.cacheCreationInputTokens) || 0);
+      let bestTokens = -1;
       for (const [id, model] of Object.entries(event.modelUsage) as [string, any][]) {
-        if (!modelRan) modelRan = id;
-        if (model && typeof model.contextWindow === 'number') {
-          contextLimit = model.contextWindow;
-          break;
+        const t = tokensOf(model);
+        if (t > bestTokens) {
+          bestTokens = t;
+          modelRan = id;
+          contextLimit = model && typeof model.contextWindow === 'number' ? model.contextWindow : contextLimit;
         }
       }
     }
