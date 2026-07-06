@@ -444,14 +444,17 @@ async function runChatTurn(agentId: string, content: string, source?: 'qa'): Pro
     const sysMsg = agentService.addSystemMessage(agentId, `Agent run failed: ${e?.message || String(e)}`);
     broadcast({ type: 'message', message: sysMsg });
   } finally {
-    // Flush the final assistant message. Prefer streamed text-delta accumulation;
-    // fall back to the result event's text if nothing streamed (rare path).
+    // Flush the final assistant message. Claude streams the final response, so
+    // prefer accumulated deltas there. Codex also streams progress/status text;
+    // its --output-last-message result is the canonical persisted answer.
     // Use the local `turn` (not the map) so this turn always flushes its own
     // buffer even if a newer turn has since replaced the map entry.
     const turnState = turn;
     const streamed = (turnState?.accumulatedText ?? '').trim();
     const resultText = (turnState?.lastResultEmitted ?? '').trim();
-    let finalText = streamed.length >= resultText.length ? streamed : resultText;
+    let finalText = provider === 'codex' && resultText
+      ? resultText
+      : (streamed.length >= resultText.length ? streamed : resultText);
 
     if (finalText) {
       if (turnState?.abortReason) {
