@@ -38,6 +38,14 @@ export interface AgentInfo {
   provider?: AgentProvider;   // Defaults to 'claude' when absent (backward compat with pre-rebuild data.json)
   model?: string;             // Provider-scoped model id; null → adapter default
   reasoningLevel?: string;    // Codex-only (low / medium / high / xhigh)
+  /**
+   * Set when a turn's ground-truth model (reported by the CLI) differed from
+   * the model the user selected — e.g. the service silently served Opus for a
+   * large-context Fable request. While set, chat.service REFUSES new sends for
+   * this agent; the UI renders a blocking banner whose two actions resolve it
+   * (continue on `ran`, or start a fresh session on `requested`).
+   */
+  modelMismatch?: { requested: string; ran: string; at: number } | null;
 }
 
 export interface ModelOption {
@@ -66,13 +74,14 @@ export interface ModelCatalogResponse {
  * etc.). Stored in data.json.
  *
  * Session model: one current session per agent, owned by exactly one
- * provider. When the user swaps provider, the next turn starts fresh
+ * provider/model pair. When the user swaps provider or model, the next turn starts fresh
  * (with prior UI chat history prepended into the prompt) and the new
- * provider claims currentSessionId/currentSessionProvider as its own.
+ * provider/model claims currentSessionId/currentSessionProvider/currentSessionModel as its own.
  */
 export interface PersistedAgentRecord extends AgentInfo {
   currentSessionId?: string | null;
   currentSessionProvider?: AgentProvider | null;
+  currentSessionModel?: string | null;
   contextTokens?: number;
   contextLimit?: number;
   totalInputTokens?: number;
@@ -93,7 +102,7 @@ export interface PersistedAgentRecord extends AgentInfo {
  *       (Codex session is dropped — we can't carry both forward; the lost
  *        side starts fresh on next turn with full UI history prepended.)
  *
- *   v3 (current):       { currentSessionId, currentSessionProvider }
+ *   v3 (current):       { currentSessionId, currentSessionProvider, currentSessionModel }
  *     → unchanged
  *
  * Also defaults `provider` to 'claude' so the inline dropdown always has
@@ -127,10 +136,26 @@ export function migrateAgentRecord(raw: any): PersistedAgentRecord {
     record.provider = 'claude';
   }
 
+  // Normalize modelMismatch: anything other than the full well-formed shape
+  // collapses to null so a corrupt record can't permanently wedge sends.
+  const mm = record.modelMismatch;
+  if (!mm || typeof mm !== 'object'
+      || typeof mm.requested !== 'string' || !mm.requested
+      || typeof mm.ran !== 'string' || !mm.ran) {
+    record.modelMismatch = null;
+  } else {
+    record.modelMismatch = { requested: mm.requested, ran: mm.ran, at: typeof mm.at === 'number' ? mm.at : Date.now() };
+  }
+
   // Normalize empty session marker to null instead of undefined.
   if (!record.currentSessionId) {
     record.currentSessionId = null;
     record.currentSessionProvider = null;
+    record.currentSessionModel = null;
+  } else if (typeof record.currentSessionModel !== 'string' || !record.currentSessionModel) {
+    // Existing sessions pre-date model binding, so they are unsafe to resume:
+    // the CLI may keep the old session's model even when a new --model is passed.
+    record.currentSessionModel = null;
   }
 
   return record as PersistedAgentRecord;
@@ -146,6 +171,7 @@ export interface ChatMessage {
   imageMimeType?: string;     // e.g. 'image/png', 'image/jpeg'
   source?: 'qa';              // QA-originated message (for visual styling)
   provider?: AgentProvider;   // Which provider produced this turn (assistant messages only). Stamped at turn-finalize. Legacy messages without this field display as 'Claude' for backward compat.
+  model?: string;             // Which model actually produced this turn when the provider reports it.
 }
 
 export interface ProjectNote {
@@ -250,6 +276,7 @@ export interface UsageReport {
 export type ClientMessage =
   | { type: 'create_agent'; name: string; cwd: string; referencePaths?: string[]; systemPrompt?: string; workspaceId?: string }
   | { type: 'update_agent'; id: string; name?: string; cwd?: string; referencePaths?: string[]; systemPrompt?: string; provider?: AgentProvider; model?: string; reasoningLevel?: string }
+  | { type: 'resolve_model_mismatch'; id: string; action: 'continue-actual' | 'fresh-requested' }
   | { type: 'send_message'; agentId: string; content: string }
   | { type: 'kill_agent'; agentId: string }
   | { type: 'stop_agent'; agentId: string }
@@ -294,7 +321,10 @@ export type ClientMessage =
   | { type: 'kill_terminal'; id: string }
   | { type: 'get_terminals' }
   // Kill all
-  | { type: 'kill_all' };
+  | { type: 'kill_all' }
+  // App-level heartbeat — browsers can't send protocol-level pings, so the
+  // client uses this to detect half-open sockets (e.g. after sleep/resume).
+  | { type: 'ping' };
 
 // Server -> Client messages
 export type ServerMessage =
@@ -325,7 +355,7 @@ export type ServerMessage =
   // Settings
   | { type: 'settings'; settings: AppSettings }
   // Token usage (per-agent live state — drives the per-chat context bar)
-  | { type: 'token_usage'; agentId: string; contextTokens: number; contextLimit: number; totalInputTokens: number; totalOutputTokens: number; totalCostUsd: number; numTurns: number }
+  | { type: 'token_usage'; agentId: string; contextTokens: number; contextLimit: number; totalInputTokens: number; totalOutputTokens: number; totalCostUsd: number; numTurns: number; modelRan?: string }
   // Full token report (windows + per-agent) — drives the Tokens sidebar tab.
   | { type: 'usage_report'; report: UsageReport }
   // Workspaces
@@ -341,7 +371,9 @@ export type ServerMessage =
   | { type: 'terminals_list'; terminals: TerminalSession[] }
   | { type: 'terminal_created'; terminal: TerminalSession }
   | { type: 'terminal_output'; terminalId: string; content: string }
-  | { type: 'terminal_exited'; terminalId: string; exitCode: number | null };
+  | { type: 'terminal_exited'; terminalId: string; exitCode: number | null }
+  // Heartbeat reply
+  | { type: 'pong' };
 
 // Persistence types
 export interface PersistedData {

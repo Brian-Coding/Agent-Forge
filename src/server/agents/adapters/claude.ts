@@ -1,5 +1,6 @@
 import { existsSync } from 'fs';
-import { ArgvTooLongError, resolveCliBinary, safeSpawn } from '../../utils';
+import { ArgvTooLongError, createCliEnv, killProcessTree, resolveCliBinary, safeSpawn } from '../../utils';
+import { stripModelTier } from '../agent-kinds';
 import { persistenceService } from '../../services/persistence.service';
 import { summarizeToolInput, type AgentEvent } from '../events';
 import { drainStreamToString, parseNdjsonLines, flushNdjsonLeftover } from '../stream-utils';
@@ -43,8 +44,9 @@ export const claudeAdapter: AgentAdapter<undefined> = {
 
     // Resolve to absolute path so Bun.spawn doesn't have to probe PATHEXT
     // from the agent's cwd (which fails on Windows for npm shim files).
+    const claudeBin = resolveCliBinary('claude');
     const args: string[] = [
-      resolveCliBinary('claude'),
+      claudeBin,
       '--print',
       '--output-format', 'stream-json',
       '--verbose',
@@ -74,14 +76,15 @@ export const claudeAdapter: AgentAdapter<undefined> = {
     return {
       async run() {
         try {
-          // CLAUDECODE env var leaks "I'm running inside Claude Code already" signals
-          // that confuse a freshly-spawned Claude CLI — strip it. The rest of process.env
-          // (PATH, USERPROFILE, etc.) is preserved so the CLI can find its bin shims and
-          // home-dir config on Windows.
-          const env: Record<string, string> = {};
-          for (const [k, v] of Object.entries(process.env)) {
-            if (k === 'CLAUDECODE') continue;
-            if (typeof v === 'string') env[k] = v;
+          // CLAUDECODE leaks "already inside Claude Code" signals. createCliEnv
+          // strips it and augments PATH for GUI/editor-launched servers.
+          const env = createCliEnv();
+          const authError = await getClaudeAuthError(claudeBin, env);
+          if (authError) {
+            ctx.emitAgentEvent({ type: 'error', message: authError });
+            ctx.emitSystemMessage(authError);
+            ctx.emitAgentEvent({ type: 'finish', reason: 'auth-error' });
+            return undefined;
           }
 
           try {
@@ -104,6 +107,12 @@ export const claudeAdapter: AgentAdapter<undefined> = {
 
           if (proc.pid) persistenceService.trackPid(proc.pid);
 
+          // A stop/kill may have landed between handle registration and the
+          // spawn above — honor it now instead of running a full orphan turn.
+          if (killed) {
+            void killProcessTree(proc);
+          }
+
           // Feed the prompt via stdin then close, so the CLI processes a single turn
           // and exits. This matches the agent-forge convention; --print + stdin is the
           // shape Claude CLI expects for non-interactive batch use.
@@ -111,7 +120,10 @@ export const claudeAdapter: AgentAdapter<undefined> = {
             proc.stdin.write(prompt + '\n');
             proc.stdin.end();
           } catch (e) {
-            console.warn('[claude] stdin write failed:', e);
+            // If stdin is broken the CLI would sit waiting for input forever —
+            // kill it so the turn unwinds instead of wedging the agent.
+            console.warn('[claude] stdin write failed; killing process:', e);
+            void killProcessTree(proc);
           }
 
           // Stream stderr live so the UI can show error output as it arrives.
@@ -127,6 +139,9 @@ export const claudeAdapter: AgentAdapter<undefined> = {
                 const text = decoder.decode(value, { stream: true });
                 if (text) {
                   acc += text;
+                  // Keep only the tail — a chatty/looping CLI can otherwise
+                  // balloon memory and later broadcast a megabyte error blob.
+                  if (acc.length > 64_000) acc = acc.slice(-64_000);
                   ctx.emitAgentEvent({ type: 'stderr', text });
                 }
               }
@@ -159,6 +174,12 @@ export const claudeAdapter: AgentAdapter<undefined> = {
               if (done) break;
               leftover += decoder.decode(value, { stream: true });
               leftover = parseNdjsonLines(leftover, handleEvent);
+              // A single newline-free line growing without bound means the CLI
+              // is emitting something we'll never parse — drop it rather than OOM.
+              if (leftover.length > 10_000_000) {
+                console.error('[claude] dropping >10MB unterminated stdout line');
+                leftover = '';
+              }
             }
             flushNdjsonLeftover(leftover, handleEvent);
           } finally {
@@ -180,8 +201,13 @@ export const claudeAdapter: AgentAdapter<undefined> = {
               errorMessage: stderrText,
             };
           }
-          if (!killed && exitCode !== 0 && stderrText) {
-            ctx.emitAgentEvent({ type: 'error', message: stderrText });
+          if (!killed && exitCode !== 0) {
+            // Even with empty stderr the user must see that the turn failed —
+            // otherwise a crash looks like "Claude said nothing".
+            ctx.emitAgentEvent({
+              type: 'error',
+              message: stderrText || `Claude CLI exited with code ${exitCode} and no output`,
+            });
           }
 
           ctx.emitAgentEvent({
@@ -201,23 +227,29 @@ export const claudeAdapter: AgentAdapter<undefined> = {
       },
 
       stop() {
+        // Set killed even before proc exists — run() checks it post-spawn so a
+        // stop landing in the spawn window doesn't produce an orphan turn.
+        killed = true;
         if (!proc) return;
         try {
-          // SIGINT lets the CLI flush + exit gracefully. If it ignores us, the
-          // event loop will still resolve when the kernel reaps it. We do NOT
-          // escalate to SIGKILL here — that's what kill() is for.
-          killed = true;
-          proc.kill('SIGINT');
+          if (process.platform === 'win32') {
+            // SIGINT isn't deliverable on Windows; Bun's kill() only terminates
+            // the npm .cmd shim, leaving the real CLI running. Kill the tree.
+            void killProcessTree(proc);
+          } else {
+            // SIGINT lets the CLI flush + exit gracefully on POSIX.
+            proc.kill('SIGINT');
+          }
         } catch (e) {
           console.warn('[claude] stop() failed:', e);
         }
       },
 
       kill() {
+        killed = true;
         if (!proc) return;
         try {
-          killed = true;
-          proc.kill();
+          void killProcessTree(proc);
         } catch (e) {
           console.warn('[claude] kill() failed:', e);
         }
@@ -225,6 +257,87 @@ export const claudeAdapter: AgentAdapter<undefined> = {
     };
   },
 };
+
+const CLAUDE_AUTH_CHECK_TIMEOUT_MS = 5_000;
+
+async function getClaudeAuthError(claudeBin: string, env: Record<string, string>): Promise<string | null> {
+  if (env.AGENT_FORGE_SKIP_CLAUDE_AUTH_CHECK === '1') return null;
+
+  // API-key/token environments do not need Claude Code's persisted first-party login.
+  if (env.ANTHROPIC_API_KEY || env.ANTHROPIC_AUTH_TOKEN || env.CLAUDE_CODE_OAUTH_TOKEN) {
+    return null;
+  }
+
+  try {
+    const result = await getClaudeAuthStatus(claudeBin, env);
+    if (!result) return null;
+
+    const { status, detail } = result;
+
+    if (status?.loggedIn === true) return null;
+    if (status?.loggedIn !== false) return null;
+
+    return [
+      'Claude Code is not authenticated for non-interactive Agent Forge runs.',
+      `Fresh CLI auth check failed (${detail}).`,
+      'Run `claude auth login` in a normal terminal, then verify `claude auth status` reports loggedIn=true.',
+      'If you use a Claude subscription token instead, run `claude setup-token`; if you use the Anthropic API, start Agent Forge with `ANTHROPIC_API_KEY` set.',
+    ].join('\n');
+  } catch (e: any) {
+    console.warn('[claude] auth status check skipped:', e?.message || e);
+    return null;
+  }
+}
+
+async function getClaudeAuthStatus(
+  claudeBin: string,
+  env: Record<string, string>,
+): Promise<{ status: any; detail: string } | null> {
+  let timedOut = false;
+  const proc = Bun.spawn([claudeBin, 'auth', 'status'], {
+    stdout: 'pipe',
+    stderr: 'pipe',
+    env,
+  });
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    try { proc.kill(); } catch {}
+  }, CLAUDE_AUTH_CHECK_TIMEOUT_MS);
+
+  try {
+    const [, stdout] = await Promise.all([
+      proc.exited,
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ]);
+
+    if (timedOut) {
+      console.warn(`[claude] auth status check timed out after ${CLAUDE_AUTH_CHECK_TIMEOUT_MS}ms`);
+      return null;
+    }
+
+    let status: any = null;
+    try {
+      status = stdout ? JSON.parse(stdout) : null;
+    } catch {
+      console.warn('[claude] auth status returned non-JSON output');
+      return null;
+    }
+
+    if (!status || typeof status !== 'object') return null;
+
+    return {
+      status,
+      detail: `status=${JSON.stringify({
+        loggedIn: status.loggedIn,
+        authMethod: status.authMethod,
+        apiProvider: status.apiProvider,
+      })}`,
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 
 /**
  * Translate a single Claude stream-json event into one or more normalized
@@ -250,6 +363,11 @@ function normalizeClaudeEvent(
 
   // assistant: contains usage stats + content blocks (text / thinking / tool_use).
   if (event.type === 'assistant') {
+    // Every assistant message carries the model that produced it — ground
+    // truth per API call, available even when the turn dies before the final
+    // result event (kill, crash, max-turns). The result-event modelUsage
+    // check below stays as the authoritative end-of-turn snapshot.
+    const messageModel = event.message?.model;
     const usage = event.message?.usage;
     if (usage && typeof usage === 'object') {
       const inputTokens = (usage.input_tokens || 0)
@@ -260,7 +378,10 @@ function normalizeClaudeEvent(
         contextTokens: inputTokens > 0 ? inputTokens : undefined,
         inputTokensDelta: inputTokens > 0 ? inputTokens : undefined,
         outputTokensDelta: typeof usage.output_tokens === 'number' ? usage.output_tokens : undefined,
+        modelRan: typeof messageModel === 'string' && messageModel ? messageModel : undefined,
       });
+    } else if (typeof messageModel === 'string' && messageModel) {
+      ctx.emitAgentEvent({ type: 'usage', modelRan: messageModel });
     }
 
     const content = event.message?.content;
@@ -324,18 +445,53 @@ function normalizeClaudeEvent(
     }
 
     let contextLimit: number | undefined;
+    let modelRan: string | undefined;
     if (event.modelUsage && typeof event.modelUsage === 'object') {
-      for (const model of Object.values(event.modelUsage) as any[]) {
-        if (model && typeof model.contextWindow === 'number') {
-          contextLimit = model.contextWindow;
-          break;
+      // modelUsage is keyed by EVERY model the CLI touched this turn — not just
+      // the main one. Claude Code fires the small/fast model (claude-haiku-4-5)
+      // for background chores (title/topic generation, quota checks) on nearly
+      // every turn, so haiku appears alongside the model doing the real work.
+      // Taking the first key blindly reported those auxiliary haiku calls as
+      // "the model that ran," which false-latched a mismatch and blocked all
+      // sends whenever a non-haiku model was selected. Pick the model with the
+      // most token usage instead: the main model always dwarfs the tiny
+      // auxiliary call, and a genuine silent substitution (e.g. Fable→Opus)
+      // still surfaces because the substitute does the real work and wins here.
+      const tokensOf = (m: any): number =>
+        !m || typeof m !== 'object' ? 0 :
+        (Number(m.inputTokens) || 0) + (Number(m.outputTokens) || 0) +
+        (Number(m.cacheReadInputTokens) || 0) + (Number(m.cacheCreationInputTokens) || 0);
+      let bestTokens = -1;
+      for (const [id, model] of Object.entries(event.modelUsage) as [string, any][]) {
+        const t = tokensOf(model);
+        if (t > bestTokens) {
+          bestTokens = t;
+          modelRan = id;
+          contextLimit = model && typeof model.contextWindow === 'number' ? model.contextWindow : contextLimit;
         }
       }
+    }
+
+    // Silent-substitution guard: if the model that actually ran differs from what
+    // the user requested, the service quietly served something else. Confirmed
+    // 2026-07-01: large-context claude-fable-5 requests are served by
+    // claude-opus-4-8[1m]; phantom ids (claude-sonnet-5) get downgraded too.
+    // chat.service latches this same comparison into agent.modelMismatch, which
+    // BLOCKS further sends until the user resolves it — this message is the
+    // in-conversation explanation of why.
+    if (modelRan && ctx.model && stripModelTier(modelRan) !== stripModelTier(ctx.model)) {
+      ctx.emitSystemMessage(
+        `⚠ Requested model "${ctx.model}" but the CLI actually ran "${modelRan}". ` +
+        `The service substituted it silently (this happens when the id isn't available ` +
+        `on this account, or when a large-context Fable request is served by Opus). ` +
+        `This agent is now blocked until you resolve the mismatch banner.`,
+      );
     }
 
     ctx.emitAgentEvent({
       type: 'usage',
       contextLimit,
+      modelRan,
       costUsdDelta: typeof event.total_cost_usd === 'number' ? event.total_cost_usd : undefined,
       turnsDelta: typeof event.num_turns === 'number' ? event.num_turns : undefined,
     });

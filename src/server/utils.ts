@@ -44,14 +44,21 @@ function estimateArgvBytes(args: string[]): number {
 // Every long-running child (claude, codex, terminal sessions that pass large
 // payloads) should go through this so a pathological prompt or doc-heavy
 // system context cannot panic the host process.
-export function safeSpawn(
-  args: string[],
-  opts: SpawnOptions.OptionsObject<'pipe', 'pipe', 'pipe'>,
-): Subprocess<'pipe', 'pipe', 'pipe'> {
+// Throw a catchable ArgvTooLongError if the serialized argv would exceed the
+// Windows command-line limit. Call this before any raw Bun.spawn whose stdio
+// shape differs from safeSpawn's pipe/pipe/pipe (e.g. terminal sessions).
+export function assertArgvWithinLimit(args: string[]): void {
   const bytes = estimateArgvBytes(args);
   if (bytes > MAX_ARGV_BYTES) {
     throw new ArgvTooLongError(bytes, MAX_ARGV_BYTES, args[0] ?? 'unknown');
   }
+}
+
+export function safeSpawn(
+  args: string[],
+  opts: SpawnOptions.OptionsObject<'pipe', 'pipe', 'pipe'>,
+): Subprocess<'pipe', 'pipe', 'pipe'> {
+  assertArgvWithinLimit(args);
   return Bun.spawn(args, opts) as Subprocess<'pipe', 'pipe', 'pipe'>;
 }
 
@@ -62,14 +69,24 @@ export function jsonResponse(data: any, status = 200): Response {
   });
 }
 
-// Kill an entire process tree on Windows using taskkill /T /F
+// Kill an entire process tree. Windows needs taskkill /T; POSIX gets a direct
+// process kill fallback because spawned CLIs are not always in their own group.
 export async function treeKill(pid: number): Promise<void> {
   try {
-    const proc = Bun.spawn(['taskkill', '/T', '/F', '/PID', String(pid)], {
-      stdout: 'pipe',
-      stderr: 'pipe',
-    });
-    await proc.exited;
+    if (process.platform === 'win32') {
+      const proc = Bun.spawn(['taskkill', '/T', '/F', '/PID', String(pid)], {
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
+      await proc.exited;
+      return;
+    }
+
+    try {
+      process.kill(-pid, 'SIGKILL');
+    } catch {
+      process.kill(pid, 'SIGKILL');
+    }
   } catch (e) {
     console.error(`treeKill(${pid}) failed (process may already be dead):`, e);
   }
@@ -100,9 +117,74 @@ export async function killProcessTree(proc: Subprocess<any, any, any>): Promise<
 //   * Cache per-name forever — npm/bun bin paths don't move during a run
 
 import { existsSync as _existsSync } from 'fs';
-import { join as _pathJoin, sep as _pathSep } from 'path';
+import { homedir as _homedir } from 'os';
+import { join as _pathJoin } from 'path';
 
 const _binaryCache: Map<string, string> = (globalThis as any).__cliBinaryCache ??= new Map<string, string>();
+
+function _pathDelimiter(isWin: boolean): string {
+  return isWin ? ';' : ':';
+}
+
+function _defaultCliDirs(isWin: boolean): string[] {
+  if (isWin) return [];
+
+  const home = _homedir();
+  return [
+    _pathJoin(home, '.local', 'bin'),
+    _pathJoin(home, '.bun', 'bin'),
+    '/opt/homebrew/bin',
+    '/opt/homebrew/sbin',
+    '/usr/local/bin',
+    '/usr/bin',
+    '/bin',
+    '/usr/sbin',
+    '/sbin',
+  ];
+}
+
+function _cliSearchDirs(): string[] {
+  const isWin = process.platform === 'win32';
+  const pathRaw = process.env.PATH ?? process.env.Path ?? '';
+  const dirs = pathRaw.split(_pathDelimiter(isWin)).filter(Boolean);
+  const seen = new Set<string>();
+
+  return dirs.concat(_defaultCliDirs(isWin)).filter((dir) => {
+    if (seen.has(dir)) return false;
+    seen.add(dir);
+    return true;
+  });
+}
+
+/**
+ * Build an environment for spawned agent CLIs.
+ *
+ * GUI-launched shells and editor tasks on macOS often start Bun with a minimal
+ * PATH that omits Homebrew and ~/.local/bin. Resolve/spawn use the same
+ * augmented PATH so absolute shim scripts can still find `node` and helper
+ * binaries through `/usr/bin/env`.
+ */
+export function createCliEnv(extra: Record<string, string | undefined> = {}): Record<string, string> {
+  const isWin = process.platform === 'win32';
+  const env: Record<string, string> = {};
+
+  for (const [k, v] of Object.entries(process.env)) {
+    if (k === 'CLAUDECODE') continue;
+    if (k === '__CFBundleIdentifier') continue;
+    if (k === 'INIT_CWD' || k === 'NODE' || k === 'TERM_PROGRAM' || k === 'TERM_PROGRAM_VERSION') continue;
+    if (k.startsWith('VSCODE_') || k.startsWith('npm_')) continue;
+    if (typeof v === 'string') env[k] = v;
+  }
+
+  const pathKey = isWin ? (env.Path !== undefined ? 'Path' : 'PATH') : 'PATH';
+  env[pathKey] = _cliSearchDirs().join(_pathDelimiter(isWin));
+
+  for (const [k, v] of Object.entries(extra)) {
+    if (typeof v === 'string') env[k] = v;
+  }
+
+  return env;
+}
 
 export function resolveCliBinary(name: string): string {
   const cached = _binaryCache.get(name);
@@ -122,10 +204,7 @@ export function resolveCliBinary(name: string): string {
       ))
     : [''];
 
-  const pathRaw = process.env.PATH ?? process.env.Path ?? '';
-  const dirs = pathRaw.split(isWin ? ';' : ':').filter(Boolean);
-
-  for (const dir of dirs) {
+  for (const dir of _cliSearchDirs()) {
     for (const ext of exts) {
       const candidate = _pathJoin(dir, name + ext);
       try {

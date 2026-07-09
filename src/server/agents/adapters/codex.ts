@@ -1,8 +1,8 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { unlink } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { isAbsolute, relative, resolve } from 'node:path';
-import { ArgvTooLongError, resolveCliBinary, safeSpawn } from '../../utils';
+import { homedir, tmpdir } from 'node:os';
+import { isAbsolute, join, relative, resolve } from 'node:path';
+import { ArgvTooLongError, createCliEnv, killProcessTree, resolveCliBinary, safeSpawn } from '../../utils';
 import { persistenceService } from '../../services/persistence.service';
 import { summarizeToolInput, type AgentEvent } from '../events';
 import { drainStreamToString, parseNdjsonLines, flushNdjsonLeftover } from '../stream-utils';
@@ -54,7 +54,131 @@ const MAX_INLINE_DIFF_CHARS = 80_000;
 const STDERR_NOISE_PATTERNS = [
   /failed to record rollout items/i,
   /failed to refresh available models/i,
+  // Internal tracing logs ("2026-06-09T21:46:40Z ERROR codex_core...: ...") are
+  // CLI diagnostics, not agent output — real failures still surface via exit
+  // code + the full stderr accumulator.
+  /^\s*\d{4}-\d{2}-\d{2}T[\d:.]+Z?\s+(ERROR|WARN|INFO|DEBUG|TRACE)\s+\S*codex/i,
 ];
+
+// Resume failures when the persisted thread id no longer exists on disk
+// (Codex history pruned, version upgrade). Mirrors the Claude adapter's
+// "No conversation found" detection so the bridge can clear the session
+// and retry fresh instead of failing every turn forever.
+const STALE_SESSION_PATTERNS = [
+  // Single-line matches only — stderr is a multi-line accumulator full of
+  // unrelated noise, so cross-line .* matches false-positive easily.
+  /\b(thread|session|conversation|rollout)\b[^\n]*\b(not found|no longer|does not exist|missing)\b/i,
+  /\b(no|failed to find|could not find|unable to load)\b[^\n]*\b(thread|session|conversation|rollout)\b/i,
+  /failed to resume/i,
+];
+
+// codex exec --json never reports context-window fullness (turn.completed
+// usage is a per-turn aggregate), but the session rollout file records
+// token_count events with last_token_usage.total_tokens (== codex-rs
+// tokens_in_context_window) and model_context_window. After each turn we
+// tail the rollout and emit the real snapshot. Best-effort: any failure
+// just leaves the context display unchanged.
+const rolloutPathCache = new Map<string, string>();
+
+async function findRolloutPath(threadId: string): Promise<string | null> {
+  const cached = rolloutPathCache.get(threadId);
+  if (cached && (await Bun.file(cached).exists())) return cached;
+  const sessionsDir = join(process.env.CODEX_HOME || join(homedir(), '.codex'), 'sessions');
+  try {
+    const glob = new Bun.Glob(`**/rollout-*-${threadId}.jsonl`);
+    for await (const p of glob.scan({ cwd: sessionsDir, absolute: true })) {
+      rolloutPathCache.set(threadId, p);
+      return p;
+    }
+  } catch {
+    // sessions dir missing or unreadable
+  }
+  return null;
+}
+
+async function emitContextFromRollout(ctx: AgentRunContext, threadId: string): Promise<void> {
+  const path = await findRolloutPath(threadId);
+  if (!path) return;
+  const f = Bun.file(path);
+  const size = f.size;
+  if (!size) return;
+  const start = Math.max(0, size - 262_144);
+  const text = await f.slice(start, size).text();
+  const lines = text.split('\n');
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i];
+    if (!line || !line.includes('token_count')) continue;
+    try {
+      const payload = JSON.parse(line)?.payload;
+      if (payload?.type !== 'token_count' || !payload.info) continue;
+      const total = payload.info.last_token_usage?.total_tokens;
+      const window = payload.info.model_context_window;
+      const contextTokens = typeof total === 'number' && total >= 0 ? total : undefined;
+      const contextLimit = typeof window === 'number' && window > 0 ? window : undefined;
+      if (contextTokens !== undefined || contextLimit !== undefined) {
+        ctx.emitAgentEvent({ type: 'usage', contextTokens, contextLimit });
+      }
+      return;
+    } catch {
+      // first line of the slice may be cut mid-JSON — keep walking back
+    }
+  }
+}
+
+async function emitSnapshotFromRollout(ctx: AgentRunContext, threadId: string): Promise<void> {
+  const path = await findRolloutPath(threadId);
+  if (!path) return;
+  const f = Bun.file(path);
+  const size = f.size;
+  if (!size) return;
+  let modelRan: string | undefined;
+  let contextTokens: number | undefined;
+  let contextLimit: number | undefined;
+
+  const readLine = (line: string): void => {
+    if (!line) return;
+    try {
+      const event = JSON.parse(line);
+      const payload = event?.payload;
+      if (!modelRan && event?.type === 'turn_context' && typeof payload?.model === 'string' && payload.model) {
+        modelRan = payload.model;
+      }
+      if ((contextTokens === undefined || contextLimit === undefined) && payload?.type === 'token_count' && payload.info) {
+        const total = payload.info.last_token_usage?.total_tokens;
+        const window = payload.info.model_context_window;
+        contextTokens = typeof total === 'number' && total >= 0 ? total : contextTokens;
+        contextLimit = typeof window === 'number' && window > 0 ? window : contextLimit;
+      }
+    } catch {
+      // Chunk boundaries can split a JSONL record; the next chunk completes it.
+    }
+  };
+
+  const chunkSize = 1_048_576;
+  let end = size;
+  let suffix = '';
+  while (end > 0 && !(modelRan && (contextTokens !== undefined || contextLimit !== undefined))) {
+    const start = Math.max(0, end - chunkSize);
+    const text = await f.slice(start, end).text();
+    const lines = (text + suffix).split('\n');
+    suffix = start > 0 ? (lines.shift() ?? '') : '';
+    for (let i = lines.length - 1; i >= 0; i--) {
+      readLine(lines[i] ?? '');
+      if (modelRan && (contextTokens !== undefined || contextLimit !== undefined)) break;
+    }
+    end = start;
+  }
+
+  if (modelRan || contextTokens !== undefined || contextLimit !== undefined) {
+    ctx.emitAgentEvent({ type: 'usage', contextTokens, contextLimit, modelRan });
+    if (modelRan && ctx.model && modelRan !== ctx.model) {
+      ctx.emitSystemMessage(
+        `Requested Codex model "${ctx.model}" but the CLI actually ran "${modelRan}". ` +
+        `This turn has been stamped with the actual model.`,
+      );
+    }
+  }
+}
 
 function extractText(value: any): string {
   if (!value) return '';
@@ -197,18 +321,19 @@ function handleCodexEvent(ctx: AgentRunContext, state: CodexRunState, event: any
 
   // Codex 0.125+ emits per-turn usage on turn.completed.
   // Shape: { input_tokens, cached_input_tokens, output_tokens, reasoning_output_tokens }.
-  // We treat the API's input_tokens as the snapshot ("how full is your context?")
-  // and accumulate both regular + reasoning output as the spend per turn.
+  // input_tokens is the AGGREGATE across every model call in the turn (and
+  // cached_input_tokens is a subset of it, per codex-rs TokenUsage), so it is
+  // NOT a context snapshot — a long agentic turn sums to millions of tokens.
+  // Context fullness comes from the session rollout file after the turn
+  // (see emitContextFromRollout); here we only accumulate per-turn spend.
   if (event.type === 'turn.completed') {
     const usage = event.usage;
     if (usage && typeof usage === 'object') {
-      const inputTokens = (typeof usage.input_tokens === 'number' ? usage.input_tokens : 0)
-        + (typeof usage.cached_input_tokens === 'number' ? usage.cached_input_tokens : 0);
+      const inputTokens = typeof usage.input_tokens === 'number' ? usage.input_tokens : 0;
       const outputTokens = (typeof usage.output_tokens === 'number' ? usage.output_tokens : 0)
         + (typeof usage.reasoning_output_tokens === 'number' ? usage.reasoning_output_tokens : 0);
       ctx.emitAgentEvent({
         type: 'usage',
-        contextTokens: inputTokens > 0 ? inputTokens : undefined,
         inputTokensDelta: inputTokens > 0 ? inputTokens : undefined,
         outputTokensDelta: outputTokens > 0 ? outputTokens : undefined,
         turnsDelta: 1,
@@ -409,18 +534,24 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
     // prepend the agent-forge system prompt (guardrails + persona + notes
     // + docs + atlas citation) to the user message with clear markers so
     // the model can distinguish system context from the user's actual turn.
+    const runtimeContext = [
+      '=== AGENT-FORGE RUNTIME CONTEXT ===',
+      'Provider: Codex',
+      ctx.model ? `Configured model id for this turn: ${ctx.model}` : null,
+      'If the user asks what model you are, answer from this runtime context instead of generic base instructions.',
+      '=== END AGENT-FORGE RUNTIME CONTEXT ===',
+    ].filter(Boolean).join('\n');
     const fullPrompt = ctx.systemPrompt
       ? `=== SYSTEM CONTEXT (provided by agent-forge — these instructions are load-bearing) ===\n${ctx.systemPrompt}\n=== END SYSTEM CONTEXT ===\n\n=== USER MESSAGE ===\n${prompt}`
       : prompt;
+    const fullPromptWithRuntime = ctx.systemPrompt
+      ? `${runtimeContext}\n\n${fullPrompt}`
+      : `${runtimeContext}\n\n=== USER MESSAGE ===\n${fullPrompt}`;
 
     return {
       async run() {
         try {
-          const env: Record<string, string> = {};
-          for (const [k, v] of Object.entries(process.env)) {
-            if (k === 'CLAUDECODE') continue;
-            if (typeof v === 'string') env[k] = v;
-          }
+          const env = createCliEnv();
 
           try {
             proc = safeSpawn(args, {
@@ -442,12 +573,21 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
 
           if (proc.pid) persistenceService.trackPid(proc.pid);
 
+          // A stop/kill may have landed between handle registration and the
+          // spawn above — honor it now instead of running a full orphan turn.
+          if (killed) {
+            void killProcessTree(proc);
+          }
+
           // Pipe the (system + user) prompt via stdin.
           try {
-            proc.stdin.write(fullPrompt);
+            proc.stdin.write(fullPromptWithRuntime);
             proc.stdin.end();
           } catch (e) {
-            console.warn('[codex] stdin write failed:', e);
+            // Codex with `-` blocks reading stdin forever if the write failed —
+            // kill it so the turn unwinds instead of wedging the agent.
+            console.warn('[codex] stdin write failed; killing process:', e);
+            void killProcessTree(proc);
           }
 
           // Drain stderr — filter known harmless noise; surface anything else as live stderr events.
@@ -467,6 +607,8 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
                 const chunk = decoder.decode(value, { stream: true });
                 if (!chunk) continue;
                 acc += chunk;
+                // Tail-cap so a chatty/looping CLI can't balloon memory.
+                if (acc.length > 64_000) acc = acc.slice(-64_000);
                 pendingLine += chunk;
                 // Process complete lines for noise filtering; emit only what survives.
                 let nlIdx: number;
@@ -478,9 +620,13 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
                     suppressedRouterLines = 0;
                     continue;
                   }
-                  if (/codex_core_skills::loader/i.test(line) && /failed to read/i.test(line)) {
-                    suppressSkillsLoaderBlock = true;
-                    suppressedSkillsLoaderLines = 0;
+                  if (/codex_core_skills::loader/i.test(line)) {
+                    // Single-line errors end with "(os error N)" — drop just the
+                    // line. Otherwise enter block mode to eat continuation lines.
+                    if (!/\(os error \d+\)/i.test(line)) {
+                      suppressSkillsLoaderBlock = true;
+                      suppressedSkillsLoaderLines = 0;
+                    }
                     continue;
                   }
                   if (suppressRouterBlock) {
@@ -542,6 +688,12 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
               if (done) break;
               leftover += decoder.decode(value, { stream: true });
               leftover = parseNdjsonLines(leftover, onEvent);
+              // A single newline-free line growing without bound means the CLI
+              // is emitting something we'll never parse — drop it rather than OOM.
+              if (leftover.length > 10_000_000) {
+                console.error('[codex] dropping >10MB unterminated stdout line');
+                leftover = '';
+              }
             }
             flushNdjsonLeftover(leftover, onEvent);
           } finally {
@@ -576,11 +728,35 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
             await unlink(state.outputPath).catch(() => {});
           }
 
-          if (finalText && !state.sawAssistantStream && !state.hasFinalAssistantMessage) {
+          // Always emit the canonical final answer. The live stream can include
+          // progress/status narration; chat.service uses this result as the
+          // persisted Codex assistant message and keeps streamed deltas live-only.
+          if (finalText) {
             ctx.emitAgentEvent({ type: 'result', text: finalText });
-          } else if (!killed && exitCode !== 0 && stderrText) {
-            // Stderr noise was filtered live; anything still here is real.
-            ctx.emitAgentEvent({ type: 'error', message: stderrText });
+          }
+
+          // Stale-session resume failure: clear + retry fresh via the bridge,
+          // mirroring the Claude adapter's "No conversation found" path.
+          if (!killed && exitCode !== 0 && sessionId
+              && STALE_SESSION_PATTERNS.some(re => re.test(stderrText))) {
+            ctx.emitAgentEvent({ type: 'finish', reason: 'stale-session' });
+            return { recoverableError: 'stale-session' as const, errorMessage: stderrText };
+          }
+
+          // Pull the real context-window snapshot from the session rollout.
+          const threadId = ctx.getSessionId();
+          if (!killed && threadId) {
+            await emitSnapshotFromRollout(ctx, threadId).catch(() => {});
+          }
+
+          if (!killed && exitCode !== 0 && !state.hasFinalAssistantMessage && !state.sawAssistantStream) {
+            // Stderr noise was filtered live; anything still here is real. With
+            // nothing at all, the user must still see that the turn failed —
+            // otherwise a crash looks like "Codex said nothing".
+            ctx.emitAgentEvent({
+              type: 'error',
+              message: stderrText || `Codex CLI exited with code ${exitCode} and no output`,
+            });
           }
 
           ctx.emitAgentEvent({
@@ -600,20 +776,28 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
       },
 
       stop() {
+        // Set killed even before proc exists — run() checks it post-spawn so a
+        // stop landing in the spawn window doesn't produce an orphan turn.
+        killed = true;
         if (!proc) return;
         try {
-          killed = true;
-          proc.kill('SIGINT');
+          if (process.platform === 'win32') {
+            // SIGINT isn't deliverable on Windows; Bun's kill() only terminates
+            // the npm .cmd shim, leaving the real CLI running. Kill the tree.
+            void killProcessTree(proc);
+          } else {
+            proc.kill('SIGINT');
+          }
         } catch (e) {
           console.warn('[codex] stop() failed:', e);
         }
       },
 
       kill() {
+        killed = true;
         if (!proc) return;
         try {
-          killed = true;
-          proc.kill();
+          void killProcessTree(proc);
         } catch (e) {
           console.warn('[codex] kill() failed:', e);
         }

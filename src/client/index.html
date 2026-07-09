@@ -4,11 +4,12 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Agent Forge</title>
-  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
-  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
-  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github-dark.min.css">
-  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"></script>
+  <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" integrity="sha384-DGyLxAyjq0f9SPpVevD6IgztCFlnMF6oW/XQGmfe+IsZ8TqEiDrcHkMLKI6fiB/Z" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" integrity="sha384-gTGxhz21lVGYNMcdJOyq01Edg0jhn/c22nsx0kyqP0TxaV5WVdsSH1fSDUf5YJj1" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js" integrity="sha384-948ahk4ZmxYVYOc+rxN1H2gM1EJ2Duhp7uHtZ4WSLkV4Vtx5MUqnV+l7u9B+jFv+" crossorigin="anonymous"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.2.4/purify.min.js" integrity="sha512-Y1p/STLW/B+l+MPJ5K5OdILMwJa2gMFXXmC/qsyDuGH9uc1MZMUo6/8YQUg9Ut4ns8KGCrCtt+58UwmNFFiVvA==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github-dark.min.css" integrity="sha384-wH75j6z1lH97ZOpMOInqhgKzFkAInZPPSPlZpYKYTOqsaizPvhQZmAtLcPKXpLyH" crossorigin="anonymous">
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js" integrity="sha384-F/bZzf7p3Joyp5psL90p/p89AZJsndkSoGwRpXcZhleCWhd8SnRuoYo4d0yirjJp" crossorigin="anonymous"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
@@ -189,6 +190,14 @@
 
     /* Connection status */
     .connection-error { padding: 8px 16px; background: var(--error); color: white; text-align: center; font-size: 12px; flex-shrink: 0; }
+
+    /* Model-mismatch blocking banner */
+    .model-mismatch-banner { background: rgba(220, 60, 60, 0.12); border: 1px solid var(--error); border-radius: 6px; margin: 6px 8px 0 8px; padding: 8px 10px; font-size: 12px; }
+    .model-mismatch-text { color: var(--error); font-weight: 600; margin-bottom: 6px; }
+    .model-mismatch-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    .model-mismatch-btn { background: var(--bg-tertiary); border: 1px solid var(--border); color: var(--text-primary); border-radius: 4px; padding: 4px 10px; font-size: 12px; cursor: pointer; }
+    .model-mismatch-btn:hover { border-color: var(--text-secondary); }
+    .model-mismatch-btn-primary { border-color: var(--error); }
 
     /* Error toasts */
     .error-toast-container { position: fixed; top: 16px; right: 16px; z-index: 200; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
@@ -720,12 +729,18 @@
     }
 
     // Static fallback for model dropdowns; /api/models is authoritative when available.
+    // Must be kept in lockstep with STATIC_AGENT_DEFINITIONS in src/server/agents/agent-kinds.ts.
     const FALLBACK_AGENT_PROVIDERS = [
       {
         kind: 'claude',
         label: 'Claude',
         icon: '✦',
         models: [
+          // Lockstep with STATIC_AGENT_DEFINITIONS — phantom ids (claude-mythos-5,
+          // claude-sonnet-5) must NOT appear here: the server resolver rejects
+          // anything outside its catalog and runs the default instead, so listing
+          // them makes the dropdown offer models that can never actually run.
+          { id: 'claude-fable-5',            label: 'fable 5' },
           { id: 'claude-opus-4-8',           label: 'opus 4.8' },
           { id: 'claude-opus-4-7',           label: 'opus 4.7' },
           { id: 'claude-opus-4-6',           label: 'opus 4.6' },
@@ -769,6 +784,10 @@
       AGENT_PROVIDERS = withIcons;
       PROVIDER_BY_KIND = Object.fromEntries(AGENT_PROVIDERS.map(p => [p.kind, p]));
       return withIcons;
+    }
+
+    function stripModelTier(model) {
+      return String(model || '').replace(/\[[^\]]*\]$/, '');
     }
 
     // ======================== HOOKS ========================
@@ -853,12 +872,34 @@
       const reconnectAttempt = useRef(0);
 
       useEffect(() => {
+        // disposed guards against the cleanup race: closing the socket fires
+        // onclose, which would otherwise schedule a reconnect for a dead
+        // component (leaked timer + setState after unmount).
+        let disposed = false;
+        let reconnectTimer = null;
+        let heartbeatTimer = null;
+        let lastServerActivity = Date.now();
         function connect() {
+          if (disposed) return;
           const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
           const ws = new WebSocket(protocol + '//' + location.host);
           ws.onopen = () => {
             setConnected(true);
             reconnectAttempt.current = 0;
+            lastServerActivity = Date.now();
+            // App-level heartbeat: after Windows sleep/resume the socket can be
+            // half-open (looks connected, delivers nothing). Ping every 15s and
+            // force-close if the server has been silent for 45s — onclose then
+            // drives the normal reconnect path.
+            heartbeatTimer = setInterval(() => {
+              if (Date.now() - lastServerActivity > 45000) {
+                try { ws.close(); } catch {}
+                return;
+              }
+              if (ws.readyState === WebSocket.OPEN) {
+                try { ws.send(JSON.stringify({ type: 'ping' })); } catch {}
+              }
+            }, 15000);
             fetch('/api/models')
               .then(r => r.ok ? r.json() : null)
               .then(data => {
@@ -868,16 +909,32 @@
           };
           ws.onclose = () => {
             setConnected(false);
+            if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
+            if (disposed) return;
             const delay = Math.min(1000 * Math.pow(2, reconnectAttempt.current), 30000);
             reconnectAttempt.current++;
-            setTimeout(connect, delay);
+            reconnectTimer = setTimeout(connect, delay);
           };
           ws.onmessage = (event) => {
-            const msg = JSON.parse(event.data);
+            let msg;
+            try {
+              msg = JSON.parse(event.data);
+            } catch (err) {
+              console.warn('Dropping malformed WS frame:', err);
+              return;
+            }
+            lastServerActivity = Date.now();
             switch (msg.type) {
+              case 'pong':
+                break;
               case 'agents_list':
                 setAgents(msg.agents);
-                msg.agents.forEach(a => sendRaw({ type: 'get_history', agentId: a.id }));
+                msg.agents.forEach(a => {
+                  sendRaw({ type: 'get_history', agentId: a.id });
+                  // Drain messages queued while disconnected once we know the
+                  // agent is actually idle (reconnect resync path).
+                  if (a.status === 'idle') drainQueue(a.id);
+                });
                 sendRaw({ type: 'get_shared_context' });
                 break;
               case 'agent_created':
@@ -903,6 +960,19 @@
                       });
                       setTimeout(() => setErrorToasts(prev2 => prev2.filter(t => t.id !== toastId)), 12000);
                     }
+                  }
+                  // Toast the moment a model mismatch latches, independent of
+                  // status transitions — this is the loud, impossible-to-miss
+                  // signal that a turn was served by the wrong model.
+                  if (old && !old.modelMismatch && msg.agent.modelMismatch) {
+                    const mm = msg.agent.modelMismatch;
+                    const toastId = 'model-mismatch-' + msg.agent.id + '-' + mm.at;
+                    setErrorToasts(prev2 => {
+                      if (prev2.some(t => t.id === toastId)) return prev2;
+                      const next = [...prev2, { id: toastId, message: '⛔ ' + msg.agent.name + ': turn ran "' + mm.ran + '" instead of "' + mm.requested + '" — pane blocked until resolved.' }];
+                      return next.slice(-5);
+                    });
+                    setTimeout(() => setErrorToasts(prev2 => prev2.filter(t => t.id !== toastId)), 20000);
                   }
                   return prev.map(a => a.id === msg.agent.id ? msg.agent : a);
                 });
@@ -950,12 +1020,17 @@
               case 'agent_activity':
                 setAgentActivity(prev => ({ ...prev, [msg.agentId]: { label: msg.label, timestamp: msg.timestamp } }));
                 break;
-              case 'thinking_output':
-                setThinkingOutput(prev => ({
-                  ...prev,
-                  [msg.agentId]: (prev[msg.agentId] || '') + msg.content
-                }));
+              case 'thinking_output': {
+                const MAX_THINKING_OUTPUT = 512000; // same 500KB cap as live output
+                setThinkingOutput(prev => {
+                  let updated = (prev[msg.agentId] || '') + msg.content;
+                  if (updated.length > MAX_THINKING_OUTPUT) {
+                    updated = updated.slice(updated.length - MAX_THINKING_OUTPUT);
+                  }
+                  return { ...prev, [msg.agentId]: updated };
+                });
                 break;
+              }
               case 'shared_context':
                 setSharedContext(msg.content);
                 break;
@@ -1003,7 +1078,7 @@
                 break;
               // Token usage
               case 'token_usage':
-                setTokenUsage(prev => ({ ...prev, [msg.agentId]: { contextTokens: msg.contextTokens, contextLimit: msg.contextLimit, totalInputTokens: msg.totalInputTokens, totalOutputTokens: msg.totalOutputTokens, totalCostUsd: msg.totalCostUsd, numTurns: msg.numTurns } }));
+                setTokenUsage(prev => ({ ...prev, [msg.agentId]: { contextTokens: msg.contextTokens, contextLimit: msg.contextLimit, totalInputTokens: msg.totalInputTokens, totalOutputTokens: msg.totalOutputTokens, totalCostUsd: msg.totalCostUsd, numTurns: msg.numTurns, modelRan: msg.modelRan } }));
                 break;
               case 'usage_report':
                 setUsageReport(msg.report);
@@ -1076,7 +1151,12 @@
           wsRef.current = ws;
         }
         connect();
-        return () => wsRef.current?.close();
+        return () => {
+          disposed = true;
+          if (reconnectTimer) clearTimeout(reconnectTimer);
+          if (heartbeatTimer) clearInterval(heartbeatTimer);
+          wsRef.current?.close();
+        };
       }, [drainQueue, sendRaw]);
 
       return {
@@ -1091,7 +1171,12 @@
         clearQaUnread: (sourceAgentId) => setQaUnread(prev => { if (!prev[sourceAgentId]) return prev; const { [sourceAgentId]: _, ...rest } = prev; return rest; }),
         sendMessage: (agentId, content) => {
           const agent = agentsRef.current.find(a => a.id === agentId);
-          if (agent && (agent.status === 'working' || agent.status === 'thinking')) {
+          const socketOpen = wsRef.current?.readyState === WebSocket.OPEN;
+          // Queue when the agent is busy OR the socket is down — sendRaw
+          // silently drops frames on a closed socket, which used to destroy
+          // messages typed while disconnected. Queued messages drain on
+          // reconnect (agents_list) / when the agent goes idle.
+          if (!socketOpen || (agent && (agent.status === 'working' || agent.status === 'thinking'))) {
             setQueued(prev => ({ ...prev, [agentId]: [...(prev[agentId] || []), content] }));
           } else {
             sendRaw({ type: 'send_message', agentId, content });
@@ -1120,6 +1205,8 @@
         sendImages: (agentId, images, prompt) => sendRaw({ type: 'send_images', agentId, images, prompt }),
         // Update agent
         updateAgent: (id, updates) => sendRaw({ type: 'update_agent', id, ...updates }),
+        // Resolve a latched model mismatch ('continue-actual' | 'fresh-requested')
+        resolveModelMismatch: (id, action) => sendRaw({ type: 'resolve_model_mismatch', id, action }),
         // Workspaces
         createWorkspace: (name) => sendRaw({ type: 'create_workspace', name }),
         updateWorkspace: (id, updates) => sendRaw({ type: 'update_workspace', id, ...updates }),
@@ -1144,6 +1231,25 @@
     function countToolMessages(text) {
       const matches = text.match(TOOL_ANNOTATION_RE);
       return matches ? matches.length : 0;
+    }
+
+    // Render untrusted markdown (agent output, doc content) to sanitized HTML.
+    // Agent responses can contain arbitrary HTML/JS; DOMPurify strips it before
+    // it reaches dangerouslySetInnerHTML. If DOMPurify failed to load, fall back
+    // to escaped plain text rather than raw HTML so a CDN miss can't reopen XSS.
+    function renderMarkdown(content) {
+      const src = content || '';
+      let html;
+      try {
+        html = marked.parse(src);
+      } catch {
+        html = src.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+        return html;
+      }
+      if (window.DOMPurify && typeof window.DOMPurify.sanitize === 'function') {
+        return window.DOMPurify.sanitize(html);
+      }
+      return src.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     }
 
     // Highlight search query in HTML string (outside of tags)
@@ -1179,11 +1285,9 @@
         }
       }, [content, searchQuery]);
       const html = useMemo(() => {
-        try {
-          let parsed = marked.parse(content);
-          if (searchQuery) parsed = highlightInHtml(parsed, searchQuery);
-          return parsed;
-        } catch { return content; }
+        let parsed = renderMarkdown(content);
+        if (searchQuery) parsed = highlightInHtml(parsed, searchQuery);
+        return parsed;
       }, [content, searchQuery]);
       return e('div', { ref, className: 'chat-turn-content', dangerouslySetInnerHTML: { __html: html } });
     });
@@ -1436,7 +1540,7 @@
       return { verdict: { kind, summary, raw: m[1].trim() }, body };
     }
 
-    const ChatTurn = React.memo(function ChatTurn({ role, content, isStreaming, imageData, imageMimeType, showToolMessages, searchQuery, showRetry, onRetry, source, provider }) {
+    const ChatTurn = React.memo(function ChatTurn({ role, content, isStreaming, imageData, imageMimeType, showToolMessages, searchQuery, showRetry, onRetry, source, provider, model }) {
       const [copied, setCopied] = useState(false);
       const isQa = source === 'qa';
       // Per-message provider stamp (newer messages); fall back to 'Claude' for
@@ -1444,6 +1548,9 @@
       // provider definition so we can prefix with the icon (✦ Claude / ⚙ Codex).
       const providerDef = provider ? PROVIDER_BY_KIND[provider] : null;
       const assistantLabel = providerDef ? providerDef.label : 'Claude';
+      const assistantModelLabel = model && providerDef?.models
+        ? (providerDef.models.find(m => m.id === model)?.label || model)
+        : model;
       const roleLabels = { user: isQa ? 'QA Tester' : 'You', assistant: assistantLabel, system: 'System' };
       const turnClass = isStreaming ? 'chat-turn chat-turn-streaming' : 'chat-turn chat-turn-' + role;
       // Filter [Using tool: ...] annotations for assistant messages AND for QA-source
@@ -1484,18 +1591,20 @@
 
       return e('div', { className: turnClass, 'data-source': source || undefined },
         e('button', { className: 'copy-msg-btn', onClick: handleCopy }, copied ? 'Copied!' : 'Copy'),
-        e('div', { className: 'chat-turn-role' }, roleLabels[role] || role),
+        e('div', { className: 'chat-turn-role', title: role === 'assistant' && assistantModelLabel ? 'Actual model: ' + model : undefined },
+          (roleLabels[role] || role) + (role === 'assistant' && assistantModelLabel ? ' · ' + assistantModelLabel : '')
+        ),
         renderQaVerdictRow(verdict),
         imageData && e('img', { className: 'chat-image', src: 'data:' + (imageMimeType || 'image/png') + ';base64,' + imageData, alt: 'Uploaded image', onClick: () => window.open('data:' + (imageMimeType || 'image/png') + ';base64,' + imageData) }),
         renderBody(),
         showRetry && onRetry && e('button', { className: 'retry-btn', onClick: onRetry }, '\u21BB Retry')
       );
     }, (prev, next) => {
-      return prev.content === next.content && prev.role === next.role && prev.isStreaming === next.isStreaming && prev.searchQuery === next.searchQuery && prev.showToolMessages === next.showToolMessages && prev.showRetry === next.showRetry && prev.imageData === next.imageData && prev.source === next.source && prev.provider === next.provider;
+      return prev.content === next.content && prev.role === next.role && prev.isStreaming === next.isStreaming && prev.searchQuery === next.searchQuery && prev.showToolMessages === next.showToolMessages && prev.showRetry === next.showRetry && prev.imageData === next.imageData && prev.source === next.source && prev.provider === next.provider && prev.model === next.model;
     });
 
     // Terminal Panel
-    function TerminalPanel({ agent, messages, liveOutput, queuedMessages, fileChanges, thinkingOutput, agentActivity, statusStartTime, tokenUsage, terminals, terminalOutput, workspace, qaAgent, qaMessages, qaTokenUsage, qaHasUnread, qaLiveShots, onQaSend, onQaAbort, onClearQaUnread, onSendMessage, onSendImage, onSendImages, onStop, onClearHistory, onClearFileChanges, onMinimize, onMaximize, isMaximized, onFocus, isFocused, onCreateTerminal, onKillTerminal, onUpdateAgent, isLocked, onToggleLock, isDragging, isDragOver, onDragStart, onDragEnd, onDragOver, onDragLeave, onDrop }) {
+    function TerminalPanel({ agent, messages, liveOutput, queuedMessages, fileChanges, thinkingOutput, agentActivity, statusStartTime, tokenUsage, terminals, terminalOutput, workspace, qaAgent, qaMessages, qaTokenUsage, qaHasUnread, qaLiveShots, onQaSend, onQaAbort, onClearQaUnread, onSendMessage, onSendImage, onSendImages, onStop, onClearHistory, onClearFileChanges, onMinimize, onMaximize, isMaximized, onFocus, isFocused, onCreateTerminal, onKillTerminal, onUpdateAgent, onResolveModelMismatch, isLocked, onToggleLock, isDragging, isDragOver, onDragStart, onDragEnd, onDragOver, onDragLeave, onDrop }) {
       const [input, setInput] = useState('');
       const [inputHistory, setInputHistory] = useState([]);
       const [historyIdx, setHistoryIdx] = useState(-1);
@@ -1703,14 +1812,18 @@
         prevStatus.current = agent?.status;
       }, [agent?.status]);
 
-      // Focus input on window focus and visibility change (Feature 8)
+      // Focus input on window focus and visibility change (Feature 8).
+      // Gated on isFocused — with multiple panels mounted, every panel
+      // registers this listener, and without the gate whichever mounted last
+      // steals focus from the panel the user was actually working in.
       useEffect(() => {
+        if (!isFocused) return;
         const focusInput = () => { if (inputRef.current) inputRef.current.focus(); };
         window.addEventListener('focus', focusInput);
         const onVis = () => { if (!document.hidden) focusInput(); };
         document.addEventListener('visibilitychange', onVis);
         return () => { window.removeEventListener('focus', focusInput); document.removeEventListener('visibilitychange', onVis); };
-      }, []);
+      }, [isFocused]);
 
       const handleSubmit = () => {
         if (!agent) return;
@@ -1762,6 +1875,10 @@
           }
           if (ev.key === 'Escape') {
             ev.preventDefault();
+            // Without stopPropagation the global Escape handler also fires and
+            // stops the focused agent's in-flight turn — closing an autocomplete
+            // popup must never kill work.
+            ev.stopPropagation();
             setInput('');
             return;
           }
@@ -1934,7 +2051,15 @@
             e('button', { className: 'panel-btn', onClick: () => { setSearchVisible(prev => !prev); setTimeout(() => searchInputRef.current?.focus(), 50); }, title: 'Search (Ctrl+F)' }, '\uD83D\uDD0D'),
             isWorking && e('button', { className: 'panel-btn panel-btn-stop', onClick: () => onStop(agent.id), title: 'Stop current turn (Esc)' }, 'Stop turn'),
             !isMaximized && onMinimize && e('button', { className: 'panel-btn panel-minimize-btn', onClick: () => onMinimize(agent.id), title: 'Minimize' }, '_'),
-            e('button', { className: 'panel-btn', onClick: () => onClearHistory(agent.id), title: 'Clear chat' }, 'Clear'),
+            e('button', {
+              className: 'panel-btn',
+              onClick: () => {
+                if (confirm('Clear the entire chat history for "' + agent.name + '"? This also resets the provider session and cannot be undone.')) {
+                  onClearHistory(agent.id);
+                }
+              },
+              title: 'Clear chat',
+            }, 'Clear'),
           )
         ),
         // Context bar + token info
@@ -1948,8 +2073,22 @@
             e('span', null, Math.round(safeContextTokens / 1000) + 'k / ' + Math.round(safeContextLimit / 1000) + 'k ctx'),
             tokenUsage.totalCostUsd > 0 && e('span', null, '\u00B7'),
             tokenUsage.totalCostUsd > 0 && e('span', null, '$' + tokenUsage.totalCostUsd.toFixed(2)),
-            tokenUsage.numTurns > 0 && e('span', null, '\u00B7'),
-            tokenUsage.numTurns > 0 && e('span', null, tokenUsage.numTurns + ' turns')
+            tokenUsage.numTurns > 0 && e('span', null, tokenUsage.numTurns + ' turns'),
+            // Ground truth: the model the CLI ACTUALLY ran last turn (from the
+            // result event's modelUsage), not what the selector claims. Amber when
+            // it disagrees with the configured model, so a mismatch can never hide.
+            tokenUsage.modelRan && e('span', null, '\u00B7'),
+            tokenUsage.modelRan && (() => {
+              const providerDef = PROVIDER_BY_KIND[agent.provider] || PROVIDER_BY_KIND.claude;
+              const configuredModelId = agent.model || providerDef.defaultModel || (providerDef.models[0] && providerDef.models[0].id) || '';
+              const mismatch = !!configuredModelId && stripModelTier(tokenUsage.modelRan) !== stripModelTier(configuredModelId);
+              return e('span', {
+                style: { color: mismatch ? '#e5a000' : 'inherit' },
+                title: mismatch
+                  ? 'Selector resolves to "' + configuredModelId + '" but the CLI actually ran "' + tokenUsage.modelRan + '"'
+                  : 'Model the CLI actually ran last turn',
+              }, (mismatch ? '\u26A0 ran ' : 'ran ') + tokenUsage.modelRan);
+            })()
           )
         ),
         // Search bar (Feature 1)
@@ -2015,6 +2154,7 @@
                         imageMimeType: m.imageMimeType,
                         source: m.source,
                         provider: m.provider,
+                        model: m.model,
                         showToolMessages,
                         searchQuery: searchVisible ? searchQuery : '',
                         showRetry: realIdx === lastUserMsgIndex && m.role === 'user' && !isWorking,
@@ -2028,7 +2168,7 @@
                   e('span', { className: 'agent-activity-dot' }),
                   activity.label || 'Working...'
                 ),
-                liveOutput && e(ChatTurn, { key: 'live', role: 'assistant', content: liveOutput, isStreaming: isWorking, showToolMessages, provider: agent.provider }),
+                liveOutput && e(ChatTurn, { key: 'live', role: 'assistant', content: liveOutput, isStreaming: isWorking, showToolMessages, provider: agent.provider, model: agent.model }),
                 queued.map((q, i) => e('div', { key: 'q' + i, className: 'chat-turn chat-turn-queued' },
                   e('div', { className: 'chat-turn-role' }, 'Queued'),
                   e('div', { className: 'chat-turn-content' }, q)
@@ -2066,6 +2206,27 @@
         })(),
         // Input
         e('div', { className: 'panel-input-container' },
+          // Model-mismatch hard stop. Server refuses sends while this is set;
+          // the two buttons are the only ways forward, so the wrong model can
+          // never keep serving a conversation unnoticed.
+          agent.modelMismatch && e('div', { className: 'model-mismatch-banner' },
+            e('div', { className: 'model-mismatch-text' },
+              '⛔ Model mismatch: this conversation was served by "' + agent.modelMismatch.ran +
+              '" but you selected "' + agent.modelMismatch.requested + '". Sends are blocked until you choose.'
+            ),
+            e('div', { className: 'model-mismatch-actions' },
+              e('button', {
+                className: 'model-mismatch-btn',
+                onClick: () => onResolveModelMismatch && onResolveModelMismatch(agent.id, 'continue-actual'),
+                title: 'Accept the model that actually ran and keep this conversation/session',
+              }, 'Continue on ' + agent.modelMismatch.ran),
+              e('button', {
+                className: 'model-mismatch-btn model-mismatch-btn-primary',
+                onClick: () => onResolveModelMismatch && onResolveModelMismatch(agent.id, 'fresh-requested'),
+                title: 'Start a fresh session — fresh spawns honor the selected model (note: if the substitution was context-size-driven, it can recur as the new session grows)',
+              }, 'Fresh session on ' + agent.modelMismatch.requested)
+            )
+          ),
           pendingImages.length > 0 && e('div', { style: { display: 'flex', alignItems: 'center', gap: 8, padding: '4px 12px', fontSize: 11, color: 'var(--text-secondary)', flexWrap: 'wrap' } },
             pendingImages.map((img, idx) =>
               e('div', { key: idx, style: { position: 'relative', display: 'inline-block' } },
@@ -2084,11 +2245,14 @@
               onChange: (ev) => { setInput(ev.target.value); setHistoryIdx(-1); },
               onKeyDown: handleKeyDown,
               onPaste: handlePaste,
-              placeholder: pendingImages.length > 0
-                ? 'Add context for the image' + (pendingImages.length > 1 ? 's' : '') + '... (Enter to send)'
-                : isWorking
-                  ? (queued.length > 0 ? queued.length + ' queued \u2014 type more...' : 'Type to queue...')
-                  : 'Message... (Enter to send, Shift+Enter for newline)',
+              disabled: !!agent.modelMismatch,
+              placeholder: agent.modelMismatch
+                ? 'Blocked \u2014 resolve the model mismatch above first'
+                : pendingImages.length > 0
+                  ? 'Add context for the image' + (pendingImages.length > 1 ? 's' : '') + '... (Enter to send)'
+                  : isWorking
+                    ? (queued.length > 0 ? queued.length + ' queued \u2014 type more...' : 'Type to queue...')
+                    : 'Message... (Enter to send, Shift+Enter for newline)',
               rows: 1,
               autoFocus: true,
             }),
@@ -2110,7 +2274,18 @@
           // each provider keeps its own sessionId so swapping preserves both threads.
           (() => {
             const currentProvider = PROVIDER_BY_KIND[agent.provider] || PROVIDER_BY_KIND.claude;
-            const currentModel = currentProvider.models.find(m => m.id === agent.model) || currentProvider.models[0];
+            // The model this agent is ACTUALLY configured with. Never fall back to
+            // models[0] for display — that used to render "Fable 5" (first in the
+            // list) for any agent whose model was unset, while the server actually
+            // ran the provider default (Opus). An unset model resolves to the
+            // provider default server-side, so show THAT; an id missing from the
+            // catalog is surfaced verbatim so the selector can never claim a model
+            // that isn't really set.
+            const configuredModelId = agent.model || currentProvider.defaultModel || (currentProvider.models[0] && currentProvider.models[0].id) || '';
+            const modelInCatalog = currentProvider.models.some(m => m.id === configuredModelId);
+            const modelOptions = modelInCatalog
+              ? currentProvider.models
+              : [{ id: configuredModelId, label: configuredModelId + ' (not in catalog)' }].concat(currentProvider.models);
             const currentReasoning = agent.reasoningLevel || currentProvider.defaultReasoningLevel || '';
             return e('div', { className: 'agent-provider-row' },
               e('select', {
@@ -2134,11 +2309,11 @@
               ),
               e('select', {
                 className: 'agent-provider-select agent-provider-select-model',
-                value: currentModel ? currentModel.id : '',
+                value: configuredModelId,
                 onChange: (ev) => { if (onUpdateAgent) onUpdateAgent(agent.id, { model: ev.target.value }); },
                 title: 'Model',
               },
-                currentProvider.models.map(m => e('option', { key: m.id, value: m.id }, m.label))
+                modelOptions.map(m => e('option', { key: m.id, value: m.id }, m.label))
               ),
               currentProvider.reasoningLevels && e('select', {
                 className: 'agent-provider-select agent-provider-select-reasoning',
@@ -3386,9 +3561,7 @@
         setCreating(false);
       };
 
-      const previewHtml = useMemo(() => {
-        try { return marked.parse(editContent || ''); } catch { return editContent; }
-      }, [editContent]);
+      const previewHtml = useMemo(() => renderMarkdown(editContent), [editContent]);
 
       const statusBadge = (doc) => {
         const status = doc.status || 'draft';
@@ -4100,6 +4273,7 @@
                   onCreateTerminal: ws.createTerminal,
                   onKillTerminal: ws.killTerminal,
                   onUpdateAgent: ws.updateAgent,
+                  onResolveModelMismatch: ws.resolveModelMismatch,
                 });
               }
               const nonMinimized = displayAgents;
@@ -4153,6 +4327,7 @@
                   onCreateTerminal: ws.createTerminal,
                   onKillTerminal: ws.killTerminal,
                   onUpdateAgent: ws.updateAgent,
+                  onResolveModelMismatch: ws.resolveModelMismatch,
                   isLocked,
                   onToggleLock: toggleLock,
                   isDragging: draggedAgent === agentId,

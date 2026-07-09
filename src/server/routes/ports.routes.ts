@@ -32,6 +32,22 @@ async function getProcessNamesByPidWindows(): Promise<Map<number, string>> {
   return map;
 }
 
+// OS services and always-on consumer apps whose listeners are never the
+// user's dev servers. Killing these from the sidebar would also be a footgun
+// (taskkill /F on svchost can blue-screen-adjacent break the session).
+const WINDOWS_SYSTEM_IMAGES = new Set([
+  'svchost', 'System', 'Idle', 'lsass', 'services', 'wininit', 'winlogon',
+  'csrss', 'smss', 'spoolsv', 'dasHost', 'SearchIndexer', 'SearchHost',
+  'fontdrvhost', 'dwm', 'sihost', 'OneDrive', 'msedgewebview2', 'Widgets',
+  'Discord', 'DiscordPTB', 'DiscordCanary', 'Spotify', 'steam',
+  'NVIDIA Web Helper', 'nvcontainer', 'jhi_service', 'wslservice',
+].map(s => s.toLowerCase()));
+
+// Listeners in the OS dynamic/ephemeral range are auto-assigned IPC and
+// helper sockets (VS Code extension hosts, Electron apps, language servers),
+// not servers anyone started on purpose. Dev servers live on chosen ports.
+const EPHEMERAL_PORT_START = process.platform === 'win32' ? 49152 : 32768;
+
 export async function handleGetPorts(req: Request): Promise<Response> {
   try {
     const isWindows = process.platform === 'win32';
@@ -60,10 +76,12 @@ export async function handleGetPorts(req: Request): Promise<Response> {
         const port = parseInt(addrMatch[1]!, 10);
         const pid = parseInt(parts[4]!, 10);
         if (isNaN(pid) || pid === 0) continue;
+        if (port >= EPHEMERAL_PORT_START) continue;
         const key = port + ':' + pid;
         if (seen.has(key)) continue;
         seen.add(key);
         const command = pidToName.get(pid) || 'unknown';
+        if (WINDOWS_SYSTEM_IMAGES.has(command.toLowerCase())) continue;
         ports.push({ port, pid, command });
       }
     } else {
@@ -89,6 +107,7 @@ export async function handleGetPorts(req: Request): Promise<Response> {
         const portMatch = nameField.match(/:(\d+)$/);
         if (!portMatch) continue;
         const port = parseInt(portMatch[1]!, 10);
+        if (port >= EPHEMERAL_PORT_START) continue;
         const key = port + ':' + pid;
         if (seen.has(key)) continue;
         seen.add(key);

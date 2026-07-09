@@ -34,6 +34,11 @@ setInterval(() => {
 // Handle incoming WebSocket messages
 async function handleMessage(ws: ServerWebSocket<unknown>, message: ClientMessage) {
   switch (message.type) {
+    case 'ping': {
+      sendTo(ws, { type: 'pong' });
+      break;
+    }
+
     case 'create_agent': {
       try {
         const agent = await agentService.createAgent(
@@ -62,6 +67,18 @@ async function handleMessage(ws: ServerWebSocket<unknown>, message: ClientMessag
         }
       } catch (e: any) {
         sendTo(ws, { type: 'error', message: e.message || 'Failed to update agent' });
+      }
+      break;
+    }
+
+    case 'resolve_model_mismatch': {
+      // Two explicit resolutions for a latched model mismatch:
+      //   'continue-actual'  — adopt the model that really ran, keep the session
+      //   'fresh-requested'  — keep the selection, drop the session, spawn fresh
+      const action = message.action === 'continue-actual' ? 'continue-actual' : 'fresh-requested';
+      const agent = await agentService.resolveModelMismatch(message.id, action);
+      if (!agent) {
+        sendTo(ws, { type: 'error', message: 'Agent not found', agentId: message.id });
       }
       break;
     }

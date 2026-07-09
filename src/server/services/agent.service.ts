@@ -2,6 +2,7 @@
 import { join } from 'path';
 import { tmpdir } from 'os';
 import type { AgentInfo, AgentProvider, AgentStatus, ChatMessage } from '../../shared/protocol';
+import { STATIC_AGENT_DEFINITIONS, stripModelTier } from '../agents/agent-kinds';
 import { generateId } from '../utils';
 import { persistenceService } from './persistence.service';
 import { noteService } from './note.service';
@@ -20,14 +21,15 @@ import { broadcast } from '../broadcast';
 interface ManagedAgent {
   info: AgentInfo;
   /**
-   * One current session per agent, owned by exactly one provider. When the
-   * user swaps providers, the next turn detects the mismatch, starts fresh
+   * One current session per agent, owned by exactly one provider/model pair.
+   * When the user swaps providers or models, the next turn detects the mismatch, starts fresh
    * (no --resume), prepends the prior UI chat history into the prompt, and
-   * then claims currentSessionId/currentSessionProvider for the new provider.
-   * "Clear History" nulls both.
+   * then claims currentSessionId/currentSessionProvider/currentSessionModel.
+   * "Clear History" nulls all three.
    */
   currentSessionId: string | null;
   currentSessionProvider: AgentProvider | null;
+  currentSessionModel: string | null;
   watcher: FSWatcher | null;
   lastFileChange: string[];
   pendingTimeouts: ReturnType<typeof setTimeout>[];
@@ -37,6 +39,7 @@ interface ManagedAgent {
   totalOutputTokens: number;
   totalCostUsd: number;
   numTurns: number;
+  lastModelRan?: string;
 }
 
 // HMR-safe state
@@ -70,7 +73,7 @@ async function notifyLifecycle(kind: 'onIdle' | 'onStop' | 'onRemoved', agentId:
 //   src/server/services/prompts/{qa,atlas}-system-prompt.ts
 // They subscribe to agent lifecycle via agentService.onAgentIdle / onAgentRemoved.
 
-function addMessage(agentId: string, role: ChatMessage['role'], content: string, imageData?: string, imageMimeType?: string, source?: 'qa', provider?: AgentProvider): ChatMessage {
+function addMessage(agentId: string, role: ChatMessage['role'], content: string, imageData?: string, imageMimeType?: string, source?: 'qa', provider?: AgentProvider, model?: string): ChatMessage {
   const msg: ChatMessage = {
     id: generateId(),
     agentId,
@@ -82,6 +85,7 @@ function addMessage(agentId: string, role: ChatMessage['role'], content: string,
   if (imageMimeType) msg.imageMimeType = imageMimeType;
   if (source) msg.source = source;
   if (provider) msg.provider = provider;
+  if (model) msg.model = model;
   if (!messages.has(agentId)) {
     messages.set(agentId, []);
   }
@@ -193,8 +197,9 @@ async function _stopAgentImpl(agentId: string, reason: 'user' | 'timeout' | 'sys
   clearAgentTimeouts(agentId);
   // Note: chat.service's finally block releases plan locks + sets status to
   // 'idle' + fires onIdle hooks after the adapter unwinds. We don't repeat
-  // those side effects here. If no turn is in flight, set status defensively.
-  if (agent.info.status !== 'idle') {
+  // those side effects here — only run the defensive idle path when no turn
+  // is actually in flight, otherwise QA/Atlas idle hooks fire twice per stop.
+  if (agent.info.status !== 'idle' && !chatService.hasActiveTurn(agentId)) {
     agent.info.status = 'idle';
     broadcast({ type: 'agent_updated', agent: agent.info });
     await documentService.releaseLocksForAgent(agentId);
@@ -251,8 +256,8 @@ export const agentService = {
   },
 
   /** Internal: append any-role message. Used by chat.service when broadcasting user turns. */
-  appendMessage(agentId: string, role: ChatMessage['role'], content: string, imageData?: string, imageMimeType?: string, source?: 'qa', provider?: AgentProvider): ChatMessage {
-    return addMessage(agentId, role, content, imageData, imageMimeType, source, provider);
+  appendMessage(agentId: string, role: ChatMessage['role'], content: string, imageData?: string, imageMimeType?: string, source?: 'qa', provider?: AgentProvider, model?: string): ChatMessage {
+    return addMessage(agentId, role, content, imageData, imageMimeType, source, provider, model);
   },
 
   /** Internal: set agent status + broadcast agent_updated. No-op if status unchanged. */
@@ -280,16 +285,17 @@ export const agentService = {
     return sharedContext;
   },
 
-  getTokenUsage(agentId: string): { contextTokens: number; contextLimit: number; totalInputTokens: number; totalOutputTokens: number; totalCostUsd: number; numTurns: number } | null {
+  getTokenUsage(agentId: string): { contextTokens: number; contextLimit: number; totalInputTokens: number; totalOutputTokens: number; totalCostUsd: number; numTurns: number; lastModelRan?: string } | null {
     const agent = agents.get(agentId);
     if (!agent) return null;
     return {
       contextTokens: agent.contextTokens,
-      contextLimit: 200000,
+      contextLimit: agent.contextLimit > 0 ? agent.contextLimit : 200000,
       totalInputTokens: agent.totalInputTokens,
       totalOutputTokens: agent.totalOutputTokens,
       totalCostUsd: agent.totalCostUsd,
       numTurns: agent.numTurns,
+      lastModelRan: agent.lastModelRan,
     };
   },
 
@@ -321,6 +327,7 @@ export const agentService = {
     outputTokensDelta?: number;
     costUsdDelta?: number;
     turnsDelta?: number;
+    modelRan?: string;
   }): void {
     const agent = agents.get(agentId);
     if (!agent) return;
@@ -340,6 +347,7 @@ export const agentService = {
     }
     if (typeof usage.costUsdDelta === 'number' && usage.costUsdDelta > 0) agent.totalCostUsd += usage.costUsdDelta;
     if (typeof usage.turnsDelta === 'number' && usage.turnsDelta > 0) agent.numTurns += usage.turnsDelta;
+    if (typeof usage.modelRan === 'string' && usage.modelRan) agent.lastModelRan = usage.modelRan;
     persistenceService.save();
   },
 
@@ -386,6 +394,8 @@ export const agentService = {
       status: 'idle',
       createdAt: Date.now(),
       workspaceId: wsId,
+      provider: 'claude',
+      model: STATIC_AGENT_DEFINITIONS.claude.defaultModel,
     };
     if (opts.hideFromGrid) info.hideFromGrid = true;
 
@@ -393,6 +403,7 @@ export const agentService = {
       info,
       currentSessionId: null,
       currentSessionProvider: null,
+      currentSessionModel: null,
       watcher: null,
       lastFileChange: [],
       pendingTimeouts: [],
@@ -464,11 +475,29 @@ export const agentService = {
     if (updates.referencePaths !== undefined) agent.info.referencePaths = updates.referencePaths;
     if (updates.systemPrompt !== undefined) agent.info.systemPrompt = updates.systemPrompt;
     // Provider / model / reasoningLevel are hot-swappable per the inline
-    // dropdowns under each agent's chat input. Swapping provider does NOT
-    // clear sessionIds — each provider keeps its own resume token.
+    // dropdowns under each agent's chat input. Provider/model changes must
+    // invalidate the current session because provider CLIs may bind a resumed
+    // conversation to the model it started with and ignore a later --model.
+    const nextProvider = updates.provider !== undefined ? updates.provider : agent.info.provider;
+    const nextModel = updates.model !== undefined ? updates.model : agent.info.model;
+    const providerChanged = updates.provider !== undefined && updates.provider !== agent.info.provider;
+    const modelChanged = updates.model !== undefined && updates.model !== agent.info.model;
+
     if (updates.provider !== undefined) agent.info.provider = updates.provider;
     if (updates.model !== undefined) agent.info.model = updates.model;
     if (updates.reasoningLevel !== undefined) agent.info.reasoningLevel = updates.reasoningLevel;
+    if ((providerChanged || modelChanged) && (agent.currentSessionId || agent.currentSessionProvider || agent.currentSessionModel)) {
+      agent.currentSessionId = null;
+      agent.currentSessionProvider = null;
+      agent.currentSessionModel = null;
+      console.log(`[agent] cleared session for ${agentId}: provider/model changed to ${nextProvider ?? 'unset'}/${nextModel ?? 'unset'}`);
+    }
+    // An explicit provider/model choice is an acknowledgment of any pending
+    // mismatch: the user has re-decided what should run, and the session was
+    // just invalidated so the next turn spawns fresh with exactly that model.
+    if ((providerChanged || modelChanged) && agent.info.modelMismatch) {
+      agent.info.modelMismatch = null;
+    }
 
     await persistenceService.saveNow();
     return agent.info;
@@ -481,8 +510,60 @@ export const agentService = {
     // "Clear History" fully resets the agent's memory.
     agent.currentSessionId = null;
     agent.currentSessionProvider = null;
+    agent.currentSessionModel = null;
+    // A fully reset agent has no session to be mismatched about.
+    agent.info.modelMismatch = null;
     await persistenceService.saveNow();
     return true;
+  },
+
+  // --- Model-mismatch guard ---------------------------------------------------
+  // The CLI reports which model ACTUALLY served each turn (modelUsage for
+  // Claude, rollout turn_context for Codex). When that diverges from the
+  // user's selection, the service substituted silently (observed 2026-07-01:
+  // large-context Fable requests served by Opus[1m]). We record it here and
+  // chat.service refuses further sends until the user explicitly resolves it —
+  // a warning alone let hours of work run on the wrong model.
+
+  /** Record a divergence between the requested model and the CLI ground truth. Blocks sends until resolved. */
+  setModelMismatch(agentId: string, requested: string, ran: string): void {
+    const agent = agents.get(agentId);
+    if (!agent) return;
+    const prev = agent.info.modelMismatch;
+    if (prev && prev.requested === requested && prev.ran === ran) return;
+    agent.info.modelMismatch = { requested, ran, at: Date.now() };
+    persistenceService.save();
+    broadcast({ type: 'agent_updated', agent: agent.info });
+  },
+
+  /**
+   * Resolve a pending mismatch.
+   *  - 'continue-actual':  accept reality — set the selector to the model that
+   *    actually ran and KEEP the session (it was that model's all along).
+   *  - 'fresh-requested':  insist on the requested model — drop the session so
+   *    the next turn spawns fresh (fresh spawns honor --model).
+   */
+  async resolveModelMismatch(agentId: string, action: 'continue-actual' | 'fresh-requested'): Promise<AgentInfo | null> {
+    const agent = agents.get(agentId);
+    if (!agent) return null;
+    const mm = agent.info.modelMismatch;
+    if (!mm) return agent.info;
+
+    if (action === 'continue-actual') {
+      // Deliberately NOT updateAgent(): that would invalidate the session, but
+      // the session genuinely belongs to `ran` — adopt it, don't discard it.
+      const actualModel = stripModelTier(mm.ran);
+      agent.info.model = actualModel;
+      agent.currentSessionModel = agent.currentSessionId ? actualModel : null;
+    } else {
+      agent.currentSessionId = null;
+      agent.currentSessionProvider = null;
+      agent.currentSessionModel = null;
+    }
+    agent.info.modelMismatch = null;
+    await persistenceService.saveNow();
+    broadcast({ type: 'agent_updated', agent: agent.info });
+    return agent.info;
   },
 
   // --- Current session (read by chat.service to decide --resume vs fresh) ---
@@ -497,17 +578,24 @@ export const agentService = {
     return agents.get(agentId)?.currentSessionProvider ?? null;
   },
 
+  /** Which model owns the active session — used to detect model swap boundaries. */
+  getCurrentSessionModel(agentId: string): string | null {
+    return agents.get(agentId)?.currentSessionModel ?? null;
+  },
+
   /**
-   * Claim or update the current session for an agent. Always sets both
-   * fields together so they stay consistent. Used by the bridge after a
-   * turn establishes / updates its provider session id.
+   * Claim or update the current session for an agent. Always sets all session
+   * identity fields together so they stay consistent. Used by the bridge after
+   * a turn establishes / updates its provider session id.
    */
-  setCurrentSession(agentId: string, provider: AgentProvider, sessionId: string): void {
+  setCurrentSession(agentId: string, provider: AgentProvider, model: string | undefined, sessionId: string): void {
     const agent = agents.get(agentId);
     if (!agent) return;
-    if (agent.currentSessionId === sessionId && agent.currentSessionProvider === provider) return;
+    const sessionModel = model || null;
+    if (agent.currentSessionId === sessionId && agent.currentSessionProvider === provider && agent.currentSessionModel === sessionModel) return;
     agent.currentSessionId = sessionId;
     agent.currentSessionProvider = provider;
+    agent.currentSessionModel = sessionModel;
     persistenceService.save();
   },
 
@@ -517,6 +605,7 @@ export const agentService = {
     if (!agent) return;
     agent.currentSessionId = null;
     agent.currentSessionProvider = null;
+    agent.currentSessionModel = null;
     persistenceService.save();
   },
 
@@ -636,11 +725,10 @@ export const agentService = {
       clearAgentTimeouts(agentId);
       chatService.kill(agentId);
     }
-    // Adapters own their subprocess lifetime now — the kill() calls above tell
-    // each in-flight handle to terminate. PID tracking is handled inside each
-    // adapter, so the persistence layer's pids.json is kept consistent without
-    // any work here.
-    await new Promise<void>(resolve => setTimeout(resolve, 200));
+    // Wait (capped) for killed turns to finish unwinding — their finally
+    // blocks flush partial assistant messages into history, which must land
+    // before index.ts's final saveNow() or those messages are lost.
+    await chatService.waitForAllTurns(3000);
   },
 
   async killAllProcesses(): Promise<{ success: boolean; message: string }> {
@@ -712,18 +800,38 @@ export const agentService = {
         (sessionProviderCandidate === 'claude' || sessionProviderCandidate === 'codex')
           ? sessionProviderCandidate
           : (currentSessionId ? 'claude' : null);
+      const currentSessionModel = currentSessionId && typeof agentData.currentSessionModel === 'string' && agentData.currentSessionModel
+        ? agentData.currentSessionModel
+        : null;
+
+      const info: any = {
+        ...agentData,
+        status: 'stopped' as AgentStatus,
+        referencePaths: agentData.referencePaths || [],
+        systemPrompt: agentData.systemPrompt || '',
+        workspaceId: agentData.workspaceId || '',
+        provider: (agentData.provider === 'claude' || agentData.provider === 'codex') ? agentData.provider : 'claude',
+        model: typeof agentData.model === 'string' && agentData.model ? agentData.model : undefined,
+      };
+      // The persisted record carries session/accounting fields that live on
+      // ManagedAgent, not AgentInfo. Strip them from the spread so `info`
+      // (which gets broadcast verbatim) can never carry a stale copy of the
+      // session — the wire must only ever reflect the authoritative fields.
+      delete info.currentSessionId;
+      delete info.currentSessionProvider;
+      delete info.currentSessionModel;
+      delete info.contextTokens;
+      delete info.contextLimit;
+      delete info.totalInputTokens;
+      delete info.totalOutputTokens;
+      delete info.totalCostUsd;
+      delete info.numTurns;
 
       const managed: ManagedAgent = {
-        info: {
-          ...agentData,
-          status: 'stopped' as AgentStatus,
-          referencePaths: agentData.referencePaths || [],
-          systemPrompt: agentData.systemPrompt || '',
-          workspaceId: agentData.workspaceId || '',
-          provider: (agentData.provider === 'claude' || agentData.provider === 'codex') ? agentData.provider : 'claude',
-        },
+        info,
         currentSessionId,
         currentSessionProvider,
+        currentSessionModel,
         watcher: null,
         lastFileChange: [],
         pendingTimeouts: [],
@@ -768,6 +876,7 @@ export const agentService = {
       ...a.info,
       currentSessionId: a.currentSessionId,
       currentSessionProvider: a.currentSessionProvider,
+      currentSessionModel: a.currentSessionModel,
       contextTokens: a.contextTokens,
       contextLimit: a.contextLimit,
       totalInputTokens: a.totalInputTokens,

@@ -38,6 +38,7 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 # Runtime data
 data.json
 pids.json
+agent-forge.lock
 
 # Editor configs
 .cursor

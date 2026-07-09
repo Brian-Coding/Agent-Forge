@@ -1,6 +1,6 @@
 import type { Subprocess } from 'bun';
 import type { TerminalSession } from '../../shared/protocol';
-import { generateId, killProcessTree } from '../utils';
+import { generateId, killProcessTree, assertArgvWithinLimit } from '../utils';
 import { persistenceService } from './persistence.service';
 import { broadcast } from '../broadcast';
 
@@ -14,6 +14,13 @@ interface ManagedTerminal {
 
 // HMR-safe state
 const terminals: Map<string, ManagedTerminal> = (globalThis as any).__terminalsMap ??= new Map<string, ManagedTerminal>();
+
+function getShellCommand(command: string): string[] {
+  if (process.platform === 'win32') {
+    return [process.env.ComSpec || 'cmd.exe', '/d', '/s', '/c', command];
+  }
+  return [process.env.SHELL || 'sh', '-c', command];
+}
 
 export const terminalService = {
   getAll(): TerminalSession[] {
@@ -32,7 +39,9 @@ export const terminalService = {
     };
 
     try {
-      const proc = Bun.spawn(['sh', '-c', command], {
+      const spawnArgs = getShellCommand(command);
+      assertArgvWithinLimit(spawnArgs);
+      const proc = Bun.spawn(spawnArgs, {
         cwd,
         stdin: 'ignore',
         stdout: 'pipe',
