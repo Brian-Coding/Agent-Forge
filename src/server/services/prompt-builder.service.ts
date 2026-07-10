@@ -1,7 +1,6 @@
 import { existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import type { AgentInfo } from '../../shared/protocol';
-import { noteService } from './note.service';
 import { documentService } from './document.service';
 import { settingsService } from './settings.service';
 import { workspaceService } from './workspace.service';
@@ -17,7 +16,7 @@ const PLAN_MANAGEMENT_INSTRUCTIONS = `Plan Management:
 When asked to create or update a plan, use the Write tool to write a markdown file to the .plans/ directory in your working directory.
 - To create a new plan: Write to .plans/<plan-name>.md
 - To update an existing plan: Write the complete updated content to the same file path
-- Plans will automatically appear in the user's Plans sidebar for review
+- The user reads plan files directly from the repo in their IDE
 - Plans marked [APPROVED] should be followed as-is
 - Plans marked [DRAFT] are pending user review`;
 
@@ -55,12 +54,11 @@ export interface PromptBuildResult {
  *   1. Guardrails
  *   2. Agent persona (from agent.systemPrompt)
  *   3. Project context (workspace-shared)
- *   4. Notes (tagged to this agent)
- *   5. Documents (plans relevant to this agent / workspace)
- *   6. Plan Management instructions (so the agent knows .plans/* is special)
- *   7. Default iOS simulator (if set and cwd looks iOS-ish)
- *   8. Reference directories
- *   9. Atlas citation (when the workspace has a built atlas and the agent isn't a workspace tool)
+ *   4. Documents (plans relevant to this agent / workspace)
+ *   5. Plan Management instructions (so the agent knows .plans/* is special)
+ *   6. Default iOS simulator (if set and cwd looks iOS-ish)
+ *   7. Reference directories
+ *   8. Atlas citation (when the workspace has a built atlas and the agent isn't a workspace tool)
  */
 export const promptBuilderService = {
   build(agentInfo: AgentInfo, sharedContext: string): PromptBuildResult {
@@ -71,10 +69,6 @@ export const promptBuilderService = {
     }
     if (sharedContext) {
       parts.push(`Project Context:\n${sharedContext}`);
-    }
-    const notesContext = noteService.getNotesForAgent(agentInfo.id);
-    if (notesContext) {
-      parts.push(notesContext);
     }
     const docsContext = documentService.getDocumentsForAgent(agentInfo.id, agentInfo.workspaceId);
     if (docsContext) {

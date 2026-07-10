@@ -10,6 +10,7 @@ export const CHAT_AGENT_KINDS: readonly ChatAgentKind[] = ['claude', 'codex'] as
 export interface ModelOption {
   id: string;          // The exact string passed to --model
   label: string;       // What the UI dropdown shows
+  description?: string; // Short model guidance shown beneath the selector
 }
 
 export interface AgentDefinition {
@@ -50,6 +51,11 @@ export const STATIC_AGENT_DEFINITIONS: Record<ChatAgentKind, AgentDefinition> = 
     supportsResume: true,
     supportsReasoningLevel: true,
     models: [
+      // GPT-5.6 ids confirmed against the OpenAI model docs (gpt-5.6-sol /
+      // gpt-5.6-terra; Luna deliberately omitted — not requested). Static
+      // fallback until `codex debug models` discovery lists the 5.6 family.
+      { id: 'gpt-5.6-sol',       label: 'GPT-5.6 Sol',   description: 'Latest frontier agentic coding model.' },
+      { id: 'gpt-5.6-terra',     label: 'GPT-5.6 Terra', description: 'Balanced agentic coding model for everyday work.' },
       { id: 'gpt-5.5',           label: 'GPT-5.5' },
       { id: 'gpt-5.4',           label: 'GPT-5.4' },
       { id: 'gpt-5.2-codex',     label: 'GPT-5.2 Codex' },

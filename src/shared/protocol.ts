@@ -51,6 +51,7 @@ export interface AgentInfo {
 export interface ModelOption {
   id: string;
   label: string;
+  description?: string;
 }
 
 export interface AgentProviderDefinition {
@@ -174,16 +175,11 @@ export interface ChatMessage {
   model?: string;             // Which model actually produced this turn when the provider reports it.
 }
 
-export interface ProjectNote {
-  id: string;
-  title: string;
-  content: string;
-  agentId?: string;       // Optional: tag note to a specific agent
-  createdAt: number;
-  updatedAt: number;
-}
-
-
+/**
+ * Backend representation of a plan document. The Plans sidebar UI was removed
+ * (2026-07-09); these records now exist purely as the agent-facing `.plans/`
+ * plumbing — file sync, prompt context, and write-lock tracking.
+ */
 export interface LiveDocument {
   id: string;
   title: string;
@@ -232,6 +228,14 @@ export interface UsageEvent {
   outputTokens: number;
   costUsd: number;
   turns: number;
+  /**
+   * Enrichment fields (2026-07-09, Token Usage redesign). Stamped at record
+   * time when known; absent on historical events, which the report renders
+   * as "(unrecorded)".
+   */
+  model?: string;        // ground-truth model that served the turn (modelRan, else resolved)
+  agentName?: string;    // agent display name at event time (survives agent deletion)
+  workspaceId?: string;  // workspace the agent belonged to at event time
 }
 
 /**
@@ -253,23 +257,112 @@ export interface WindowTokenSummary {
   total: ProviderTokenBucket;
 }
 
+/** One breakdown row (per agent or per model) inside a usage window. */
+export interface UsageBreakdownRow {
+  key: string;                   // agentId or model id
+  label: string;                 // display label (agent name / model id)
+  claude: ProviderTokenBucket;
+  codex: ProviderTokenBucket;
+  total: ProviderTokenBucket;
+  lastTimestamp: number;
+}
+
+/** Derived headline stats for one usage window. */
+export interface UsageWindowStats {
+  totalTokens: number;
+  turns: number;
+  avgInputPerTurn: number;       // rounded
+  avgOutputPerTurn: number;      // rounded
+  outputInputRatio: number | null;  // null when no input tokens in window
+  biggestTurn: {
+    tokens: number;
+    agentName: string;
+    provider: AgentProvider;
+    model?: string;
+    timestamp: number;
+  } | null;
+}
+
+/** Everything the Tokens tab needs for one time window. */
+export interface UsageWindowReport {
+  summary: WindowTokenSummary;
+  byAgent: UsageBreakdownRow[];  // sorted by total tokens desc
+  byModel: UsageBreakdownRow[];  // sorted by total tokens desc
+  stats: UsageWindowStats;
+}
+
+/** One calendar day's provider-split totals (local time). */
+export interface UsageDailyRow {
+  date: string;                  // YYYY-MM-DD local
+  claude: ProviderTokenBucket;
+  codex: ProviderTokenBucket;
+  total: ProviderTokenBucket;
+}
+
 /**
  * Full usage report rendered by the Tokens sidebar tab. Windows are
  * calendar-aligned to the server's local time (which is the user's local
- * time, since the server runs on the user's machine).
+ * time, since the server runs on the user's machine). `days7`/`days30`
+ * are rolling windows (now minus N days); `today`/`month` are calendar
+ * windows; `allTime` covers the whole log.
  */
 export interface UsageReport {
-  today: WindowTokenSummary;     // Since 00:00 local today
-  week: WindowTokenSummary;      // Since most recent Mon 00:00 local
-  month: WindowTokenSummary;     // Since 1st of this calendar month, 00:00 local
-  allTime: WindowTokenSummary;   // Everything in the log
-  perAgent: Array<{
-    agentId: string;
+  windows: {
+    today: UsageWindowReport;
+    days7: UsageWindowReport;
+    days30: UsageWindowReport;
+    month: UsageWindowReport;
+    allTime: UsageWindowReport;
+  };
+  /** Last 30 calendar days, oldest first, zero-filled so charts have no gaps. */
+  daily: UsageDailyRow[];
+  /** Most recent turns, newest first (capped small — it's a peek, not a log viewer). */
+  recentTurns: Array<{
+    timestamp: number;
     agentName: string;
-    claude: ProviderTokenBucket;
-    codex: ProviderTokenBucket;
-    lastTimestamp: number;
+    provider: AgentProvider;
+    model?: string;
+    inputTokens: number;
+    outputTokens: number;
   }>;
+  generatedAt: number;
+}
+
+// ---------------------------------------------------------------------------
+// Provider limits (Limits sidebar tab)
+// ---------------------------------------------------------------------------
+
+export type LimitsProviderStatus = 'available' | 'stale' | 'unavailable' | 'error';
+
+/** One rate-limit window (5-hour or weekly). */
+export interface LimitsWindow {
+  usedPercent: number | null;
+  resetsAt: number | null;       // epoch ms
+  windowMinutes: number | null;  // 300 for 5h, 10080 for weekly (when the source reports it)
+}
+
+export interface ProviderLimitsSnapshot {
+  provider: AgentProvider;
+  status: LimitsProviderStatus;
+  /** When the underlying data was produced (statusline write / rollout event). */
+  updatedAt: number | null;
+  /** When the limits service last read the source. */
+  checkedAt: number;
+  model: string | null;
+  planType: string | null;
+  contextUsedPercent: number | null;
+  fiveHour: LimitsWindow;
+  weekly: LimitsWindow;
+  /** Human-readable description of where the data came from. */
+  source: string;
+  /** Error text or setup hint when status is unavailable/error. */
+  detail: string | null;
+}
+
+export interface LimitsSnapshot {
+  providers: { claude: ProviderLimitsSnapshot; codex: ProviderLimitsSnapshot };
+  refreshIntervalMs: number;
+  nextRefreshAt: number;
 }
 
 // Client -> Server messages
@@ -282,22 +375,10 @@ export type ClientMessage =
   | { type: 'stop_agent'; agentId: string }
   | { type: 'remove_agent'; agentId: string }
   | { type: 'clear_history'; agentId: string }
-  | { type: 'broadcast_message'; agentIds: string[]; content: string }
   | { type: 'update_shared_context'; content: string }
   | { type: 'get_shared_context' }
   | { type: 'list_agents' }
   | { type: 'get_history'; agentId: string }
-  // Notes
-  | { type: 'get_notes' }
-  | { type: 'create_note'; title: string; content: string; agentId?: string }
-  | { type: 'update_note'; id: string; title?: string; content?: string; agentId?: string | null }
-  | { type: 'delete_note'; id: string }
-  // Documents
-  | { type: 'get_documents' }
-  | { type: 'create_document'; title: string; content: string; agentId?: string; workspaceId?: string }
-  | { type: 'update_document'; id: string; title?: string; content?: string; agentId?: string | null; lastEditedBy?: string; status?: 'draft' | 'approved' | 'in_progress' }
-  | { type: 'delete_document'; id: string }
-  | { type: 'approve_document'; id: string }
   // Settings
   | { type: 'get_settings' }
   | { type: 'update_settings'; settings: Partial<AppSettings> }
@@ -320,6 +401,8 @@ export type ClientMessage =
   | { type: 'create_terminal'; agentId: string; command: string }
   | { type: 'kill_terminal'; id: string }
   | { type: 'get_terminals' }
+  // Limits
+  | { type: 'refresh_limits' }
   // Kill all
   | { type: 'kill_all' }
   // App-level heartbeat — browsers can't send protocol-level pings, so the
@@ -341,23 +424,14 @@ export type ServerMessage =
   | { type: 'shared_context'; content: string }
   | { type: 'file_changed'; agentId: string; files: string[] }
   | { type: 'error'; message: string; agentId?: string }
-  // Notes
-  | { type: 'notes_list'; notes: ProjectNote[] }
-  | { type: 'note_created'; note: ProjectNote }
-  | { type: 'note_updated'; note: ProjectNote }
-  | { type: 'note_deleted'; id: string }
-  // Documents
-  | { type: 'documents_list'; documents: LiveDocument[] }
-  | { type: 'document_created'; document: LiveDocument }
-  | { type: 'document_updated'; document: LiveDocument }
-  | { type: 'document_deleted'; id: string }
-  | { type: 'document_content_stream'; documentId: string; content: string }
   // Settings
   | { type: 'settings'; settings: AppSettings }
   // Token usage (per-agent live state — drives the per-chat context bar)
   | { type: 'token_usage'; agentId: string; contextTokens: number; contextLimit: number; totalInputTokens: number; totalOutputTokens: number; totalCostUsd: number; numTurns: number; modelRan?: string }
   // Full token report (windows + per-agent) — drives the Tokens sidebar tab.
   | { type: 'usage_report'; report: UsageReport }
+  // Provider rate-limit snapshot — drives the Limits sidebar tab.
+  | { type: 'limits_snapshot'; snapshot: LimitsSnapshot }
   // Workspaces
   | { type: 'workspaces_list'; workspaces: WorkspaceInfo[] }
   | { type: 'workspace_created'; workspace: WorkspaceInfo }
@@ -380,7 +454,11 @@ export interface PersistedData {
   agents: AgentInfo[];
   messages: ChatMessage[];
   sharedContext: string;
-  notes: ProjectNote[];
+  /**
+   * Legacy field — the Notes feature was removed (2026-07-09). Old data.json
+   * files may still carry it; it's ignored on load and no longer written.
+   */
+  notes?: unknown[];
   documents: LiveDocument[];
   settings: AppSettings;
   workspaces: WorkspaceInfo[];

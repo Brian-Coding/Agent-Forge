@@ -115,6 +115,34 @@ function prependPriorHistory(agentId: string, currentUserContent: string): strin
 
 // --- Bridge: translate normalized AgentEvent → wire-protocol messages -------
 
+// eslint-disable-next-line no-control-regex
+const ANSI_ESCAPE = /\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b[@-Z\\-_]/g;
+// eslint-disable-next-line no-control-regex
+const CONTROL_CHARS = /[\x00-\x08\x0b\x0c\x0e-\x1f�]/g;
+
+/**
+ * Make a raw CLI stderr chunk safe to render in the chat's live output.
+ * Strips ANSI escapes, then drops the chunk entirely when it is mostly
+ * non-printable (a binary dump — e.g. a crashing CLI spilling a panic
+ * backtrace or core-fragment bytes, which decode to U+FFFD replacement
+ * characters). Otherwise removes any stray control bytes and returns the
+ * readable remainder. Empty string means "nothing worth showing".
+ */
+export function sanitizeStderrForChat(text: string): string {
+  const stripped = text.replace(ANSI_ESCAPE, '');
+  if (!stripped) return '';
+  let bad = 0;
+  for (let i = 0; i < stripped.length; i++) {
+    const c = stripped.charCodeAt(i);
+    if (c === 0xfffd || (c < 0x20 && c !== 0x09 && c !== 0x0a && c !== 0x0d)) bad++;
+  }
+  // >30% control/replacement bytes = binary noise (real dumps run ~50%+),
+  // not a diagnostic message. Readable text with an occasional stray control
+  // byte stays under this and is cleaned up below rather than dropped.
+  if (bad > stripped.length * 0.3) return '';
+  return stripped.replace(CONTROL_CHARS, '');
+}
+
 function handleEvent(agentId: string, event: AgentEvent): void {
   switch (event.type) {
     case 'text-delta': {
@@ -131,7 +159,16 @@ function handleEvent(agentId: string, event: AgentEvent): void {
 
     case 'stderr': {
       if (/No conversation found with session ID/i.test(event.text)) return;
-      broadcast({ type: 'output', agentId, content: event.text, stream: 'stderr' });
+      // CLI stderr is diagnostics, not agent output. A crashing/old CLI can
+      // dump raw binary (panic backtraces, core fragments) or ANSI-laden
+      // tracing here, which the live-output view rendered as thousands of
+      // lines of mojibake. Sanitize before it reaches the chat: strip ANSI,
+      // drop chunks that are mostly non-printable (binary), and remove
+      // stray control bytes. Genuine failures still surface via the adapter's
+      // end-of-turn `error` event, so nothing real is lost.
+      const clean = sanitizeStderrForChat(event.text);
+      if (!clean) return;
+      broadcast({ type: 'output', agentId, content: clean, stream: 'stderr' });
       return;
     }
 
@@ -483,9 +520,11 @@ async function runChatTurn(agentId: string, content: string, source?: 'qa'): Pro
 
     // Persist the per-turn usage rollup. No-ops if every counter is zero
     // (a turn that errored before any API call). Triggers a usage_summary
-    // broadcast so the bottom-bar tracker updates immediately.
+    // broadcast so the bottom-bar tracker updates immediately. The model is
+    // stamped from the CLI-reported ground truth when available so the Tokens
+    // tab can break spend down per model.
     if (turnState) {
-      usageService.record(agentId, provider, turnState.turnUsage);
+      usageService.record(agentId, provider, turnState.turnUsage, { model: turnState.modelRan || resolvedModel });
     }
 
     // Identity-guarded: never delete a newer turn's buffer.
@@ -506,9 +545,9 @@ async function runChatTurn(agentId: string, content: string, source?: 'qa'): Pro
 
 export const chatService = {
   /**
-   * Entry point for `send_message`, `send_image`, `send_images`, and
-   * `broadcast_message`. Serializes per-agent via the sendLocks chain so
-   * concurrent calls don't interleave.
+   * Entry point for `send_message`, `send_image`, and `send_images`.
+   * Serializes per-agent via the sendLocks chain so concurrent calls don't
+   * interleave.
    */
   async sendMessage(agentId: string, content: string, source?: 'qa'): Promise<void> {
     // Capture the epoch at enqueue time. If resetLock() bumps it while this

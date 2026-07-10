@@ -12,6 +12,9 @@ test('resolveAgentModel passes through a requested model that is in the catalog'
   // never get downgraded to the default.
   expect(resolveAgentModel('claude', 'claude-fable-5')).toBe('claude-fable-5');
   expect(resolveAgentModel('codex', 'gpt-5.4')).toBe('gpt-5.4');
+  // GPT-5.6 family (added 2026-07-09) must pass through unchanged.
+  expect(resolveAgentModel('codex', 'gpt-5.6-sol')).toBe('gpt-5.6-sol');
+  expect(resolveAgentModel('codex', 'gpt-5.6-terra')).toBe('gpt-5.6-terra');
 });
 
 test('resolveAgentModel falls back to the provider default for a model outside the catalog', () => {

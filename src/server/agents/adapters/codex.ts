@@ -515,12 +515,18 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
     if (ctx.model) {
       baseArgs.push('-m', ctx.model);
     }
-    if (ctx.reasoningLevel) {
-      // Older settings may store "extra_high" for the "xhigh" effort level; we
-      // accept either spelling but normalize to the CLI form.
-      const effort = ctx.reasoningLevel === 'extra_high' ? 'xhigh' : ctx.reasoningLevel;
-      baseArgs.push('-c', `reasoning_effort="${effort}"`);
-    }
+    // Always pin the reasoning effort. The Codex config key is
+    // `model_reasoning_effort` — passing the wrong key (`reasoning_effort`) is
+    // silently ignored, so the dropdown level never took and Codex fell back to
+    // whatever ~/.codex/config.toml had. If that fallback is invalid for the
+    // chosen model (e.g. an "ultra"/"max" tier the API rejects), every turn
+    // 400s on reasoning.effort. We normalize the legacy "extra_high" spelling
+    // to the CLI's "xhigh" and default to "medium" when no level is selected,
+    // so a stale config value can never leak into a turn.
+    const effort = ctx.reasoningLevel === 'extra_high'
+      ? 'xhigh'
+      : (ctx.reasoningLevel || 'medium');
+    baseArgs.push('-c', `model_reasoning_effort="${effort}"`);
 
     // Resolve to absolute path so Bun.spawn doesn't have to probe PATHEXT
     // from the agent's cwd (which fails on Windows for npm shim files).

@@ -2,8 +2,6 @@ import type { ServerWebSocket } from 'bun';
 import type { ClientMessage, ServerMessage } from '../shared/protocol';
 import { clients, clientLastPong, broadcast, sendTo } from './broadcast';
 import { agentService } from './services/agent.service';
-import { noteService } from './services/note.service';
-import { documentService } from './services/document.service';
 import { settingsService } from './services/settings.service';
 import { workspaceService } from './services/workspace.service';
 import { terminalService } from './services/terminal.service';
@@ -14,6 +12,7 @@ import { qaService } from './services/qa.service';
 import { atlasService } from './services/atlas.service';
 import { chatService } from './services/chat.service';
 import { usageService } from './services/usage.service';
+import { limitsService } from './services/limits.service';
 
 // WebSocket heartbeat — ping every 30s, close stale clients after 40s
 setInterval(() => {
@@ -174,13 +173,6 @@ async function handleMessage(ws: ServerWebSocket<unknown>, message: ClientMessag
       break;
     }
 
-    case 'broadcast_message': {
-      await Promise.all(message.agentIds.map(
-        (agentId: string) => chatService.sendMessage(agentId, message.content)
-      ));
-      break;
-    }
-
     case 'update_shared_context': {
       await agentService.updateSharedContext(message.content);
       broadcast({ type: 'shared_context', content: message.content });
@@ -202,85 +194,6 @@ async function handleMessage(ws: ServerWebSocket<unknown>, message: ClientMessag
     case 'get_history': {
       const messages = agentService.getMessages(message.agentId);
       sendTo(ws, { type: 'history', agentId: message.agentId, messages });
-      break;
-    }
-
-    // --- Notes ---
-    case 'get_notes': {
-      sendTo(ws, { type: 'notes_list', notes: noteService.getAll() });
-      break;
-    }
-
-    case 'create_note': {
-      const note = await noteService.create(message.title, message.content, message.agentId);
-      broadcast({ type: 'note_created', note });
-      break;
-    }
-
-    case 'update_note': {
-      const { id, ...updates } = message;
-      const note = await noteService.update(id, updates);
-      if (note) {
-        broadcast({ type: 'note_updated', note });
-      } else {
-        sendTo(ws, { type: 'error', message: 'Note not found' });
-      }
-      break;
-    }
-
-    case 'delete_note': {
-      const deleted = await noteService.delete(message.id);
-      if (deleted) {
-        broadcast({ type: 'note_deleted', id: message.id });
-      } else {
-        sendTo(ws, { type: 'error', message: 'Note not found' });
-      }
-      break;
-    }
-
-    // --- Documents ---
-    case 'get_documents': {
-      sendTo(ws, { type: 'documents_list', documents: documentService.getAll() });
-      break;
-    }
-
-    case 'create_document': {
-      const doc = await documentService.create(message.title, message.content, message.agentId, message.workspaceId);
-      broadcast({ type: 'document_created', document: doc });
-      break;
-    }
-
-    case 'update_document': {
-      const { id: docId, type: _docType, ...docUpdates } = message;
-      const doc = await documentService.update(docId, docUpdates);
-      if (doc) {
-        broadcast({ type: 'document_updated', document: doc });
-      } else {
-        sendTo(ws, { type: 'error', message: 'Document not found' });
-      }
-      break;
-    }
-
-    case 'delete_document': {
-      const deleted = await documentService.delete(message.id);
-      if (deleted) {
-        broadcast({ type: 'document_deleted', id: message.id });
-      } else {
-        sendTo(ws, { type: 'error', message: 'Document not found' });
-      }
-      break;
-    }
-
-    case 'approve_document': {
-      const doc = await documentService.update(message.id, {
-        status: 'approved',
-        lastEditedBy: 'user',
-      });
-      if (doc) {
-        broadcast({ type: 'document_updated', document: doc });
-      } else {
-        sendTo(ws, { type: 'error', message: 'Document not found' });
-      }
       break;
     }
 
@@ -378,6 +291,15 @@ async function handleMessage(ws: ServerWebSocket<unknown>, message: ClientMessag
       break;
     }
 
+    case 'refresh_limits': {
+      try {
+        await limitsService.refresh();
+      } catch (e: any) {
+        sendTo(ws, { type: 'error', message: e?.message || 'Limits refresh failed' });
+      }
+      break;
+    }
+
     case 'kill_all': {
       await agentService.killAllProcesses();
       terminalService.clearAll();
@@ -400,13 +322,14 @@ export const websocketHandlers = {
 
     // Send current state on connect
     sendTo(ws, { type: 'agents_list', agents: agentService.getAgents() });
-    sendTo(ws, { type: 'notes_list', notes: noteService.getAll() });
-    sendTo(ws, { type: 'documents_list', documents: documentService.getAll() });
     sendTo(ws, { type: 'settings', settings: settingsService.get() });
     sendTo(ws, { type: 'workspaces_list', workspaces: workspaceService.getAll() });
     sendTo(ws, { type: 'terminals_list', terminals: terminalService.getAll() });
     // Cross-provider token report — drives the Tokens sidebar tab.
     sendTo(ws, { type: 'usage_report', report: usageService.getReportForConnect() });
+    // Provider limits — cached snapshot on connect (the 30-min loop keeps it fresh).
+    const limitsSnapshot = limitsService.getSnapshot();
+    if (limitsSnapshot) sendTo(ws, { type: 'limits_snapshot', snapshot: limitsSnapshot });
 
     // Send token usage for each agent
     for (const agent of agentService.getAgents()) {

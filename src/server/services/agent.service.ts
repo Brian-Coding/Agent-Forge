@@ -5,7 +5,6 @@ import type { AgentInfo, AgentProvider, AgentStatus, ChatMessage } from '../../s
 import { STATIC_AGENT_DEFINITIONS, stripModelTier } from '../agents/agent-kinds';
 import { generateId } from '../utils';
 import { persistenceService } from './persistence.service';
-import { noteService } from './note.service';
 import { documentService } from './document.service';
 import { workspaceService } from './workspace.service';
 import { settingsService } from './settings.service';
