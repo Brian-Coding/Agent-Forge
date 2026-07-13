@@ -70,6 +70,14 @@
     .bottom-bar { height: 40px; padding: 0 16px; background: var(--bg-secondary); border-top: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; margin-bottom: 5px; }
     .bottom-bar-left { display: flex; align-items: center; gap: 8px; }
     .bottom-bar-right { display: flex; align-items: center; gap: 12px; }
+    .bottom-limits { display: flex; align-items: center; gap: 6px; padding-right: 12px; border-right: 1px solid var(--border); white-space: nowrap; }
+    .bottom-limit-provider { height: 28px; display: flex; align-items: center; gap: 7px; padding: 0 9px; background: var(--bg-primary); border: 1px solid var(--border); border-radius: 7px; }
+    .bottom-limit-identity { display: flex; align-items: center; gap: 5px; color: var(--text-primary); font-size: 11px; font-weight: 650; }
+    .bottom-limit-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--success); box-shadow: 0 0 0 2px rgba(63, 185, 80, 0.12); }
+    .bottom-limit-dot.stale { background: var(--warning); box-shadow: 0 0 0 2px rgba(210, 153, 34, 0.12); }
+    .bottom-limit-window { display: flex; align-items: baseline; gap: 4px; padding-left: 7px; border-left: 1px solid var(--border); }
+    .bottom-limit-window-label { color: var(--text-secondary); font-size: 10px; font-weight: 600; }
+    .bottom-limit-value { font-family: 'SF Mono', Monaco, Consolas, monospace; color: var(--text-primary); font-size: 11px; font-weight: 600; }
     .grid-controls { display: flex; align-items: center; gap: 8px; }
     .grid-label { font-size: 12px; color: var(--text-secondary); }
     .grid-buttons { display: flex; gap: 2px; }
@@ -177,8 +185,30 @@
     .form-hint { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
 
     /* Shared context modal */
-    .shared-context-textarea { width: 100%; min-height: 200px; padding: 12px; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary); font-family: 'SF Mono', Monaco, Consolas, monospace; font-size: 13px; resize: vertical; }
+    .harness-settings-modal { max-width: 760px; }
+    .shared-context-textarea { width: 100%; min-height: 150px; padding: 12px; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary); font-family: 'SF Mono', Monaco, Consolas, monospace; font-size: 13px; resize: vertical; }
     .shared-context-textarea:focus { outline: none; border-color: var(--accent); }
+    .settings-card { border: 1px solid var(--border); background: var(--bg-primary); border-radius: 8px; padding: 12px; margin-bottom: 12px; }
+    .settings-card-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 4px; }
+    .settings-card-title { font-size: 13px; font-weight: 700; color: var(--text-primary); }
+    .settings-badge { flex-shrink: 0; padding: 2px 7px; border: 1px solid var(--border); border-radius: 999px; color: var(--text-secondary); background: var(--bg-tertiary); font-size: 9px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
+    .settings-assembly-list { display: grid; gap: 5px; margin: 10px 0 0; padding: 0; list-style: none; counter-reset: assembly-step; }
+    .settings-assembly-list li { counter-increment: assembly-step; display: grid; grid-template-columns: 20px 1fr; align-items: start; gap: 7px; color: var(--text-secondary); font-size: 11px; line-height: 1.4; }
+    .settings-assembly-list li::before { content: counter(assembly-step); display: grid; place-items: center; width: 18px; height: 18px; border: 1px solid var(--border); border-radius: 50%; color: var(--text-muted); font-family: 'SF Mono', Monaco, Consolas, monospace; font-size: 9px; }
+    .settings-instructions { display: grid; gap: 7px; margin-top: 10px; }
+    .settings-instruction { border: 1px solid var(--border); border-radius: 6px; background: var(--bg-secondary); overflow: hidden; }
+    .settings-instruction summary { display: grid; grid-template-columns: minmax(130px, 0.45fr) 1fr; gap: 12px; padding: 9px 10px; cursor: pointer; color: var(--text-primary); font-size: 11px; font-weight: 650; }
+    .settings-instruction summary:hover { background: var(--bg-tertiary); }
+    .settings-instruction-summary { color: var(--text-muted); font-weight: 400; line-height: 1.35; }
+    .settings-instruction-content { max-height: 320px; margin: 0; padding: 12px; overflow: auto; border-top: 1px solid var(--border); background: var(--bg-primary); color: var(--text-secondary); white-space: pre-wrap; word-break: break-word; font-family: 'SF Mono', Monaco, Consolas, monospace; font-size: 10px; line-height: 1.5; }
+    .settings-status-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 10px 0; }
+    .settings-status-item { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 9px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-secondary); color: var(--text-secondary); font-size: 11px; }
+    .settings-status-ok { color: var(--success); }
+    .settings-status-pending { color: var(--warning); }
+    .settings-detail-list { margin: 9px 0 0; padding-left: 18px; color: var(--text-secondary); font-size: 11px; line-height: 1.55; }
+    .settings-endpoint { margin-top: 8px; color: var(--text-muted); font-family: 'SF Mono', Monaco, Consolas, monospace; font-size: 10px; overflow-wrap: anywhere; }
+    .settings-context-meta { display: flex; justify-content: space-between; gap: 12px; margin: 8px 0; color: var(--text-muted); font-size: 10px; }
+    .settings-command { font-family: 'SF Mono', Monaco, Consolas, monospace; color: var(--text-secondary); font-size: 10px; background: var(--bg-tertiary); padding: 5px 7px; border-radius: 4px; margin-top: 5px; user-select: all; }
 
     /* Connection status */
     .connection-error { padding: 8px 16px; background: var(--error); color: white; text-align: center; font-size: 12px; flex-shrink: 0; }
@@ -307,6 +337,13 @@
     .tokens-recent-agent { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary); }
     .tokens-recent-tokens { font-family: 'SF Mono', Monaco, Consolas, monospace; color: var(--text-secondary); font-size: 10px; white-space: nowrap; }
     .tokens-recent-time { color: var(--text-muted); font-size: 9px; white-space: nowrap; }
+    .tokens-project { border: 1px solid var(--border); border-radius: 5px; overflow: hidden; margin-top: 4px; }
+    .tokens-project-head { display: flex; align-items: center; gap: 6px; padding: 6px 7px; cursor: pointer; background: var(--bg-primary); font-size: 11px; }
+    .tokens-project-head:hover { background: var(--bg-tertiary); }
+    .tokens-project-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; color: var(--text-primary); }
+    .tokens-project-meta { color: var(--text-muted); font-size: 9px; white-space: nowrap; }
+    .tokens-project-turns { border-top: 1px solid var(--border); padding: 3px; }
+    .tokens-tracking { color: var(--text-muted); font-size: 10px; padding: 0 2px; }
     .tokens-empty { padding: 14px 8px; color: var(--text-muted); font-size: 11px; text-align: center; }
 
     /* Limits panel — provider rate-limit cards */
@@ -452,7 +489,13 @@
     .workspace-item { padding: 10px 12px; border-radius: 6px; cursor: pointer; margin-bottom: 2px; display: flex; align-items: center; gap: 8px; position: relative; border: 1px solid transparent; }
     .workspace-item:hover { background: var(--bg-tertiary); }
     .workspace-item.active { background: rgba(47, 129, 247, 0.12); border-color: var(--accent); }
+    .workspace-item.dragging { opacity: 0.45; }
+    .workspace-item.drag-over { border-color: var(--accent); box-shadow: inset 0 2px 0 var(--accent); }
+    .workspace-drag-handle { color: var(--text-muted); cursor: grab; font-size: 14px; line-height: 1; user-select: none; }
+    .workspace-drag-handle:active { cursor: grabbing; }
     .workspace-name { font-weight: 500; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; }
+    .workspace-active-indicator { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; padding: 2px 6px; border: 1px solid rgba(47, 129, 247, 0.35); border-radius: 999px; background: rgba(47, 129, 247, 0.1); color: #58a6ff; font-size: 9px; font-weight: 700; line-height: 1.2; }
+    .workspace-active-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); animation: pulse 1.4s infinite; }
     .workspace-meta { font-size: 11px; color: var(--text-muted); }
     .workspace-delete-btn { background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 2px 4px; border-radius: 3px; font-size: 12px; opacity: 0; }
     .workspace-item:hover .workspace-delete-btn { opacity: 1; }
@@ -753,15 +796,15 @@
         label: 'Codex',
         icon: '⚙',
         models: [
-          { id: 'gpt-5.6-sol',       label: 'gpt-5.6 sol',   description: 'Latest frontier agentic coding model.' },
+          { id: 'gpt-5.6-sol',       label: 'gpt-5.6 sol',   description: 'Latest frontier agentic coding model.', supportedReasoningLevels: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'], defaultReasoningLevel: 'medium' },
           { id: 'gpt-5.6-terra',     label: 'gpt-5.6 terra', description: 'Balanced agentic coding model for everyday work.' },
           { id: 'gpt-5.5',           label: 'gpt-5.5' },
           { id: 'gpt-5.4',           label: 'gpt-5.4' },
           { id: 'gpt-5.2-codex',     label: 'gpt-5.2 codex' },
           { id: 'gpt-5.1-codex-max', label: 'gpt-5.1 codex max' },
         ],
-        defaultModel: 'gpt-5.5',
-        reasoningLevels: ['low', 'medium', 'high', 'xhigh'],
+        defaultModel: 'gpt-5.6-sol',
+        reasoningLevels: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
         defaultReasoningLevel: 'medium',
       },
     ];
@@ -837,7 +880,7 @@
       // null until the first report lands (the connect handshake fires it).
       const [usageReport, setUsageReport] = useState(null);
       // Provider rate-limit snapshot for the Limits sidebar tab. Server emits
-      // `limits_snapshot` on connect, every 30 minutes, and on manual refresh.
+      // `limits_snapshot` on connect, every minute, and on manual refresh.
       const [limits, setLimits] = useState(null);
       const [terminals, setTerminals] = useState([]);
       const [terminalOutput, setTerminalOutput] = useState({});
@@ -1022,7 +1065,7 @@
                 setAgentActivity(prev => ({ ...prev, [msg.agentId]: { label: msg.label, timestamp: msg.timestamp } }));
                 break;
               case 'thinking_output': {
-                const MAX_THINKING_OUTPUT = 512000; // same 500KB cap as live output
+                const MAX_THINKING_OUTPUT = 16000;
                 setThinkingOutput(prev => {
                   let updated = (prev[msg.agentId] || '') + msg.content;
                   if (updated.length > MAX_THINKING_OUTPUT) {
@@ -1169,6 +1212,7 @@
         resolveModelMismatch: (id, action) => sendRaw({ type: 'resolve_model_mismatch', id, action }),
         // Workspaces
         createWorkspace: (name) => sendRaw({ type: 'create_workspace', name }),
+        reorderWorkspaces: (orderedIds) => sendRaw({ type: 'reorder_workspaces', orderedIds }),
         updateWorkspace: (id, updates) => sendRaw({ type: 'update_workspace', id, ...updates }),
         deleteWorkspace: (id) => sendRaw({ type: 'delete_workspace', id }),
         setActiveWorkspace: (id) => sendRaw({ type: 'set_active_workspace', id }),
@@ -1429,13 +1473,112 @@
     // Shared Context Modal
     function SharedContextModal({ isOpen, onClose, content, onSave }) {
       const [text, setText] = useState(content);
+      const [vercelStatus, setVercelStatus] = useState(null);
+      const [vercelLoading, setVercelLoading] = useState(false);
+      const [vercelError, setVercelError] = useState('');
+      const [instructionManifest, setInstructionManifest] = useState(null);
+      const [instructionError, setInstructionError] = useState('');
       useEffect(() => { setText(content); }, [content]);
+      useEffect(() => {
+        if (!isOpen) return;
+        let active = true;
+        setVercelLoading(true);
+        setVercelError('');
+        setInstructionError('');
+        fetch('/api/integrations/vercel')
+          .then(r => r.ok ? r.json() : Promise.reject(new Error('Status check failed')))
+          .then(data => { if (active) setVercelStatus(data); })
+          .catch(err => { if (active) setVercelError(err.message || 'Status check failed'); })
+          .finally(() => { if (active) setVercelLoading(false); });
+        fetch('/api/harness/instructions')
+          .then(r => r.ok ? r.json() : Promise.reject(new Error('Instruction manifest failed to load')))
+          .then(data => { if (active) setInstructionManifest(data); })
+          .catch(err => { if (active) setInstructionError(err.message || 'Instruction manifest failed to load'); });
+        return () => { active = false; };
+      }, [isOpen]);
       if (!isOpen) return null;
+      const configureVercel = () => {
+        setVercelLoading(true);
+        setVercelError('');
+        fetch('/api/integrations/vercel', { method: 'POST' })
+          .then(r => r.ok ? r.json() : Promise.reject(new Error('Configuration failed')))
+          .then(setVercelStatus)
+          .catch(err => setVercelError(err.message || 'Configuration failed'))
+          .finally(() => setVercelLoading(false));
+      };
       return e('div', { className: 'modal-overlay', onClick: (ev) => ev.target === ev.currentTarget && onClose() },
-        e('div', { className: 'modal' },
-          e('h2', { className: 'modal-title' }, 'Shared Project Context'),
-          e('div', { className: 'form-hint', style: { marginBottom: 12 } }, 'This context is prepended to every agent\'s prompt automatically.'),
-          e('textarea', { className: 'shared-context-textarea', value: text, onChange: (ev) => setText(ev.target.value), placeholder: 'e.g., We are building a REST API in Go, using PostgreSQL, deployed on AWS...' }),
+        e('div', { className: 'modal harness-settings-modal' },
+          e('h2', { className: 'modal-title' }, 'Harness Settings'),
+          e('div', { className: 'settings-card' },
+            e('div', { className: 'settings-card-header' },
+              e('div', { className: 'settings-card-title' }, 'How agent context is assembled'),
+              e('span', { className: 'settings-badge' }, 'System owned')
+            ),
+            e('div', { className: 'form-hint' }, 'Agent Forge builds one context package for every turn. Inherent safety rules come first and cannot be edited here; project- and task-specific information is layered on afterward.'),
+            instructionManifest?.assemblyOrder && e('ol', { className: 'settings-assembly-list' },
+              instructionManifest.assemblyOrder.map((step, index) => e('li', { key: index }, step))
+            )
+          ),
+          e('div', { className: 'settings-card' },
+            e('div', { className: 'settings-card-header' },
+              e('div', { className: 'settings-card-title' }, 'Inherent instructions'),
+              e('span', { className: 'settings-badge' }, 'Always applied / read only')
+            ),
+            e('div', { className: 'form-hint' }, 'These are the exact server-owned instruction blocks currently supplied to agents. Expand a section to inspect its full text. Keeping this view read-only prevents a UI edit from silently weakening harness-level safeguards.'),
+            instructionError && e('div', { className: 'form-hint', style: { color: 'var(--error)', marginTop: 8 } }, instructionError),
+            !instructionManifest && !instructionError && e('div', { className: 'form-hint', style: { marginTop: 8 } }, 'Loading inherent instructions...'),
+            instructionManifest?.sections && e('div', { className: 'settings-instructions' },
+              instructionManifest.sections.map(section => e('details', { className: 'settings-instruction', key: section.id },
+                e('summary', null,
+                  e('span', null, section.title),
+                  e('span', { className: 'settings-instruction-summary' }, section.description)
+                ),
+                e('pre', { className: 'settings-instruction-content' }, section.content)
+              ))
+            )
+          ),
+          e('div', { className: 'settings-card' },
+            e('div', { className: 'settings-card-header' },
+              e('div', { className: 'settings-card-title' }, 'Vercel MCP'),
+              e('span', { className: 'settings-badge' }, 'Global / all projects')
+            ),
+            e('div', { className: 'form-hint' }, 'The official remote MCP makes Vercel project, deployment, log, and documentation tools discoverable to agents in every Agent Forge workspace.'),
+            e('ul', { className: 'settings-detail-list' },
+              e('li', null, 'Scope: stored in each provider CLI\'s user-level configuration, not in this repository.'),
+              e('li', null, 'Authentication: a configured entry does not necessarily mean that CLI has completed its one-time Vercel sign-in.'),
+              e('li', null, 'Safety: inspection is read-only by default; deployments and other Vercel changes still require an explicit request.')
+            ),
+            vercelStatus && e('div', { className: 'settings-status-row' },
+              e('div', { className: 'settings-status-item' },
+                e('strong', null, 'Codex'),
+                e('span', { className: vercelStatus.codex?.configured ? 'settings-status-ok' : 'settings-status-pending' }, vercelStatus.codex?.configured ? 'Configured' : vercelStatus.codex?.available ? 'Not configured' : 'CLI unavailable')
+              ),
+              e('div', { className: 'settings-status-item' },
+                e('strong', null, 'Claude'),
+                e('span', { className: vercelStatus.claude?.configured ? 'settings-status-ok' : 'settings-status-pending' }, vercelStatus.claude?.configured ? 'Configured' : vercelStatus.claude?.available ? 'Not configured' : 'CLI unavailable')
+              )
+            ),
+            vercelStatus?.endpoint && e('div', { className: 'settings-endpoint' }, 'Endpoint: ' + vercelStatus.endpoint),
+            vercelError && e('div', { className: 'form-hint', style: { color: 'var(--error)' } }, vercelError),
+            e('button', { type: 'button', className: 'btn btn-secondary', disabled: vercelLoading || vercelStatus?.ready, onClick: configureVercel, style: { marginTop: 8 } }, vercelLoading ? 'Checking...' : vercelStatus?.ready ? 'Configured in both CLIs' : 'Configure available CLIs'),
+            vercelStatus?.ready && e(React.Fragment, null,
+              e('div', { className: 'form-hint', style: { marginTop: 8 } }, 'One-time authentication may still be required in each CLI:'),
+              e('div', { className: 'settings-command' }, vercelStatus.authentication.codex),
+              e('div', { className: 'settings-command' }, vercelStatus.authentication.claude)
+            )
+          ),
+          e('div', { className: 'settings-card' },
+            e('div', { className: 'settings-card-header' },
+              e('div', { className: 'settings-card-title' }, 'Additional shared project context'),
+              e('span', { className: 'settings-badge' }, 'Editable')
+            ),
+            e('div', { className: 'form-hint' }, 'Optional context appended after the inherent instructions for every agent and workspace. Use it for architecture, conventions, and domain knowledge that should travel with every turn. Do not put tokens, credentials, or other secrets here.'),
+            e('div', { className: 'settings-context-meta' },
+              e('span', null, 'Applies globally inside this Agent Forge instance'),
+              e('span', null, text.length.toLocaleString() + ' characters')
+            ),
+            e('textarea', { className: 'shared-context-textarea', value: text, onChange: (ev) => setText(ev.target.value), placeholder: 'e.g., Project architecture, conventions, or domain knowledge...' })
+          ),
           e('div', { className: 'modal-actions' },
             e('button', { type: 'button', className: 'btn btn-secondary', onClick: onClose }, 'Cancel'),
             e('button', { type: 'button', className: 'btn btn-primary', onClick: () => { onSave(text); onClose(); } }, 'Save')
@@ -2247,7 +2390,9 @@
               ? currentProvider.models
               : [{ id: configuredModelId, label: configuredModelId + ' (not in catalog)' }].concat(currentProvider.models);
             const selectedModel = modelOptions.find(m => m.id === configuredModelId);
-            const currentReasoning = agent.reasoningLevel || currentProvider.defaultReasoningLevel || '';
+            const reasoningLevels = selectedModel?.supportedReasoningLevels || currentProvider.reasoningLevels;
+            const defaultReasoning = selectedModel?.defaultReasoningLevel || currentProvider.defaultReasoningLevel || 'medium';
+            const currentReasoning = reasoningLevels?.includes(agent.reasoningLevel) ? agent.reasoningLevel : defaultReasoning;
             return e('div', { className: 'agent-model-controls' },
               e('div', { className: 'agent-provider-row' },
                 e('select', {
@@ -2259,9 +2404,10 @@
                   if (!nextDef || !onUpdateAgent) return;
                   // Reset model to the provider's default on swap so we don't
                   // ship a Claude model id to Codex (or vice versa).
+                  const defaultModel = nextDef.models.find(m => m.id === nextDef.defaultModel);
                   const updates = { provider: nextKind, model: nextDef.defaultModel };
-                  if (nextDef.reasoningLevels && !agent.reasoningLevel) {
-                    updates.reasoningLevel = nextDef.defaultReasoningLevel;
+                  if (nextDef.reasoningLevels) {
+                    updates.reasoningLevel = defaultModel?.defaultReasoningLevel || nextDef.defaultReasoningLevel || 'medium';
                   }
                   onUpdateAgent(agent.id, updates);
                 },
@@ -2272,18 +2418,27 @@
                 e('select', {
                 className: 'agent-provider-select agent-provider-select-model',
                 value: configuredModelId,
-                onChange: (ev) => { if (onUpdateAgent) onUpdateAgent(agent.id, { model: ev.target.value }); },
+                onChange: (ev) => {
+                  if (!onUpdateAgent) return;
+                  const nextModel = currentProvider.models.find(m => m.id === ev.target.value);
+                  const nextLevels = nextModel?.supportedReasoningLevels || currentProvider.reasoningLevels;
+                  const updates = { model: ev.target.value };
+                  if (nextLevels && !nextLevels.includes(currentReasoning)) {
+                    updates.reasoningLevel = nextModel?.defaultReasoningLevel || currentProvider.defaultReasoningLevel || 'medium';
+                  }
+                  onUpdateAgent(agent.id, updates);
+                },
                 title: 'Model',
               },
                 modelOptions.map(m => e('option', { key: m.id, value: m.id }, m.label))
               ),
-                currentProvider.reasoningLevels && e('select', {
+                reasoningLevels && e('select', {
                 className: 'agent-provider-select agent-provider-select-reasoning',
                 value: currentReasoning,
                 onChange: (ev) => { if (onUpdateAgent) onUpdateAgent(agent.id, { reasoningLevel: ev.target.value }); },
                 title: 'Reasoning effort',
               },
-                currentProvider.reasoningLevels.map(r => e('option', { key: r, value: r }, r))
+                reasoningLevels.map(r => e('option', { key: r, value: r }, r === 'max' ? 'Max' : r === 'ultra' ? 'Ultra' : r))
                 )
               ),
               selectedModel?.description && e('div', { className: 'agent-model-description' }, selectedModel.description)
@@ -2640,10 +2795,12 @@
       );
     }
 
-    function WorkspacesSidebar({ workspaces, agents, activeWorkspaceId, onSelectWorkspace, onCreateWorkspace, onDeleteWorkspace, onRenameWorkspace, onUpdateWorkspaceTesting, onProvisionAtlas, onStopAtlas, onRescanAtlas, onOpenAtlasViewer, qaLiveShots, onNewAgent, onEditAgent, onRemoveAgent, statusStartTimes }) {
+    function WorkspacesSidebar({ workspaces, agents, activeWorkspaceId, onSelectWorkspace, onCreateWorkspace, onDeleteWorkspace, onRenameWorkspace, onReorderWorkspaces, onUpdateWorkspaceTesting, onProvisionAtlas, onStopAtlas, onRescanAtlas, onOpenAtlasViewer, qaLiveShots, onNewAgent, onEditAgent, onRemoveAgent, statusStartTimes }) {
       const [showNewModal, setShowNewModal] = useState(false);
       const [renamingId, setRenamingId] = useState(null);
       const [renameValue, setRenameValue] = useState('');
+      const [draggedWorkspaceId, setDraggedWorkspaceId] = useState(null);
+      const [dragOverWorkspaceId, setDragOverWorkspaceId] = useState(null);
 
       const startRename = (ws) => { setRenamingId(ws.id); setRenameValue(ws.name); };
       const commitRename = () => {
@@ -2651,6 +2808,21 @@
           onRenameWorkspace(renamingId, renameValue.trim());
         }
         setRenamingId(null);
+      };
+      const dropWorkspace = (targetId) => {
+        if (!draggedWorkspaceId || draggedWorkspaceId === targetId) {
+          setDraggedWorkspaceId(null); setDragOverWorkspaceId(null); return;
+        }
+        const ids = workspaces.map(ws => ws.id);
+        const from = ids.indexOf(draggedWorkspaceId);
+        const target = ids.indexOf(targetId);
+        if (from >= 0 && target >= 0) {
+          const [moved] = ids.splice(from, 1);
+          ids.splice(target, 0, moved);
+          onReorderWorkspaces(ids);
+        }
+        setDraggedWorkspaceId(null);
+        setDragOverWorkspaceId(null);
       };
 
       return e(React.Fragment, null,
@@ -2665,12 +2837,27 @@
             ? e('div', { style: { padding: 12, color: 'var(--text-muted)', fontSize: 12 } }, 'No workspaces yet.')
             : workspaces.map(ws => {
                 const wsAgents = agents.filter(a => a.workspaceId === ws.id && !a.hideFromGrid);
+                const activeAgents = agents.filter(a => a.workspaceId === ws.id && (a.status === 'working' || a.status === 'thinking'));
                 const isActive = ws.id === activeWorkspaceId;
+                const activeAgentTitle = activeAgents.length
+                  ? activeAgents.length + ' active agent' + (activeAgents.length === 1 ? '' : 's') + ': ' + activeAgents.map(a => a.name + ' (' + a.status + ')').join(', ')
+                  : '';
                 return e(React.Fragment, { key: ws.id },
                   e('div', {
-                    className: 'workspace-item' + (isActive ? ' active' : ''),
+                    className: 'workspace-item' + (isActive ? ' active' : '') + (draggedWorkspaceId === ws.id ? ' dragging' : '') + (dragOverWorkspaceId === ws.id ? ' drag-over' : ''),
                     onClick: () => onSelectWorkspace(ws.id),
+                    onDragOver: (ev) => { if (draggedWorkspaceId) { ev.preventDefault(); setDragOverWorkspaceId(ws.id); } },
+                    onDragLeave: () => { if (dragOverWorkspaceId === ws.id) setDragOverWorkspaceId(null); },
+                    onDrop: (ev) => { ev.preventDefault(); dropWorkspace(ws.id); },
                   },
+                    e('span', {
+                      className: 'workspace-drag-handle',
+                      draggable: true,
+                      title: 'Drag to reorder workspace',
+                      onDragStart: (ev) => { setDraggedWorkspaceId(ws.id); ev.dataTransfer.effectAllowed = 'move'; ev.dataTransfer.setData('text/plain', ws.id); },
+                      onDragEnd: () => { setDraggedWorkspaceId(null); setDragOverWorkspaceId(null); },
+                      onClick: (ev) => ev.stopPropagation(),
+                    }, '⋮⋮'),
                     e('div', { style: { flex: 1, minWidth: 0 } },
                       renamingId === ws.id
                         ? e('input', {
@@ -2685,6 +2872,10 @@
                           })
                         : e('div', { className: 'workspace-name', onDoubleClick: (ev) => { ev.stopPropagation(); startRename(ws); } }, ws.name),
                       e('div', { className: 'workspace-meta' }, wsAgents.length + ' agent' + (wsAgents.length !== 1 ? 's' : '') + ' \u00B7 ' + ws.gridColumns + '\u00D7' + ws.gridRows + ' grid')
+                    ),
+                    activeAgents.length > 0 && e('span', { className: 'workspace-active-indicator', title: activeAgentTitle },
+                      e('span', { className: 'workspace-active-dot' }),
+                      activeAgents.length + ' working'
                     ),
                     workspaces.length > 1 && e('button', {
                       className: 'workspace-delete-btn',
@@ -3369,6 +3560,7 @@
     function TokensPanel({ report }) {
       const [windowKey, setWindowKey] = useState('today');
       const [view, setView] = useState('overview');
+      const [expandedProjects, setExpandedProjects] = useState(new Set());
 
       if (!report || !report.windows) {
         return e('div', { className: 'tokens-panel' },
@@ -3382,6 +3574,9 @@
       const stats = win.stats;
       const fmt = (n) => formatTokens(n || 0);
       const bucketTotal = (b) => (b.inputTokens || 0) + (b.outputTokens || 0);
+      const trackingDate = report.trackingStartedAt
+        ? new Date(report.trackingStartedAt).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+        : null;
       const exportUsage = (format) => {
         const a = document.createElement('a');
         a.href = '/api/usage/export?format=' + format;
@@ -3527,18 +3722,34 @@
           )
         ),
         shareSection(),
-        (report.recentTurns || []).length > 0 && e('div', null,
-          e('div', { className: 'tokens-section-title' }, 'Recent turns'),
-          e('div', { className: 'tokens-recent' },
-            report.recentTurns.map((t, i) =>
-              e('div', { key: t.timestamp + '-' + i, className: 'tokens-recent-row', title: (t.model || t.provider) + ' · ' + fmt(t.inputTokens) + ' in / ' + fmt(t.outputTokens) + ' out' },
-                e('span', { className: 'tokens-swatch', style: { background: (PROVIDER_META[t.provider] || PROVIDER_META.claude).color } }),
-                e('span', { className: 'tokens-recent-agent' }, t.agentName),
-                e('span', { className: 'tokens-recent-tokens' }, fmt(t.inputTokens + t.outputTokens)),
-                e('span', { className: 'tokens-recent-time' }, tokensRelTime(t.timestamp))
+        (win.projects || []).length > 0 && e('div', null,
+          e('div', { className: 'tokens-section-title' }, 'Projects · turns nested inside'),
+          win.projects.map(project => {
+            const expanded = expandedProjects.has(project.workspaceId);
+            return e('div', { key: project.workspaceId, className: 'tokens-project' },
+              e('div', {
+                className: 'tokens-project-head',
+                onClick: () => setExpandedProjects(prev => {
+                  const next = new Set(prev);
+                  if (next.has(project.workspaceId)) next.delete(project.workspaceId); else next.add(project.workspaceId);
+                  return next;
+                }),
+              },
+                e('span', null, expanded ? '▾' : '▸'),
+                e('span', { className: 'tokens-project-name' }, project.workspaceName),
+                e('span', { className: 'tokens-recent-tokens' }, fmt(bucketTotal(project.total))),
+                e('span', { className: 'tokens-project-meta' }, project.eventCount + ' entries')
+              ),
+              expanded && e('div', { className: 'tokens-project-turns' },
+                project.turns.map(t => e('div', { key: t.id, className: 'tokens-recent-row', title: (t.model || t.provider) + ' · ' + fmt(t.inputTokens) + ' in / ' + fmt(t.outputTokens) + ' out' },
+                  e('span', { className: 'tokens-swatch', style: { background: (PROVIDER_META[t.provider] || PROVIDER_META.claude).color } }),
+                  e('span', { className: 'tokens-recent-agent' }, t.agentName),
+                  e('span', { className: 'tokens-recent-tokens' }, fmt(t.inputTokens + t.outputTokens)),
+                  e('span', { className: 'tokens-recent-time' }, tokensRelTime(t.timestamp))
+                ))
               )
-            )
-          )
+            );
+          })
         )
       );
 
@@ -3555,6 +3766,8 @@
             e('button', { key: w.key, className: 'tokens-chip' + (windowKey === w.key ? ' active' : ''), onClick: () => setWindowKey(w.key) }, w.label)
           )
         ),
+        windowKey === 'allTime' && e('div', { className: 'tokens-tracking' }, trackingDate ? 'Tracking since ' + trackingDate : 'Tracking begins with the first recorded turn.'),
+        report.sync?.enabled && e('div', { className: 'tokens-tracking', title: report.sync.directory || '' }, 'Usage sync: ' + report.sync.machineCount + ' machine' + (report.sync.machineCount === 1 ? '' : 's') + ' · ' + report.sync.machineId),
         e('div', { className: 'tokens-tabs' },
           TOKEN_VIEWS.map(v =>
             e('button', { key: v.key, className: 'tokens-tab' + (view === v.key ? ' active' : ''), onClick: () => setView(v.key) }, v.label)
@@ -3569,7 +3782,7 @@
 
     // Limits panel — provider rate-limit dashboard. Data sources (server-side
     // limits.service): Claude via the statusline JSON bridge file, Codex via
-    // the newest rollout-file rate_limits event. Auto-refreshes every 30 min;
+    // the newest rollout-file rate_limits event. Auto-refreshes every minute;
     // the button forces a re-read. Meter color is a status encoding
     // (ok/warning/critical) and is always paired with the numeric %.
     function limitsFmtReset(ts) {
@@ -3634,8 +3847,8 @@
           snap.planType && e('span', null, 'plan: ' + snap.planType),
           e('span', null, 'data ' + limitsRelTime(snap.updatedAt))
         ),
-        hasData && e(LimitsMeter, { label: '5-hour window', window: snap.fiveHour }),
-        hasData && e(LimitsMeter, { label: 'Weekly window', window: snap.weekly }),
+        hasData && Number.isFinite(snap.fiveHour?.usedPercent) && e(LimitsMeter, { label: '5-Hour', window: snap.fiveHour }),
+        hasData && Number.isFinite(snap.weekly?.usedPercent) && e(LimitsMeter, { label: '7-Day', window: snap.weekly }),
         hasData && typeof snap.contextUsedPercent === 'number' && e('div', { className: 'limits-meta' },
           e('span', null, 'last session context: ' + Math.round(snap.contextUsedPercent) + '%')
         ),
@@ -3670,8 +3883,40 @@
           : e(React.Fragment, null,
               e(LimitsProviderCard, { snap: limits.providers.claude, icon: '✦', title: 'Claude' }),
               e(LimitsProviderCard, { snap: limits.providers.codex, icon: '⚙', title: 'Codex' }),
-              nextIn !== null && e('div', { className: 'limits-next' }, 'auto-refresh every ' + Math.round((limits.refreshIntervalMs || 1800000) / 60000) + 'm · next in ~' + nextIn + 'm')
+              nextIn !== null && e('div', { className: 'limits-next' }, 'auto-refresh every ' + Math.round((limits.refreshIntervalMs || 60000) / 60000) + 'm · next in ~' + nextIn + 'm')
             )
+      );
+    }
+
+    function BottomLimitsSummary({ limits }) {
+      if (!limits?.providers) return null;
+      const providers = ['claude', 'codex'].map(kind => {
+        const snap = limits.providers[kind];
+        if (!snap || !['available', 'stale'].includes(snap.status)) return null;
+        const windows = [
+          { key: 'fiveHour', label: '5-Hour', data: snap.fiveHour },
+          { key: 'weekly', label: '7-Day', data: snap.weekly },
+        ].filter(item => Number.isFinite(item.data?.usedPercent));
+        return windows.length ? { kind, snap, windows } : null;
+      }).filter(Boolean);
+      if (!providers.length) return null;
+      return e('div', { className: 'bottom-limits', title: 'Verified provider utilization; refreshed every minute' },
+        providers.map(({ kind, snap, windows }) => {
+          const details = windows.map(item => {
+            const reset = limitsFmtReset(item.data.resetsAt);
+            return item.label + ': ' + Math.round(item.data.usedPercent) + '% used' + (reset ? ', ' + reset : '');
+          }).join('; ');
+          return e('span', { key: kind, className: 'bottom-limit-provider', title: (kind === 'claude' ? 'Claude' : 'Codex') + ' - ' + details },
+            e('span', { className: 'bottom-limit-identity' },
+              e('span', { className: 'bottom-limit-dot' + (snap.status === 'stale' ? ' stale' : '') }),
+              kind === 'claude' ? 'Claude' : 'Codex'
+            ),
+            windows.map(item => e('span', { key: item.key, className: 'bottom-limit-window' },
+              e('span', { className: 'bottom-limit-window-label' }, item.label),
+              e('span', { className: 'bottom-limit-value' }, Math.round(item.data.usedPercent) + '% used')
+            ))
+          );
+        })
       );
     }
 
@@ -4022,6 +4267,7 @@
             onCreateWorkspace: ws.createWorkspace,
             onDeleteWorkspace: ws.deleteWorkspace,
             onRenameWorkspace: (id, name) => ws.updateWorkspace(id, { name }),
+            onReorderWorkspaces: ws.reorderWorkspaces,
             onUpdateWorkspaceTesting: (id, updates) => ws.updateWorkspace(id, updates),
             onProvisionAtlas: (workspaceId, projectCwd) => ws.provisionAtlasAgent(workspaceId, projectCwd),
             onStopAtlas: (agentId) => ws.stopAgent(agentId),
@@ -4187,6 +4433,7 @@
               activeWorkspace && e('span', { style: { fontWeight: 600, fontSize: 13, color: 'var(--text-primary)', marginRight: 8 } }, activeWorkspace.name)
             ),
             e('div', { className: 'bottom-bar-right' },
+              e(BottomLimitsSummary, { limits: ws.limits }),
               e('div', { className: 'grid-controls' },
                 e('span', { className: 'grid-label' }, 'Col'),
                 e('div', { className: 'grid-buttons' },

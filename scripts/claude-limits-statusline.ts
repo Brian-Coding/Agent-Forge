@@ -12,7 +12,7 @@
  * Wire-up (in ~/.claude/settings.json):
  *   "statusLine": { "type": "command", "command": "bun \"<path-to>/scripts/claude-limits-statusline.ts\"" }
  *
- * Agent Forge's limits.service.ts reads the JSON file read-only every 30 min.
+ * Agent Forge's limits.service.ts reads the JSON file read-only every minute.
  * Note: rate_limits is only present for Claude Pro/Max subscriptions and only
  * after the first API response of a session — missing fields are normal.
  */

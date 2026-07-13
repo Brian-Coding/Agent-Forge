@@ -11,6 +11,7 @@ export type AgentProvider = 'claude' | 'codex';
 export interface WorkspaceInfo {
   id: string;
   name: string;
+  sortOrder: number;            // User-controlled order in the Workspaces sidebar
   gridColumns: number;
   gridRows: number;
   selectedAgentIds: string[];
@@ -37,7 +38,7 @@ export interface AgentInfo {
   // Provider / model selection (hot-swappable per agent, per the inline dropdowns under each chat input)
   provider?: AgentProvider;   // Defaults to 'claude' when absent (backward compat with pre-rebuild data.json)
   model?: string;             // Provider-scoped model id; null → adapter default
-  reasoningLevel?: string;    // Codex-only (low / medium / high / xhigh)
+  reasoningLevel?: string;    // Codex-only; validated against the selected model's live capabilities
   /**
    * Set when a turn's ground-truth model (reported by the CLI) differed from
    * the model the user selected — e.g. the service silently served Opus for a
@@ -52,6 +53,8 @@ export interface ModelOption {
   id: string;
   label: string;
   description?: string;
+  supportedReasoningLevels?: string[];
+  defaultReasoningLevel?: string;
 }
 
 export interface AgentProviderDefinition {
@@ -221,6 +224,8 @@ export interface TerminalSession {
  * tracker can break down Claude vs Codex spend.
  */
 export interface UsageEvent {
+  id?: string;            // Stable event id used to de-duplicate cross-machine shards
+  machineId?: string;     // Machine that recorded the event
   timestamp: number;
   agentId: string;
   provider: AgentProvider;
@@ -236,6 +241,7 @@ export interface UsageEvent {
   model?: string;        // ground-truth model that served the turn (modelRan, else resolved)
   agentName?: string;    // agent display name at event time (survives agent deletion)
   workspaceId?: string;  // workspace the agent belonged to at event time
+  workspaceName?: string; // workspace display name at event time (survives rename/deletion)
 }
 
 /**
@@ -288,7 +294,30 @@ export interface UsageWindowReport {
   summary: WindowTokenSummary;
   byAgent: UsageBreakdownRow[];  // sorted by total tokens desc
   byModel: UsageBreakdownRow[];  // sorted by total tokens desc
+  projects: UsageProjectGroup[]; // projects with their most recent turns nested beneath them
   stats: UsageWindowStats;
+}
+
+export interface UsageTurnRow {
+  id: string;
+  timestamp: number;
+  agentId: string;
+  agentName: string;
+  provider: AgentProvider;
+  model?: string;
+  inputTokens: number;
+  outputTokens: number;
+  turns: number;
+}
+
+export interface UsageProjectGroup {
+  workspaceId: string;
+  workspaceName: string;
+  total: ProviderTokenBucket;
+  lastTimestamp: number;
+  eventCount: number;
+  /** Newest first and capped by the server to keep long-lived logs responsive. */
+  turns: UsageTurnRow[];
 }
 
 /** One calendar day's provider-split totals (local time). */
@@ -316,15 +345,14 @@ export interface UsageReport {
   };
   /** Last 30 calendar days, oldest first, zero-filled so charts have no gaps. */
   daily: UsageDailyRow[];
-  /** Most recent turns, newest first (capped small — it's a peek, not a log viewer). */
-  recentTurns: Array<{
-    timestamp: number;
-    agentName: string;
-    provider: AgentProvider;
-    model?: string;
-    inputTokens: number;
-    outputTokens: number;
-  }>;
+  /** Earliest tracked event and cross-machine shard status. */
+  trackingStartedAt: number | null;
+  sync: {
+    enabled: boolean;
+    machineId: string;
+    machineCount: number;
+    directory: string | null;
+  };
   generatedAt: number;
 }
 
@@ -389,6 +417,7 @@ export type ClientMessage =
   | { type: 'get_workspaces' }
   | { type: 'create_workspace'; name: string }
   | { type: 'update_workspace'; id: string; name?: string; gridColumns?: number; gridRows?: number; selectedAgentIds?: string[]; lockedAgentIds?: string[]; testUrl?: string }
+  | { type: 'reorder_workspaces'; orderedIds: string[] }
   | { type: 'delete_workspace'; id: string }
   | { type: 'set_active_workspace'; id: string }
   // QA testing

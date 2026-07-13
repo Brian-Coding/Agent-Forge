@@ -12,13 +12,15 @@
  * credentials file is absent or the token is expired.
  *
  * Codex: the Codex CLI (0.125+) records a `token_count` event carrying a full
- * `rate_limits` payload (primary = 5h window, secondary = weekly) in its
- * rollout files under `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`. We scan
+ * `rate_limits` payload in its rollout files under
+ * `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`. Windows are classified by
+ * `window_minutes`, because Codex can omit one and promote the other into the
+ * primary slot. We scan
  * the newest rollout files for the last such event. This is strictly better
  * than the /status TUI-capture fallback that was originally planned — fully
  * passive, machine-readable, and it also yields context-window usage.
  *
- * Both providers refresh every 30 minutes plus on demand (refresh_limits).
+ * Both providers refresh every minute plus on demand (refresh_limits).
  * Results are cached per provider so one broken source never blanks the tab.
  */
 import { readdirSync, existsSync, statSync } from 'fs';
@@ -27,7 +29,7 @@ import { homedir } from 'os';
 import type { LimitsSnapshot, LimitsWindow, ProviderLimitsSnapshot } from '../../shared/protocol';
 import { broadcast } from '../broadcast';
 
-export const LIMITS_REFRESH_INTERVAL_MS = 30 * 60 * 1000;
+export const LIMITS_REFRESH_INTERVAL_MS = 60 * 1000;
 /** Data older than this renders as 'stale' — usage percentages decay, so old reads mislead. */
 const STALE_AFTER_MS = 6 * 60 * 60 * 1000;
 /** How many recent rollout files to scan before giving up (fresh sessions may lack the event). */
@@ -85,6 +87,39 @@ function applyFreshness(snap: ProviderLimitsSnapshot): void {
     snap.status = 'stale';
     snap.detail = 'Data is over 6h old — send a turn with this provider to refresh it.';
   }
+}
+
+/**
+ * Map Codex's positional limit slots by their declared duration. Codex may
+ * promote the weekly limit into `primary` when the 5-hour limit is disabled,
+ * so slot position alone is not a reliable label.
+ */
+export function mapCodexRateLimitWindows(rateLimits: any): Pick<ProviderLimitsSnapshot, 'fiveHour' | 'weekly'> {
+  const result = { fiveHour: emptyWindow(), weekly: emptyWindow() };
+  const slots = [
+    { raw: rateLimits?.primary, legacyTarget: 'fiveHour' as const },
+    { raw: rateLimits?.secondary, legacyTarget: 'weekly' as const },
+  ];
+  const populatedSlots = slots.filter(slot => slot.raw && typeof slot.raw === 'object');
+
+  for (const slot of populatedSlots) {
+    const windowMinutes = typeof slot.raw.window_minutes === 'number' && Number.isFinite(slot.raw.window_minutes)
+      ? slot.raw.window_minutes
+      : null;
+    const window: LimitsWindow = {
+      usedPercent: toPercent(slot.raw.used_percent),
+      resetsAt: toEpochMs(slot.raw.resets_at),
+      windowMinutes,
+    };
+
+    if (windowMinutes === 300) result.fiveHour = window;
+    else if (windowMinutes === 10080) result.weekly = window;
+    // Preserve compatibility with older two-slot events that omitted duration.
+    // A lone durationless slot stays hidden rather than receiving a false label.
+    else if (windowMinutes === null && populatedSlots.length === 2) result[slot.legacyTarget] = window;
+  }
+
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -296,16 +331,9 @@ async function readCodexLimits(): Promise<ProviderLimitsSnapshot> {
       const rl = payload.rate_limits;
       snap.updatedAt = toEpochMs(event.timestamp);
       snap.planType = typeof rl.plan_type === 'string' ? rl.plan_type : null;
-      snap.fiveHour = {
-        usedPercent: toPercent(rl.primary?.used_percent),
-        resetsAt: toEpochMs(rl.primary?.resets_at),
-        windowMinutes: typeof rl.primary?.window_minutes === 'number' ? rl.primary.window_minutes : 300,
-      };
-      snap.weekly = {
-        usedPercent: toPercent(rl.secondary?.used_percent),
-        resetsAt: toEpochMs(rl.secondary?.resets_at),
-        windowMinutes: typeof rl.secondary?.window_minutes === 'number' ? rl.secondary.window_minutes : 10080,
-      };
+      const windows = mapCodexRateLimitWindows(rl);
+      snap.fiveHour = windows.fiveHour;
+      snap.weekly = windows.weekly;
       const info = payload.info;
       if (info?.last_token_usage?.total_tokens && info?.model_context_window) {
         snap.contextUsedPercent = toPercent((info.last_token_usage.total_tokens / info.model_context_window) * 100);
@@ -346,7 +374,7 @@ export const limitsService = {
     return state.snapshot;
   },
 
-  /** Start the 30-minute refresh loop. Idempotent (HMR-safe). */
+  /** Start the one-minute refresh loop. Idempotent (HMR-safe). */
   start(): void {
     if (state.timer) clearInterval(state.timer);
     state.nextRefreshAt = Date.now() + LIMITS_REFRESH_INTERVAL_MS;

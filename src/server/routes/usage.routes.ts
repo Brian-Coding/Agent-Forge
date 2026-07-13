@@ -12,13 +12,14 @@ export function handleUsageExport(req: Request): Response {
   const stamp = new Date().toISOString().slice(0, 10);
 
   if (format === 'csv') {
-    const header = 'timestamp,iso,agentId,agentName,provider,model,workspaceId,inputTokens,outputTokens,totalTokens,turns,costUsd';
+    const header = 'id,machineId,timestamp,iso,agentId,agentName,provider,model,workspaceId,workspaceName,inputTokens,outputTokens,totalTokens,turns,costUsd';
     const escape = (v: string | number) => {
       const s = String(v);
       return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
     };
     const body = rows.map(r => [
-      r.timestamp, r.iso, r.agentId, r.agentName, r.provider, r.model, r.workspaceId,
+      r.id, r.machineId, r.timestamp, r.iso, r.agentId, r.agentName, r.provider, r.model,
+      r.workspaceId, r.workspaceName,
       r.inputTokens, r.outputTokens, r.totalTokens, r.turns, r.costUsd,
     ].map(escape).join(',')).join('\n');
     return new Response(header + '\n' + body + '\n', {

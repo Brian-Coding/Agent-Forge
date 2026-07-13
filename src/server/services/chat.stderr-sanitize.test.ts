@@ -1,4 +1,5 @@
 import { test, expect } from 'bun:test';
+import { compactThinkingText } from '../agents/stream-utils';
 import { sanitizeStderrForChat } from './chat.service';
 
 test('passes plain diagnostic text through unchanged', () => {
@@ -33,4 +34,20 @@ test('keeps legitimate non-ASCII (emoji/accents)', () => {
 
 test('empty in, empty out', () => {
   expect(sanitizeStderrForChat('')).toBe('');
+});
+
+test('strips broken UTF-8 ANSI prefixes', () => {
+  expect(sanitizeStderrForChat('\uFFFD[31mERROR\uFFFD[0m')).toBe('ERROR');
+});
+
+test('collapses large code and test dumps into a concise progress line', () => {
+  const dump = [
+    '12: export function run() {',
+    '13:   doThing();',
+    '14:   return value;',
+    '15: }',
+    'FAIL expected value',
+    'Received: false',
+  ].join('\n');
+  expect(compactThinkingText(dump)).toBe('Reviewing code and command results…');
 });

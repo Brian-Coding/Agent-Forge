@@ -4,7 +4,7 @@
  *
  * Extended beyond the reference design with:
  *   - `usage`  — token + cost accounting (Claude reports natively; Codex skipped in Phase 3)
- *   - `stderr` — surfaced as `output` with stream='stderr' on the wire
+ *   - `stderr` — retained for adapter diagnostics; the chat bridge suppresses it live
  */
 export type AgentEvent =
   | { type: 'session'; providerSessionId: string }

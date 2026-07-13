@@ -2,7 +2,7 @@ import { test, expect, beforeAll, afterAll } from 'bun:test';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { limitsService, mapClaudeUsageResponse } from './limits.service';
+import { LIMITS_REFRESH_INTERVAL_MS, limitsService, mapClaudeUsageResponse, mapCodexRateLimitWindows } from './limits.service';
 
 // Parser regression net for the Limits tab: feeds a synthetic Claude bridge
 // file and a synthetic Codex rollout tree through refresh() via env overrides.
@@ -85,6 +85,23 @@ test('mapClaudeUsageResponse tolerates missing windows', () => {
   expect(snap.status).toBe('available');
   expect(snap.fiveHour.usedPercent).toBeNull();
   expect(snap.weekly.usedPercent).toBeNull();
+});
+
+test('limits refresh cadence is one minute', () => {
+  expect(LIMITS_REFRESH_INTERVAL_MS).toBe(60_000);
+});
+
+test('Codex maps a primary-only weekly limit by duration instead of slot position', () => {
+  const windows = mapCodexRateLimitWindows({
+    primary: { used_percent: 15, window_minutes: 10080, resets_at: 1784493552 },
+    secondary: null,
+  });
+
+  expect(windows.fiveHour.usedPercent).toBeNull();
+  expect(windows.fiveHour.windowMinutes).toBeNull();
+  expect(windows.weekly.usedPercent).toBe(15);
+  expect(windows.weekly.windowMinutes).toBe(10080);
+  expect(windows.weekly.resetsAt).toBe(1784493552 * 1000);
 });
 
 test('limits refresh parses Claude bridge file and Codex rollout events', async () => {

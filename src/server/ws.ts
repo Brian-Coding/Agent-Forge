@@ -243,6 +243,12 @@ async function handleMessage(ws: ServerWebSocket<unknown>, message: ClientMessag
       break;
     }
 
+    case 'reorder_workspaces': {
+      const ordered = await workspaceService.reorder(message.orderedIds);
+      broadcast({ type: 'workspaces_list', workspaces: ordered });
+      break;
+    }
+
     case 'delete_workspace': {
       const deleted = await workspaceService.delete(message.id, agentService.reassignAgents);
       if (deleted) {
@@ -327,7 +333,7 @@ export const websocketHandlers = {
     sendTo(ws, { type: 'terminals_list', terminals: terminalService.getAll() });
     // Cross-provider token report — drives the Tokens sidebar tab.
     sendTo(ws, { type: 'usage_report', report: usageService.getReportForConnect() });
-    // Provider limits — cached snapshot on connect (the 30-min loop keeps it fresh).
+    // Provider limits — cached snapshot on connect (the one-minute loop keeps it fresh).
     const limitsSnapshot = limitsService.getSnapshot();
     if (limitsSnapshot) sendTo(ws, { type: 'limits_snapshot', snapshot: limitsSnapshot });
 

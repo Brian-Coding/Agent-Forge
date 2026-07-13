@@ -69,6 +69,14 @@ function normalizeOpenAiName(value: unknown): string {
   return typeof value === 'string' && value ? value : '';
 }
 
+function normalizeReasoningLevels(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const levels = value
+    .map((entry: any) => normalizeOpenAiName(entry?.effort ?? entry))
+    .filter(Boolean);
+  return levels.length > 0 ? Array.from(new Set(levels)) : undefined;
+}
+
 async function discoverCodexModels(): Promise<{ models: ModelOption[]; succeeded: boolean }> {
   try {
     const proc = Bun.spawn([resolveCliBinary('codex'), 'debug', 'models'], {
@@ -90,6 +98,8 @@ async function discoverCodexModels(): Promise<{ models: ModelOption[]; succeeded
         id: normalizeOpenAiName(m?.slug),
         label: normalizeOpenAiName(m?.display_name) || normalizeOpenAiName(m?.slug),
         description: normalizeOpenAiName(m?.description) || undefined,
+        supportedReasoningLevels: normalizeReasoningLevels(m?.supported_reasoning_levels),
+        defaultReasoningLevel: normalizeOpenAiName(m?.default_reasoning_level) || undefined,
       }))
       .filter((m: ModelOption) => m.id && m.label);
     return { models, succeeded: models.length > 0 };

@@ -25,10 +25,10 @@ test('usage report aggregates windows, models, and daily rows correctly', () => 
   const now = Date.now();
   usageService.load([
     // Today: one Claude turn on Fable, one Codex turn on 5.6-sol
-    ev({ timestamp: now - 60_000, provider: 'claude', model: 'claude-fable-5', agentName: 'Main', inputTokens: 1000, outputTokens: 500 }),
-    ev({ timestamp: now - 30_000, provider: 'codex', model: 'gpt-5.6-sol', agentName: 'Main', agentId: 'agent-1', inputTokens: 2000, outputTokens: 1000 }),
+    ev({ timestamp: now - 60_000, provider: 'claude', model: 'claude-fable-5', agentName: 'Main', workspaceId: 'forge', workspaceName: 'Agent Forge', inputTokens: 1000, outputTokens: 500 }),
+    ev({ timestamp: now - 30_000, provider: 'codex', model: 'gpt-5.6-sol', agentName: 'Main', agentId: 'agent-1', workspaceId: 'forge', workspaceName: 'Agent Forge', inputTokens: 2000, outputTokens: 1000 }),
     // 3 days ago: inside days7/days30/allTime but not today
-    ev({ timestamp: now - 3 * DAY, provider: 'claude', model: 'claude-opus-4-8', agentId: 'agent-2', agentName: 'Second', inputTokens: 4000, outputTokens: 4000 }),
+    ev({ timestamp: now - 3 * DAY, provider: 'claude', model: 'claude-opus-4-8', agentId: 'agent-2', agentName: 'Second', workspaceId: 'other', workspaceName: 'Other Project', inputTokens: 4000, outputTokens: 4000 }),
     // 40 days ago: allTime only — also a legacy event with no model stamp
     ev({ timestamp: now - 40 * DAY, provider: 'codex', agentId: 'agent-3', inputTokens: 100, outputTokens: 50 }),
   ]);
@@ -65,9 +65,15 @@ test('usage report aggregates windows, models, and daily rows correctly', () => 
   expect(todayRow.total.inputTokens).toBe(3000);
   expect(todayRow.total.outputTokens).toBe(1500);
 
-  // Recent turns: newest first
-  expect(report.recentTurns[0]!.provider).toBe('codex');
-  expect(report.recentTurns[0]!.model).toBe('gpt-5.6-sol');
+  // Project groups replace the old global recent-turn list. Turns nest newest first.
+  const forge = report.windows.allTime.projects.find(project => project.workspaceId === 'forge')!;
+  expect(forge.workspaceName).toBe('Agent Forge');
+  expect(forge.eventCount).toBe(2);
+  expect(forge.turns[0]!.provider).toBe('codex');
+  expect(forge.turns[0]!.model).toBe('gpt-5.6-sol');
+
+  expect(report.trackingStartedAt).toBe(now - 40 * DAY);
+  expect(report.sync.enabled).toBe(false);
 
   usageService.load([]); // reset shared module state for other tests
 });

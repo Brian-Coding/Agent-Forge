@@ -20,6 +20,8 @@ import { handleGetPorts, handleKillPort } from './routes/ports.routes';
 import { handleGitBranch } from './routes/git.routes';
 import { handleGetModels } from './routes/models.routes';
 import { handleUsageExport } from './routes/usage.routes';
+import { handleVercelIntegration } from './routes/integrations.routes';
+import { handleHarnessInstructions } from './routes/harness.routes';
 import { handleListSimulators, handleBootSimulator, handleShutdownSimulator, handleEraseSimulator, handleCleanDerivedData } from './routes/simulator.routes';
 import { handleBrowserNavigate, handleBrowserScreenshot, handleBrowserClick, handleBrowserType, handleBrowserWaitForReady, handleBrowserConsoleGet, handleBrowserConsoleClear, handleBrowserStatus, handleBrowserEvaluate, handleQaScreenshot, handleAtlasFile } from './routes/browser.routes';
 
@@ -281,6 +283,8 @@ async function init() {
     workspaces: workspaceService.getAll(),
     usageEvents: usageService.getEvents(),
   }));
+
+  usageService.startSync();
 }
 
 // Lock FIRST — kill any prior bun.exe — THEN load data.json. If we load
@@ -362,6 +366,8 @@ function startServer(preferredPort: number) {
           if (url.pathname === '/api/git-branch' && req.method === 'GET') return handleGitBranch(req);
           if (url.pathname === '/api/models' && req.method === 'GET') return handleGetModels(req);
           if (url.pathname === '/api/usage/export' && req.method === 'GET') return handleUsageExport(req);
+          if (url.pathname === '/api/integrations/vercel' && (req.method === 'GET' || req.method === 'POST')) return handleVercelIntegration(req);
+          if (url.pathname === '/api/harness/instructions' && req.method === 'GET') return handleHarnessInstructions();
           if (url.pathname === '/api/simulators' && req.method === 'GET') return handleListSimulators(req);
           if (url.pathname === '/api/simulators/boot' && req.method === 'POST') return handleBootSimulator(req);
           if (url.pathname === '/api/simulators/shutdown' && req.method === 'POST') return handleShutdownSimulator(req);
@@ -412,7 +418,7 @@ if (server.port !== preferredPort) {
 // at provision time so the spawned agents call back to the same Bun.serve we just bound.
 qaService.setGuiPort(server.port ?? 0);
 atlasService.setGuiPort(server.port ?? 0);
-// Provider limits: initial read now, then every 30 minutes.
+// Provider limits: initial read now, then every minute.
 limitsService.start();
 console.log(`Server running at http://localhost:${server.port}`);
 

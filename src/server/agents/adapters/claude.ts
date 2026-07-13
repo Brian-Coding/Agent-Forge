@@ -126,8 +126,8 @@ export const claudeAdapter: AgentAdapter<undefined> = {
             void killProcessTree(proc);
           }
 
-          // Stream stderr live so the UI can show error output as it arrives.
-          // Also captures a final string for the post-exit error surface.
+          // Capture stderr for the post-exit error surface. The chat bridge
+          // suppresses these diagnostic chunks while the turn is running.
           const stderrPromise = (async () => {
             const reader = (proc!.stderr as ReadableStream<Uint8Array>).getReader();
             const decoder = new TextDecoder();

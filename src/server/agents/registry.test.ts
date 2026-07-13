@@ -1,5 +1,5 @@
 import { test, expect } from 'bun:test';
-import { resolveAgentModel } from './registry';
+import { resolveAgentModel, resolveAgentReasoningLevel } from './registry';
 import { stripModelTier } from './agent-kinds';
 
 // Regression net for the "harness ran Opus while the UI said Fable" incident
@@ -25,7 +25,7 @@ test('resolveAgentModel falls back to the provider default for a model outside t
   // differs from the configured one.
   expect(resolveAgentModel('claude', 'claude-sonnet-5')).toBe('claude-opus-4-8');
   expect(resolveAgentModel('claude', 'totally-made-up-model')).toBe('claude-opus-4-8');
-  expect(resolveAgentModel('codex', 'totally-made-up-model')).toBe('gpt-5.5');
+  expect(resolveAgentModel('codex', 'totally-made-up-model')).toBe('gpt-5.6-sol');
 });
 
 test('resolveAgentModel falls back to the provider default when no model is requested', () => {
@@ -33,7 +33,15 @@ test('resolveAgentModel falls back to the provider default when no model is requ
   // selector and the spawned CLI can never disagree for a fresh agent.
   expect(resolveAgentModel('claude', undefined)).toBe('claude-opus-4-8');
   expect(resolveAgentModel('claude', '')).toBe('claude-opus-4-8');
-  expect(resolveAgentModel('codex', undefined)).toBe('gpt-5.5');
+  expect(resolveAgentModel('codex', undefined)).toBe('gpt-5.6-sol');
+});
+
+test('resolveAgentReasoningLevel honors model capabilities and safe defaults', () => {
+  expect(resolveAgentReasoningLevel('codex', 'gpt-5.6-sol', 'max')).toBe('max');
+  expect(resolveAgentReasoningLevel('codex', 'gpt-5.6-sol', 'ultra')).toBe('ultra');
+  expect(resolveAgentReasoningLevel('codex', 'gpt-5.6-sol', 'extra_high')).toBe('xhigh');
+  expect(resolveAgentReasoningLevel('codex', 'gpt-5.6-sol', 'made-up')).toBe('medium');
+  expect(resolveAgentReasoningLevel('claude', 'claude-opus-4-8', 'high')).toBeUndefined();
 });
 
 test('stripModelTier removes only a trailing [tier] suffix', () => {

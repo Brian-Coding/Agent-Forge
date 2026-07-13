@@ -5,7 +5,13 @@ import { buildCodexDefinition } from './model-catalog.service';
 test('Codex discovery puts the GPT-5.6 family ahead of GPT-5.5 and keeps descriptions', () => {
   const discovered: ModelOption[] = [
     { id: 'gpt-5.5', label: 'GPT-5.5' },
-    { id: 'gpt-5.6-sol', label: 'GPT-5.6-Sol', description: 'CLI Sol description' },
+    {
+      id: 'gpt-5.6-sol',
+      label: 'GPT-5.6-Sol',
+      description: 'CLI Sol description',
+      supportedReasoningLevels: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
+      defaultReasoningLevel: 'medium',
+    },
     { id: 'gpt-5.6-terra', label: 'GPT-5.6-Terra', description: 'CLI Terra description' },
   ];
 
@@ -18,6 +24,10 @@ test('Codex discovery puts the GPT-5.6 family ahead of GPT-5.5 and keeps descrip
   ]);
   expect(definition.models[0]?.label).toBe('GPT-5.6 Sol');
   expect(definition.models[0]?.description).toBe('CLI Sol description');
+  expect(definition.models[0]?.supportedReasoningLevels).toContain('max');
+  expect(definition.models[0]?.supportedReasoningLevels).toContain('ultra');
+  expect(definition.models[0]?.defaultReasoningLevel).toBe('medium');
+  expect(definition.defaultModel).toBe('gpt-5.6-sol');
 });
 
 test('successful Codex discovery does not append unsupported static models', () => {

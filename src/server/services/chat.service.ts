@@ -1,13 +1,14 @@
 import type { AgentEvent } from '../agents/events';
 import type { AgentHandle, AgentRunContext } from '../agents/types';
 import { stripModelTier, type ChatAgentKind } from '../agents/agent-kinds';
-import { getAgentAdapter, resolveAgentModel } from '../agents/registry';
+import { getAgentAdapter, resolveAgentModel, resolveAgentReasoningLevel } from '../agents/registry';
 import { broadcast } from '../broadcast';
 import { agentService } from './agent.service';
 import { documentService } from './document.service';
 import { persistenceService } from './persistence.service';
 import { promptBuilderService } from './prompt-builder.service';
 import { usageService } from './usage.service';
+import { compactThinkingText, sanitizeCliText } from '../agents/stream-utils';
 
 // --- HMR-safe state ---------------------------------------------------------
 
@@ -115,13 +116,8 @@ function prependPriorHistory(agentId: string, currentUserContent: string): strin
 
 // --- Bridge: translate normalized AgentEvent → wire-protocol messages -------
 
-// eslint-disable-next-line no-control-regex
-const ANSI_ESCAPE = /\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b[@-Z\\-_]/g;
-// eslint-disable-next-line no-control-regex
-const CONTROL_CHARS = /[\x00-\x08\x0b\x0c\x0e-\x1f�]/g;
-
 /**
- * Make a raw CLI stderr chunk safe to render in the chat's live output.
+ * Make a raw CLI stderr chunk safe for any future diagnostic UI surface.
  * Strips ANSI escapes, then drops the chunk entirely when it is mostly
  * non-printable (a binary dump — e.g. a crashing CLI spilling a panic
  * backtrace or core-fragment bytes, which decode to U+FFFD replacement
@@ -129,18 +125,7 @@ const CONTROL_CHARS = /[\x00-\x08\x0b\x0c\x0e-\x1f�]/g;
  * readable remainder. Empty string means "nothing worth showing".
  */
 export function sanitizeStderrForChat(text: string): string {
-  const stripped = text.replace(ANSI_ESCAPE, '');
-  if (!stripped) return '';
-  let bad = 0;
-  for (let i = 0; i < stripped.length; i++) {
-    const c = stripped.charCodeAt(i);
-    if (c === 0xfffd || (c < 0x20 && c !== 0x09 && c !== 0x0a && c !== 0x0d)) bad++;
-  }
-  // >30% control/replacement bytes = binary noise (real dumps run ~50%+),
-  // not a diagnostic message. Readable text with an occasional stray control
-  // byte stays under this and is cleaned up below rather than dropped.
-  if (bad > stripped.length * 0.3) return '';
-  return stripped.replace(CONTROL_CHARS, '');
+  return sanitizeCliText(text);
 }
 
 function handleEvent(agentId: string, event: AgentEvent): void {
@@ -153,22 +138,16 @@ function handleEvent(agentId: string, event: AgentEvent): void {
     }
 
     case 'thinking-delta': {
-      broadcast({ type: 'thinking_output', agentId, content: event.text });
+      const compact = compactThinkingText(event.text);
+      if (compact) broadcast({ type: 'thinking_output', agentId, content: compact + '\n' });
       return;
     }
 
     case 'stderr': {
       if (/No conversation found with session ID/i.test(event.text)) return;
-      // CLI stderr is diagnostics, not agent output. A crashing/old CLI can
-      // dump raw binary (panic backtraces, core fragments) or ANSI-laden
-      // tracing here, which the live-output view rendered as thousands of
-      // lines of mojibake. Sanitize before it reaches the chat: strip ANSI,
-      // drop chunks that are mostly non-printable (binary), and remove
-      // stray control bytes. Genuine failures still surface via the adapter's
-      // end-of-turn `error` event, so nothing real is lost.
-      const clean = sanitizeStderrForChat(event.text);
-      if (!clean) return;
-      broadcast({ type: 'output', agentId, content: clean, stream: 'stderr' });
+      // CLI stderr is diagnostics, not agent output. Keep it server-side;
+      // adapters emit a clean error event on non-zero exit, so real failures
+      // still surface without ANSI traces or binary fragments flooding chat.
       return;
     }
 
@@ -343,6 +322,7 @@ async function runChatTurn(agentId: string, content: string, source?: 'qa'): Pro
   );
 
   const requestedResolvedModel = resolveAgentModel(provider, info.model);
+  const resolvedReasoningLevel = resolveAgentReasoningLevel(provider, requestedResolvedModel, info.reasoningLevel);
 
   // 5) Decide --resume vs fresh start. We --resume only when the agent's
   //    current session is owned by THIS provider/model pair; if the user just
@@ -387,6 +367,13 @@ async function runChatTurn(agentId: string, content: string, source?: 'qa'): Pro
     );
     broadcast({ type: 'message', message: sysMsg });
   }
+  if (provider === 'codex' && info.reasoningLevel && resolvedReasoningLevel !== info.reasoningLevel) {
+    const sysMsg = agentService.addSystemMessage(
+      agentId,
+      `Reasoning effort "${info.reasoningLevel}" is not supported by "${resolvedModel}" — using "${resolvedReasoningLevel}" for this turn.`,
+    );
+    broadcast({ type: 'message', message: sysMsg });
+  }
 
   const ctx: AgentRunContext = {
     paneId: agentId,
@@ -394,7 +381,7 @@ async function runChatTurn(agentId: string, content: string, source?: 'qa'): Pro
     referencePaths: validReferencePaths,
     systemPrompt: appendedSystemPrompt,
     model: resolvedModel,
-    reasoningLevel: info.reasoningLevel,
+    reasoningLevel: resolvedReasoningLevel,
 
     getSessionId(): string | null {
       return sessionIdForAdapter;

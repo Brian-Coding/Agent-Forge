@@ -6,9 +6,13 @@ import { settingsService } from './settings.service';
 // HMR-safe state
 const workspaces: Map<string, WorkspaceInfo> = (globalThis as any).__workspacesMap ??= new Map<string, WorkspaceInfo>();
 
+export function sortWorkspaces(items: readonly WorkspaceInfo[]): WorkspaceInfo[] {
+  return [...items].sort((a, b) => a.sortOrder - b.sortOrder || a.createdAt - b.createdAt);
+}
+
 export const workspaceService = {
   getAll(): WorkspaceInfo[] {
-    return Array.from(workspaces.values()).sort((a, b) => a.createdAt - b.createdAt);
+    return sortWorkspaces(Array.from(workspaces.values()));
   },
 
   get(id: string): WorkspaceInfo | undefined {
@@ -32,9 +36,13 @@ export const workspaceService = {
   },
 
   async create(name: string): Promise<WorkspaceInfo> {
+    const existingOrders = Array.from(workspaces.values(), workspace => workspace.sortOrder)
+      .filter(Number.isFinite);
+    const nextSortOrder = existingOrders.length === 0 ? 0 : Math.max(...existingOrders) + 1;
     const ws: WorkspaceInfo = {
       id: generateId(),
       name,
+      sortOrder: nextSortOrder,
       gridColumns: 3,
       gridRows: 2,
       selectedAgentIds: [],
@@ -66,6 +74,25 @@ export const workspaceService = {
     if (updates.qaSurfaceVerifications !== undefined) ws.qaSurfaceVerifications = updates.qaSurfaceVerifications;
     await persistenceService.saveNow();
     return ws;
+  },
+
+  async reorder(orderedIds: readonly string[]): Promise<WorkspaceInfo[]> {
+    const current = workspaceService.getAll();
+    const seen = new Set<string>();
+    const ordered: WorkspaceInfo[] = [];
+    for (const id of orderedIds) {
+      if (seen.has(id)) continue;
+      const workspace = workspaces.get(id);
+      if (!workspace) continue;
+      seen.add(id);
+      ordered.push(workspace);
+    }
+    for (const workspace of current) {
+      if (!seen.has(workspace.id)) ordered.push(workspace);
+    }
+    ordered.forEach((workspace, index) => { workspace.sortOrder = index; });
+    await persistenceService.saveNow();
+    return ordered;
   },
 
   /** Delete workspace. Returns false if it's the last one or not found. */
@@ -145,7 +172,8 @@ export const workspaceService = {
       // Lazy import — workspace.service runs at boot before any node:fs use.
       const { existsSync, statSync } = await import('node:fs');
       const { join } = await import('node:path');
-      for (const ws of workspacesList) {
+      for (const [index, ws] of workspacesList.entries()) {
+        if (!Number.isFinite(ws.sortOrder)) ws.sortOrder = index;
         ws.lockedAgentIds = ws.lockedAgentIds || [];
         // Reconcile atlasLastScanAt against atlas.md mtime. Stamps when unset
         // (user manually deleted the agent before we shipped the timestamp
@@ -174,6 +202,7 @@ export const workspaceService = {
       const defaultWorkspace: WorkspaceInfo = {
         id: defaultId,
         name: 'Default',
+        sortOrder: 0,
         gridColumns: settings?.gridColumns || 2,
         gridRows: settings?.gridRows || 2,
         selectedAgentIds: settings?.selectedAgentIds || agentIds,

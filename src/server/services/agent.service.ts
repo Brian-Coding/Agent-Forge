@@ -9,6 +9,7 @@ import { documentService } from './document.service';
 import { workspaceService } from './workspace.service';
 import { settingsService } from './settings.service';
 import { broadcast } from '../broadcast';
+import { normalizeSharedProjectContext } from './prompt-builder.service';
 
 // MAX_OUTPUT_BUFFER, DEFAULT_GUARDRAILS, readWithTimeout, and the Claude-specific
 // spawn/parse code (spawnProcess, readStreamJson, readStderr, _sendMessageImpl)
@@ -393,8 +394,9 @@ export const agentService = {
       status: 'idle',
       createdAt: Date.now(),
       workspaceId: wsId,
-      provider: 'claude',
-      model: STATIC_AGENT_DEFINITIONS.claude.defaultModel,
+      provider: 'codex',
+      model: STATIC_AGENT_DEFINITIONS.codex.defaultModel,
+      reasoningLevel: STATIC_AGENT_DEFINITIONS.codex.defaultReasoningLevel,
     };
     if (opts.hideFromGrid) info.hideFromGrid = true;
 
@@ -856,7 +858,7 @@ export const agentService = {
       messages.get(msg.agentId)!.push(msg);
     }
 
-    sharedContext = data.sharedContext || '';
+    sharedContext = normalizeSharedProjectContext(data.sharedContext);
     (globalThis as any).__sharedContext = sharedContext;
   },
 
