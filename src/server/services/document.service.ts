@@ -1,9 +1,12 @@
+// The Plans sidebar UI was removed (2026-07-09). This service survives as the
+// agent-facing `.plans/` plumbing only: plan-file watching/sniffing, prompt
+// context assembly, and per-agent write locks. Nothing here reaches the client
+// anymore — document records exist purely server-side (persisted in data.json).
 import type { LiveDocument } from '../../shared/protocol';
 import { watch, existsSync, mkdirSync, type FSWatcher } from 'fs';
 import { join, basename } from 'path';
 import { generateId } from '../utils';
 import { persistenceService } from './persistence.service';
-import { broadcast } from '../broadcast';
 
 // HMR-safe state
 const documents: Map<string, LiveDocument> = (globalThis as any).__documentsMap ??= new Map<string, LiveDocument>();
@@ -13,10 +16,6 @@ const planWatchers: Map<string, FSWatcher> = (globalThis as any).__planWatchers 
 export const documentService = {
   getAll(): LiveDocument[] {
     return Array.from(documents.values()).sort((a, b) => b.updatedAt - a.updatedAt);
-  },
-
-  get(id: string): LiveDocument | undefined {
-    return documents.get(id);
   },
 
   async create(
@@ -45,43 +44,6 @@ export const documentService = {
     return doc;
   },
 
-  async update(
-    id: string,
-    updates: { title?: string; content?: string; agentId?: string | null; lastEditedBy?: string; workspaceId?: string | null; status?: LiveDocument['status']; lockedBy?: string | null; filePath?: string },
-  ): Promise<LiveDocument | null> {
-    const doc = documents.get(id);
-    if (!doc) return null;
-    if (updates.title !== undefined) doc.title = updates.title;
-    if (updates.content !== undefined) doc.content = updates.content;
-    if (updates.agentId !== undefined) doc.agentId = updates.agentId || undefined;
-    if (updates.workspaceId !== undefined) doc.workspaceId = updates.workspaceId || undefined;
-    if (updates.lastEditedBy !== undefined) doc.lastEditedBy = updates.lastEditedBy;
-    if (updates.status !== undefined) doc.status = updates.status;
-    if (updates.lockedBy !== undefined) doc.lockedBy = updates.lockedBy || undefined;
-    if (updates.filePath !== undefined) doc.filePath = updates.filePath;
-    doc.updatedAt = Date.now();
-    await persistenceService.saveNow();
-
-    // Sync content changes back to .plans/ file on disk so agents can read them
-    if (updates.content !== undefined && doc.filePath) {
-      try {
-        planWriteFromServer.add(doc.filePath);
-        await Bun.write(doc.filePath, doc.content);
-        setTimeout(() => planWriteFromServer.delete(doc.filePath!), 500);
-      } catch (e) {
-        console.error(`Failed to sync document to ${doc.filePath}:`, e);
-        planWriteFromServer.delete(doc.filePath);
-      }
-    }
-    return doc;
-  },
-
-  async delete(id: string): Promise<boolean> {
-    const deleted = documents.delete(id);
-    if (deleted) await persistenceService.saveNow();
-    return deleted;
-  },
-
   // --- Plan interception & sync ---
 
   async handlePlanWrite(agentId: string, agentName: string, isRunning: boolean, workspaceId: string | undefined, filePath: string, content: string): Promise<void> {
@@ -108,15 +70,13 @@ export const documentService = {
       }
       existingDoc.updatedAt = Date.now();
       await persistenceService.saveNow();
-      broadcast({ type: 'document_updated', document: existingDoc });
     } else {
-      const doc = await documentService.create(title, content, agentId, workspaceId, {
+      await documentService.create(title, content, agentId, workspaceId, {
         status: isRunning ? 'in_progress' : 'draft',
         lockedBy: isRunning ? agentId : undefined,
         filePath,
         lastEditedBy: isRunning ? agentName : 'user',
       });
-      broadcast({ type: 'document_updated', document: doc });
     }
   },
 
@@ -139,7 +99,6 @@ export const documentService = {
         doc.lockedBy = undefined;
         if (doc.status === 'in_progress') doc.status = 'draft';
         doc.updatedAt = Date.now();
-        broadcast({ type: 'document_updated', document: doc });
       }
     }
     await persistenceService.saveNow();
@@ -161,7 +120,7 @@ export const documentService = {
       }
       const maxInline = 2000;
       const content = d.content.length > maxInline
-        ? d.content.slice(0, maxInline) + '\n...(truncated — full content available in Plans sidebar)'
+        ? d.content.slice(0, maxInline) + '\n...(truncated — read the .plans/ file for full content)'
         : d.content;
       return `--- Plan: ${d.title} ${statusTag(d.status)} ---\n${content}\n--- End ---`;
     }).join('\n');

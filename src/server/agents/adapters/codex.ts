@@ -34,9 +34,7 @@ interface CodexRunState {
   outputPath: string;
   // Streaming state machine — Codex sends discrete items; we treat them like
   // assistant/tool blocks for parity with Claude's content_block semantics.
-  assistantOpen: boolean;
   toolOpen: boolean;
-  sawAssistantStream: boolean;
   hasFinalAssistantMessage: boolean;
   lastAssistantMessage: string;
   currentToolId: string | null;
@@ -49,6 +47,11 @@ interface CodexRunState {
 }
 
 const MAX_INLINE_DIFF_CHARS = 80_000;
+
+export function codexReasoningConfigArg(level?: string): string {
+  const normalized = level === 'extra_high' ? 'xhigh' : (level || 'medium');
+  return `model_reasoning_effort="${normalized}"`;
+}
 
 // stderr lines containing this phrase are dropped (harmless noise on every run).
 const STDERR_NOISE_PATTERNS = [
@@ -244,15 +247,7 @@ function getFileChangePaths(cwd: string, item: any): string[] {
 function handleCodexEvent(ctx: AgentRunContext, state: CodexRunState, event: any): void {
   if (!event || typeof event !== 'object') return;
 
-  const startAssistant = () => {
-    if (state.assistantOpen) return;
-    closeTool();
-    state.assistantOpen = true;
-    state.sawAssistantStream = true;
-  };
-  const closeAssistant = () => { state.assistantOpen = false; };
   const startTool = (name: string, input: unknown = {}) => {
-    closeAssistant();
     closeTool();
     const toolCallId = `${name}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
     ctx.emitAgentEvent({
@@ -276,11 +271,6 @@ function handleCodexEvent(ctx: AgentRunContext, state: CodexRunState, event: any
   const toolDelta = (delta: string) => {
     if (!state.toolOpen || !delta || !state.currentToolId) return;
     ctx.emitAgentEvent({ type: 'tool-call-delta', toolCallId: state.currentToolId, delta });
-  };
-  const assistantDelta = (text: string) => {
-    if (!text) return;
-    startAssistant();
-    ctx.emitAgentEvent({ type: 'text-delta', text });
   };
   const emitEditDiff = (absolutePath: string, before: string, after: string) => {
     if (before === after) return;
@@ -390,24 +380,30 @@ function handleCodexEvent(ctx: AgentRunContext, state: CodexRunState, event: any
   if (event.type === 'item.completed' && item?.type === 'agent_message') {
     const text = typeof item.text === 'string' ? item.text : extractText(item);
     if (text) {
-      assistantDelta(text);
-      closeAssistant();
+      // codex exec --json does not expose the internal commentary/final phase
+      // on agent_message items. Treat streamed messages as concise progress;
+      // --output-last-message remains the canonical final response below.
+      ctx.emitAgentEvent({ type: 'thinking-delta', text });
       state.lastAssistantMessage = text;
-      state.hasFinalAssistantMessage = true;
     }
+    return;
+  }
+
+  if (event.type === 'item.completed' && item?.type === 'reasoning') {
+    const text = extractText(item.summary ?? item.text ?? item);
+    if (text) ctx.emitAgentEvent({ type: 'thinking-delta', text });
     return;
   }
 
   // --- Streamed assistant tokens --------------------------------------------
   if (event.type === 'agent_message_delta') {
     const delta = event.delta ?? event.text ?? event.content ?? '';
-    if (typeof delta === 'string') assistantDelta(delta);
-    ctx.emitAgentEvent({ type: 'status', status: 'responding' });
+    if (typeof delta === 'string' && delta) ctx.emitAgentEvent({ type: 'thinking-delta', text: delta });
     return;
   }
   if (event.type === 'agent_message') {
     const content = event.message ?? event.content ?? event.text ?? '';
-    if (typeof content === 'string' && content) assistantDelta(content);
+    if (typeof content === 'string' && content) ctx.emitAgentEvent({ type: 'thinking-delta', text: content });
     return;
   }
 
@@ -470,11 +466,9 @@ function handleCodexEvent(ctx: AgentRunContext, state: CodexRunState, event: any
 
   // --- Task complete: final assistant text fallback -------------------------
   if (event.type === 'task_complete' && typeof event.last_agent_message === 'string' && event.last_agent_message) {
-    if (!state.sawAssistantStream) {
-      ctx.emitAgentEvent({ type: 'result', text: event.last_agent_message });
-      state.hasFinalAssistantMessage = true;
-      state.lastAssistantMessage = event.last_agent_message;
-    }
+    ctx.emitAgentEvent({ type: 'result', text: event.last_agent_message });
+    state.hasFinalAssistantMessage = true;
+    state.lastAssistantMessage = event.last_agent_message;
     return;
   }
 }
@@ -489,9 +483,7 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
     const stem = safePaneFileStem(ctx.paneId);
     return {
       outputPath: resolve(tmpdir(), `agent-forge-codex-${stem}-${Date.now()}.txt`),
-      assistantOpen: false,
       toolOpen: false,
-      sawAssistantStream: false,
       hasFinalAssistantMessage: false,
       lastAssistantMessage: '',
       currentToolId: null,
@@ -515,12 +507,15 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
     if (ctx.model) {
       baseArgs.push('-m', ctx.model);
     }
-    if (ctx.reasoningLevel) {
-      // Older settings may store "extra_high" for the "xhigh" effort level; we
-      // accept either spelling but normalize to the CLI form.
-      const effort = ctx.reasoningLevel === 'extra_high' ? 'xhigh' : ctx.reasoningLevel;
-      baseArgs.push('-c', `reasoning_effort="${effort}"`);
-    }
+    // Always pin the reasoning effort. The Codex config key is
+    // `model_reasoning_effort` — passing the wrong key (`reasoning_effort`) is
+    // silently ignored, so the dropdown level never took and Codex fell back to
+    // whatever ~/.codex/config.toml had. If that fallback is invalid for the
+    // chosen model (e.g. an "ultra"/"max" tier the API rejects), every turn
+    // 400s on reasoning.effort. We normalize the legacy "extra_high" spelling
+    // to the CLI's "xhigh" and default to "medium" when no level is selected,
+    // so a stale config value can never leak into a turn.
+    baseArgs.push('-c', codexReasoningConfigArg(ctx.reasoningLevel));
 
     // Resolve to absolute path so Bun.spawn doesn't have to probe PATHEXT
     // from the agent's cwd (which fails on Windows for npm shim files).
@@ -590,7 +585,8 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
             void killProcessTree(proc);
           }
 
-          // Drain stderr — filter known harmless noise; surface anything else as live stderr events.
+          // Drain stderr and filter known harmless noise. The chat bridge keeps
+          // surviving diagnostic chunks hidden until a clean exit error is needed.
           const stderrPromise = (async () => {
             const reader = (proc!.stderr as ReadableStream<Uint8Array>).getReader();
             const decoder = new TextDecoder();
@@ -712,8 +708,6 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
             state.toolOpen = false;
             state.currentToolId = null;
           }
-          state.assistantOpen = false;
-
           // Read final assistant text from --output-last-message tmpfile.
           // Codex 0.125+ writes the canonical final answer here even when
           // the stream-event for item.completed/agent_message also ran.
@@ -731,8 +725,9 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
           // Always emit the canonical final answer. The live stream can include
           // progress/status narration; chat.service uses this result as the
           // persisted Codex assistant message and keeps streamed deltas live-only.
-          if (finalText) {
+          if (finalText && (!state.hasFinalAssistantMessage || finalText !== state.lastAssistantMessage)) {
             ctx.emitAgentEvent({ type: 'result', text: finalText });
+            state.hasFinalAssistantMessage = true;
           }
 
           // Stale-session resume failure: clear + retry fresh via the bridge,
@@ -749,7 +744,7 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
             await emitSnapshotFromRollout(ctx, threadId).catch(() => {});
           }
 
-          if (!killed && exitCode !== 0 && !state.hasFinalAssistantMessage && !state.sawAssistantStream) {
+          if (!killed && exitCode !== 0 && !state.hasFinalAssistantMessage) {
             // Stderr noise was filtered live; anything still here is real. With
             // nothing at all, the user must still see that the turn failed —
             // otherwise a crash looks like "Codex said nothing".

@@ -3,7 +3,6 @@ import index from '../client/index.html';
 
 import { persistenceService } from './services/persistence.service';
 import { settingsService } from './services/settings.service';
-import { noteService } from './services/note.service';
 import { workspaceService } from './services/workspace.service';
 import { documentService } from './services/document.service';
 import { agentService, initAgentService } from './services/agent.service';
@@ -12,6 +11,7 @@ import { browserService } from './services/browser.service';
 import { qaService } from './services/qa.service';
 import { atlasService } from './services/atlas.service';
 import { usageService } from './services/usage.service';
+import { limitsService } from './services/limits.service';
 
 import { websocketHandlers } from './ws';
 
@@ -19,6 +19,9 @@ import { handleDirectories } from './routes/directories.routes';
 import { handleGetPorts, handleKillPort } from './routes/ports.routes';
 import { handleGitBranch } from './routes/git.routes';
 import { handleGetModels } from './routes/models.routes';
+import { handleUsageExport } from './routes/usage.routes';
+import { handleVercelIntegration } from './routes/integrations.routes';
+import { handleHarnessInstructions } from './routes/harness.routes';
 import { handleListSimulators, handleBootSimulator, handleShutdownSimulator, handleEraseSimulator, handleCleanDerivedData } from './routes/simulator.routes';
 import { handleBrowserNavigate, handleBrowserScreenshot, handleBrowserClick, handleBrowserType, handleBrowserWaitForReady, handleBrowserConsoleGet, handleBrowserConsoleClear, handleBrowserStatus, handleBrowserEvaluate, handleQaScreenshot, handleAtlasFile } from './routes/browser.routes';
 
@@ -250,7 +253,7 @@ async function init() {
 
   if (data) {
     settingsService.load(data.settings);
-    noteService.load(data.notes);
+    // data.notes is a legacy field (Notes feature removed) — ignored on load.
     documentService.load(data.documents);
     agentService.load({
       agents: data.agents,
@@ -264,7 +267,7 @@ async function init() {
       agentService.setAgentWorkspace,
     );
     usageService.load(data.usageEvents);
-    console.log(`Loaded ${data.agents.length} agents, ${data.messages.length} messages, ${noteService.getAll().length} notes, ${documentService.getAll().length} documents, ${workspaceService.getAll().length} workspaces, ${(data.usageEvents ?? []).length} usage entries from disk`);
+    console.log(`Loaded ${data.agents.length} agents, ${data.messages.length} messages, ${documentService.getAll().length} documents, ${workspaceService.getAll().length} workspaces, ${(data.usageEvents ?? []).length} usage entries from disk`);
   }
 
   // Wire up cross-service callbacks
@@ -275,12 +278,13 @@ async function init() {
     agents: agentService.buildPersistedAgents() as any,
     messages: agentService.buildPersistedMessages(),
     sharedContext: agentService.getSharedContext(),
-    notes: noteService.getAll(),
     documents: documentService.getAll(),
     settings: settingsService.get(),
     workspaces: workspaceService.getAll(),
     usageEvents: usageService.getEvents(),
   }));
+
+  usageService.startSync();
 }
 
 // Lock FIRST — kill any prior bun.exe — THEN load data.json. If we load
@@ -361,6 +365,9 @@ function startServer(preferredPort: number) {
           if (url.pathname === '/api/ports/kill' && req.method === 'POST') return handleKillPort(req);
           if (url.pathname === '/api/git-branch' && req.method === 'GET') return handleGitBranch(req);
           if (url.pathname === '/api/models' && req.method === 'GET') return handleGetModels(req);
+          if (url.pathname === '/api/usage/export' && req.method === 'GET') return handleUsageExport(req);
+          if (url.pathname === '/api/integrations/vercel' && (req.method === 'GET' || req.method === 'POST')) return handleVercelIntegration(req);
+          if (url.pathname === '/api/harness/instructions' && req.method === 'GET') return handleHarnessInstructions();
           if (url.pathname === '/api/simulators' && req.method === 'GET') return handleListSimulators(req);
           if (url.pathname === '/api/simulators/boot' && req.method === 'POST') return handleBootSimulator(req);
           if (url.pathname === '/api/simulators/shutdown' && req.method === 'POST') return handleShutdownSimulator(req);
@@ -411,6 +418,8 @@ if (server.port !== preferredPort) {
 // at provision time so the spawned agents call back to the same Bun.serve we just bound.
 qaService.setGuiPort(server.port ?? 0);
 atlasService.setGuiPort(server.port ?? 0);
+// Provider limits: initial read now, then every minute.
+limitsService.start();
 console.log(`Server running at http://localhost:${server.port}`);
 
 // --- Graceful shutdown ---

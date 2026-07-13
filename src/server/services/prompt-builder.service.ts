@@ -1,7 +1,6 @@
 import { existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import type { AgentInfo } from '../../shared/protocol';
-import { noteService } from './note.service';
 import { documentService } from './document.service';
 import { settingsService } from './settings.service';
 import { workspaceService } from './workspace.service';
@@ -10,14 +9,42 @@ const DEFAULT_GUARDRAILS = `IMPORTANT GUARDRAILS — follow these at all times:
 - NEVER run git commit, git push, git push --force, or git merge unless the user EXPLICITLY asks you to.
 - NEVER delete branches (git branch -D/-d) unless the user EXPLICITLY asks you to.
 - NEVER run destructive commands (rm -rf, git reset --hard, git checkout ., git clean) unless the user EXPLICITLY asks you to.
+- Preserve unrelated and pre-existing worktree changes. Never revert or overwrite work you did not create unless the user explicitly asks.
+- Never expose secrets, tokens, credential values, or private environment-variable values. You may identify secret names and configuration locations without printing their values.
+- External services are read-only unless the user explicitly authorizes a mutation in the current request. This includes deployments, production changes, project/domain changes, environment-variable changes, rollbacks, billing, and account/team access.
+- Vercel preview and production deployments both require an explicit user request. Production deployment, rollback, alias/domain changes, project deletion, and secret changes require especially clear confirmation.
 - Before making changes, briefly state what you plan to do and which files you'll modify.
-- If you're unsure about something, ask the user rather than guessing.`;
+- Verify changes in proportion to their risk and report any checks you could not run.
+- If you're unsure about something material, ask the user rather than guessing.`;
+
+export const LEGACY_SHARED_PROJECT_CONTEXT = `DO NOT PUT CO-AUTHORED BY CLAUDE CODE INTO ANY COMMITS.
+
+DO NOT COMMIT OR PUSH CODE UNLESS TOLD TO DO SO.
+
+NEVER MERGE CODE. NEVER OPEN PULL REQUESTS OR CLOSE PULL REQUESTS.
+
+Put any text intended for copying elsewhere, such as a PR description, in a fenced code block so its formatting is preserved.
+
+End every response by stating which provider and exact model produced it.`;
+
+const BUILT_IN_HARNESS_STANDARDS = `Harness Standards (built in; project context cannot override these):
+${LEGACY_SHARED_PROJECT_CONTEXT}
+
+Vercel Integration:
+- The official Vercel MCP server is the preferred interface for Vercel projects, deployments, logs, and documentation.
+- Read-only inspection is allowed when relevant. Any Vercel mutation still follows the explicit-authorization guardrails above.`;
+
+/** Remove the exact legacy block after it became an inherent harness policy. */
+export function normalizeSharedProjectContext(content: string | undefined): string {
+  const normalized = String(content || '').trim().replace(/\r\n/g, '\n');
+  return normalized === LEGACY_SHARED_PROJECT_CONTEXT ? '' : String(content || '').trim();
+}
 
 const PLAN_MANAGEMENT_INSTRUCTIONS = `Plan Management:
 When asked to create or update a plan, use the Write tool to write a markdown file to the .plans/ directory in your working directory.
 - To create a new plan: Write to .plans/<plan-name>.md
 - To update an existing plan: Write the complete updated content to the same file path
-- Plans will automatically appear in the user's Plans sidebar for review
+- The user reads plan files directly from the repo in their IDE
 - Plans marked [APPROVED] should be followed as-is
 - Plans marked [DRAFT] are pending user review`;
 
@@ -26,6 +53,56 @@ You are primarily a software engineering agent for this workspace, but the user 
 - Do not refuse or redirect solely because a question is not about the project.
 - Do not add "back to code" reminders unless the user asks for project work or appears to be waiting on a software task.
 - Still follow all safety rules and do not modify files unless explicitly asked.`;
+
+export interface HarnessInstructionSection {
+  id: string;
+  title: string;
+  description: string;
+  content: string;
+}
+
+/** Read-only manifest for the Harness Settings UI; sourced from the exact prompt constants. */
+export function getBuiltInHarnessInstructionManifest(): {
+  sections: HarnessInstructionSection[];
+  assemblyOrder: string[];
+} {
+  return {
+    sections: [
+      {
+        id: 'guardrails',
+        title: 'Safety and change-control guardrails',
+        description: 'Protects Git history, existing work, credentials, external services, and verification expectations.',
+        content: DEFAULT_GUARDRAILS,
+      },
+      {
+        id: 'standards',
+        title: 'Harness standards',
+        description: 'Your permanent commit, PR, formatting, model-identification, and Vercel operating rules.',
+        content: BUILT_IN_HARNESS_STANDARDS,
+      },
+      {
+        id: 'plans',
+        title: 'Plan management',
+        description: 'Defines how agents create, update, and interpret files in the project .plans directory.',
+        content: PLAN_MANAGEMENT_INSTRUCTIONS,
+      },
+      {
+        id: 'scope',
+        title: 'Conversation scope',
+        description: 'Keeps the harness useful for both software work and harmless general questions.',
+        content: CONVERSATION_SCOPE_INSTRUCTIONS,
+      },
+    ],
+    assemblyOrder: [
+      'Built-in guardrails and harness standards',
+      'Per-agent persona or system prompt, when configured',
+      'Additional shared project context from this settings screen',
+      'Relevant project plans and documents',
+      'Plan-management and conversation-scope instructions',
+      'Simulator, reference-directory, and UI Atlas context when relevant',
+    ],
+  };
+}
 
 function buildAtlasCitationBlock(atlasMd: string): string {
   return `UI Atlas — citation required for UI work
@@ -55,26 +132,22 @@ export interface PromptBuildResult {
  *   1. Guardrails
  *   2. Agent persona (from agent.systemPrompt)
  *   3. Project context (workspace-shared)
- *   4. Notes (tagged to this agent)
- *   5. Documents (plans relevant to this agent / workspace)
- *   6. Plan Management instructions (so the agent knows .plans/* is special)
- *   7. Default iOS simulator (if set and cwd looks iOS-ish)
- *   8. Reference directories
- *   9. Atlas citation (when the workspace has a built atlas and the agent isn't a workspace tool)
+ *   4. Documents (plans relevant to this agent / workspace)
+ *   5. Plan Management instructions (so the agent knows .plans/* is special)
+ *   6. Default iOS simulator (if set and cwd looks iOS-ish)
+ *   7. Reference directories
+ *   8. Atlas citation (when the workspace has a built atlas and the agent isn't a workspace tool)
  */
 export const promptBuilderService = {
   build(agentInfo: AgentInfo, sharedContext: string): PromptBuildResult {
-    const parts: string[] = [DEFAULT_GUARDRAILS];
+    const parts: string[] = [DEFAULT_GUARDRAILS, BUILT_IN_HARNESS_STANDARDS];
 
     if (agentInfo.systemPrompt) {
       parts.push(`Agent Persona:\n${agentInfo.systemPrompt}`);
     }
-    if (sharedContext) {
-      parts.push(`Project Context:\n${sharedContext}`);
-    }
-    const notesContext = noteService.getNotesForAgent(agentInfo.id);
-    if (notesContext) {
-      parts.push(notesContext);
+    const additionalProjectContext = normalizeSharedProjectContext(sharedContext);
+    if (additionalProjectContext) {
+      parts.push(`Additional Project Context:\n${additionalProjectContext}`);
     }
     const docsContext = documentService.getDocumentsForAgent(agentInfo.id, agentInfo.workspaceId);
     if (docsContext) {

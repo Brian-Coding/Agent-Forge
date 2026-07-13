@@ -1,13 +1,14 @@
 import type { AgentEvent } from '../agents/events';
 import type { AgentHandle, AgentRunContext } from '../agents/types';
 import { stripModelTier, type ChatAgentKind } from '../agents/agent-kinds';
-import { getAgentAdapter, resolveAgentModel } from '../agents/registry';
+import { getAgentAdapter, resolveAgentModel, resolveAgentReasoningLevel } from '../agents/registry';
 import { broadcast } from '../broadcast';
 import { agentService } from './agent.service';
 import { documentService } from './document.service';
 import { persistenceService } from './persistence.service';
 import { promptBuilderService } from './prompt-builder.service';
 import { usageService } from './usage.service';
+import { compactThinkingText, sanitizeCliText } from '../agents/stream-utils';
 
 // --- HMR-safe state ---------------------------------------------------------
 
@@ -115,6 +116,18 @@ function prependPriorHistory(agentId: string, currentUserContent: string): strin
 
 // --- Bridge: translate normalized AgentEvent → wire-protocol messages -------
 
+/**
+ * Make a raw CLI stderr chunk safe for any future diagnostic UI surface.
+ * Strips ANSI escapes, then drops the chunk entirely when it is mostly
+ * non-printable (a binary dump — e.g. a crashing CLI spilling a panic
+ * backtrace or core-fragment bytes, which decode to U+FFFD replacement
+ * characters). Otherwise removes any stray control bytes and returns the
+ * readable remainder. Empty string means "nothing worth showing".
+ */
+export function sanitizeStderrForChat(text: string): string {
+  return sanitizeCliText(text);
+}
+
 function handleEvent(agentId: string, event: AgentEvent): void {
   switch (event.type) {
     case 'text-delta': {
@@ -125,13 +138,16 @@ function handleEvent(agentId: string, event: AgentEvent): void {
     }
 
     case 'thinking-delta': {
-      broadcast({ type: 'thinking_output', agentId, content: event.text });
+      const compact = compactThinkingText(event.text);
+      if (compact) broadcast({ type: 'thinking_output', agentId, content: compact + '\n' });
       return;
     }
 
     case 'stderr': {
       if (/No conversation found with session ID/i.test(event.text)) return;
-      broadcast({ type: 'output', agentId, content: event.text, stream: 'stderr' });
+      // CLI stderr is diagnostics, not agent output. Keep it server-side;
+      // adapters emit a clean error event on non-zero exit, so real failures
+      // still surface without ANSI traces or binary fragments flooding chat.
       return;
     }
 
@@ -306,6 +322,7 @@ async function runChatTurn(agentId: string, content: string, source?: 'qa'): Pro
   );
 
   const requestedResolvedModel = resolveAgentModel(provider, info.model);
+  const resolvedReasoningLevel = resolveAgentReasoningLevel(provider, requestedResolvedModel, info.reasoningLevel);
 
   // 5) Decide --resume vs fresh start. We --resume only when the agent's
   //    current session is owned by THIS provider/model pair; if the user just
@@ -350,6 +367,13 @@ async function runChatTurn(agentId: string, content: string, source?: 'qa'): Pro
     );
     broadcast({ type: 'message', message: sysMsg });
   }
+  if (provider === 'codex' && info.reasoningLevel && resolvedReasoningLevel !== info.reasoningLevel) {
+    const sysMsg = agentService.addSystemMessage(
+      agentId,
+      `Reasoning effort "${info.reasoningLevel}" is not supported by "${resolvedModel}" — using "${resolvedReasoningLevel}" for this turn.`,
+    );
+    broadcast({ type: 'message', message: sysMsg });
+  }
 
   const ctx: AgentRunContext = {
     paneId: agentId,
@@ -357,7 +381,7 @@ async function runChatTurn(agentId: string, content: string, source?: 'qa'): Pro
     referencePaths: validReferencePaths,
     systemPrompt: appendedSystemPrompt,
     model: resolvedModel,
-    reasoningLevel: info.reasoningLevel,
+    reasoningLevel: resolvedReasoningLevel,
 
     getSessionId(): string | null {
       return sessionIdForAdapter;
@@ -483,9 +507,11 @@ async function runChatTurn(agentId: string, content: string, source?: 'qa'): Pro
 
     // Persist the per-turn usage rollup. No-ops if every counter is zero
     // (a turn that errored before any API call). Triggers a usage_summary
-    // broadcast so the bottom-bar tracker updates immediately.
+    // broadcast so the bottom-bar tracker updates immediately. The model is
+    // stamped from the CLI-reported ground truth when available so the Tokens
+    // tab can break spend down per model.
     if (turnState) {
-      usageService.record(agentId, provider, turnState.turnUsage);
+      usageService.record(agentId, provider, turnState.turnUsage, { model: turnState.modelRan || resolvedModel });
     }
 
     // Identity-guarded: never delete a newer turn's buffer.
@@ -506,9 +532,9 @@ async function runChatTurn(agentId: string, content: string, source?: 'qa'): Pro
 
 export const chatService = {
   /**
-   * Entry point for `send_message`, `send_image`, `send_images`, and
-   * `broadcast_message`. Serializes per-agent via the sendLocks chain so
-   * concurrent calls don't interleave.
+   * Entry point for `send_message`, `send_image`, and `send_images`.
+   * Serializes per-agent via the sendLocks chain so concurrent calls don't
+   * interleave.
    */
   async sendMessage(agentId: string, content: string, source?: 'qa'): Promise<void> {
     // Capture the epoch at enqueue time. If resetLock() bumps it while this

@@ -47,3 +47,20 @@ export function resolveAgentModel(
   }
   return definition.defaultModel || definition.models[0]?.id;
 }
+
+/** Resolve reasoning against the selected model's live CLI capabilities. */
+export function resolveAgentReasoningLevel(
+  agentKind: ChatAgentKind,
+  modelId: string | undefined,
+  requestedLevel?: string,
+): string | undefined {
+  const definition = getAgentDefinition(agentKind);
+  if (!definition.supportsReasoningLevel) return undefined;
+  const model = definition.models.find(option => option.id === modelId);
+  const supported = model?.supportedReasoningLevels ?? definition.reasoningLevels ?? [];
+  const normalized = requestedLevel === 'extra_high' ? 'xhigh' : requestedLevel;
+  if (normalized && supported.includes(normalized)) return normalized;
+  const preferredDefault = model?.defaultReasoningLevel ?? definition.defaultReasoningLevel;
+  if (preferredDefault && supported.includes(preferredDefault)) return preferredDefault;
+  return supported[0];
+}

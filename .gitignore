@@ -39,6 +39,7 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 data.json
 pids.json
 agent-forge.lock
+/.agent-forge-sync/
 
 # Editor configs
 .cursor

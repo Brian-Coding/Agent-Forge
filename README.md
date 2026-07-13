@@ -1,4 +1,4 @@
-# agent-forge
+# Agent Forge
 
 To install dependencies:
 
