@@ -90,7 +90,7 @@ async function handleMessage(ws: ServerWebSocket<unknown>, message: ClientMessag
     case 'send_qa_message': {
       try {
         console.log(`[qa] send_qa_message ws=${message.workspaceId} src=${message.sourceAgentId} content="${message.content.slice(0, 80)}..."`);
-        await qaService.sendQaMessage(message.workspaceId, message.sourceAgentId, message.content);
+        await qaService.sendQaMessage(message.workspaceId, message.sourceAgentId, message.content, message.rerunOf);
         console.log(`[qa] send_qa_message dispatched ok`);
       } catch (e: any) {
         console.error(`[qa] send_qa_message failed:`, e);
@@ -106,6 +106,16 @@ async function handleMessage(ws: ServerWebSocket<unknown>, message: ClientMessag
       } catch (e: any) {
         console.error(`[qa] abort_qa_test failed:`, e);
         sendTo(ws, { type: 'error', message: e?.message || 'QA abort failed' });
+      }
+      break;
+    }
+
+    case 'handoff_qa_run': {
+      try {
+        await qaService.handoffRun(message.workspaceId, message.runId);
+      } catch (e: any) {
+        console.error('[qa] handoff failed:', e);
+        sendTo(ws, { type: 'error', message: e?.message || 'QA handoff failed' });
       }
       break;
     }
@@ -134,6 +144,31 @@ async function handleMessage(ws: ServerWebSocket<unknown>, message: ClientMessag
       } catch (e: any) {
         console.error(`[atlas] rescan failed:`, e);
         sendTo(ws, { type: 'error', message: e?.message || 'Atlas rescan failed' });
+      }
+      break;
+    }
+
+    case 'resume_atlas': {
+      try {
+        console.log(`[atlas] resume ws=${message.workspaceId}`);
+        const result = await atlasService.resumeAtlas(message.workspaceId);
+        if (result.created) broadcast({ type: 'agent_created', agent: result.agent });
+        broadcast({ type: 'agents_list', agents: agentService.getAgents() });
+      } catch (e: any) {
+        console.error('[atlas] resume failed:', e);
+        sendTo(ws, { type: 'error', message: e?.message || 'Atlas resume failed' });
+      }
+      break;
+    }
+
+    case 'discard_atlas_candidate': {
+      try {
+        console.log(`[atlas] discard candidate ws=${message.workspaceId}`);
+        await atlasService.discardCandidate(message.workspaceId);
+        broadcast({ type: 'agents_list', agents: agentService.getAgents() });
+      } catch (e: any) {
+        console.error('[atlas] discard failed:', e);
+        sendTo(ws, { type: 'error', message: e?.message || 'Atlas candidate discard failed' });
       }
       break;
     }

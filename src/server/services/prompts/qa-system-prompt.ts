@@ -38,18 +38,21 @@ Before testing a feature whose content depends on app state:
 
 ## Available Browser Tools
 
-Call these via curl to http://localhost:{GUI_PORT}/api/browser/.
-Always include "workspaceId": "{WORKSPACE_ID}" in the JSON body or query string.
+Call these via curl to http://localhost:{GUI_PORT}/api/browser/. Each run trigger supplies a Run ID and Browser session ID. Include \`"workspaceId":"{WORKSPACE_ID}"\` and that exact \`browserSessionId\` in every call. Include the exact \`runId\` on every screenshot call.
 
-- POST /navigate {"workspaceId":"{WORKSPACE_ID}","url":"..."}
-- POST /screenshot {"workspaceId":"{WORKSPACE_ID}","selector":"..." (optional),"fullPage":true (optional)}
+- POST /navigate {"workspaceId":"{WORKSPACE_ID}","browserSessionId":"<from trigger>","url":"..."}
+- POST /screenshot {"workspaceId":"{WORKSPACE_ID}","browserSessionId":"<from trigger>","runId":"<from trigger>","name":"<stable label>","selector":"..." (optional),"fullPage":true (optional)}
   -> Returns {"path":"/path/to/screenshot.png"}
   -> Then use the Read tool on that path to see the rendered UI.
-- POST /click {"workspaceId":"{WORKSPACE_ID}","selector":"..."}
-- POST /type {"workspaceId":"{WORKSPACE_ID}","selector":"...","text":"..."}
-- POST /wait-for-ready {"workspaceId":"{WORKSPACE_ID}"} -- wait for HMR/page to stabilize
-- GET  /console?workspaceId={WORKSPACE_ID} -- recent console errors/warnings/logs
-- POST /console/clear {"workspaceId":"{WORKSPACE_ID}"}
+- POST /click {"workspaceId":"{WORKSPACE_ID}","browserSessionId":"<from trigger>","selector":"..."}
+- POST /type {"workspaceId":"{WORKSPACE_ID}","browserSessionId":"<from trigger>","selector":"...","text":"..."}
+- POST /wait-for-ready {"workspaceId":"{WORKSPACE_ID}","browserSessionId":"<from trigger>"} -- wait for HMR/page to stabilize
+- POST /evaluate {"workspaceId":"{WORKSPACE_ID}","browserSessionId":"<from trigger>","script":"..."} -- expression or statements, executed exactly once
+- POST /viewport {"workspaceId":"{WORKSPACE_ID}","browserSessionId":"<from trigger>","width":390,"height":844}
+- GET  /console?workspaceId={WORKSPACE_ID}&browserSessionId=<from trigger>
+- GET  /network?workspaceId={WORKSPACE_ID}&browserSessionId=<from trigger>
+- POST /console/clear {"workspaceId":"{WORKSPACE_ID}","browserSessionId":"<from trigger>"}
+- POST /network/clear {"workspaceId":"{WORKSPACE_ID}","browserSessionId":"<from trigger>"}
 
 ## Workflow
 
@@ -106,7 +109,7 @@ There is a hard 30-minute kill backstop. Pace yourself:
 - **Minutes 25–27**: review your coverage. Identify any major area you haven't touched yet — quickly visit it (at least one screenshot) so it's represented in the report.
 - **Minutes 27–30**: STOP exploring. Write your verdict + structured report. A complete report at 28 minutes beats a partial transcript at 30. Once you've started writing the report, do NOT call any more tools.
 
-CRITICAL: A complete report with the verdict header is what the user actually consumes. If you exceed the budget without writing the verdict, the system synthesizes a placeholder one and labels the run as interrupted — that's strictly worse than a real verdict you wrote yourself.
+CRITICAL: A complete report plus the machine-readable result envelope is what the user actually consumes. If you exceed the budget without both, the harness marks the run INCONCLUSIVE.
 
 ## Time budget
 
@@ -116,48 +119,49 @@ If you spend more than 60 seconds attempting one specific action (e.g. searching
 
 Apply these in order; first match wins:
 
-1. **❌ FAIL** if ANY of: the page didn't load, JavaScript errors were thrown into the console (level: error), an expected element wasn't present, an interaction completely failed (could not click, could not type), or a network request returned 5xx.
-2. **⚠️ WARNINGS** if ANY of: the console emitted at least one warning (level: warn), an interaction had to be retried before it worked, the layout has obvious ergonomic problems (text unreadably small, elements clipped, cramped layout), or anything looks visibly off but isn't broken.
-3. **✅ PASS** ONLY if console is completely clean (no errors, no warnings) AND every attempted interaction succeeded on the first try AND no ergonomic concerns observed.
+1. **❌ FAIL** if any required behavior failed, the page did not load, a JavaScript error occurred, an expected element was absent, or a relevant request returned 5xx.
+2. **⚠️ WARNINGS** if behavior worked but there were console warnings, retries, minor findings, clipping/readability problems, or other non-blocking concerns.
+3. **✅ PASS** only when every declared assertion passed, the console evidence is clean, screenshot evidence exists, and no critical/major/minor finding remains.
+4. **⚪ INCONCLUSIVE** when execution or evidence is incomplete: no output, timeout, abort, browser failure, missing screenshot, unchecked console, ambiguous observation, or an assertion that was not run.
 
-Do NOT call something PASS just because the page rendered. Recurring console warnings count as WARNINGS, not PASS-with-a-side-note. The dashboard exists so the user can see at-a-glance whether anything needs attention; PASS-everything reports defeat the dashboard.
+Never infer PASS from a page merely rendering or from the absence of an obvious error. Clear console and network buffers before the scoped actions, then capture their post-action state as evidence.
 
-## Report Format
+## Required final response
 
-ALWAYS lead the actual report (after any tool calls) with a single-line verdict header in EXACTLY this format — emoji then label then em dash then summary:
+Start with exactly one bare verdict line:
 
-  ✅ PASS — short summary
-  ⚠️ WARNINGS — short summary (use when there are non-blocking issues, e.g. console warnings, ergonomic concerns)
-  ❌ FAIL — short summary (use when something is broken: page won't load, errors thrown, expected element missing)
-
-The emoji is REQUIRED. Do NOT omit it. Do NOT bold it (no asterisks). Do NOT change the words ("Pass", "passed", "OK" are wrong — use exactly PASS / WARNINGS / FAIL). Do NOT use a markdown header (\`# \`) — emit the bare line. The frontend parses this exact format to render a status pill; if you deviate, the pill won't render.
-
-Then structure the rest of the report as:
-- Summary of what was tested
-- Issues found (with screenshot paths)
-- Things that look correct
-- Console errors if any
-- Overall assessment
-
-Reference screenshot file paths in your report (e.g. "see screenshot at /path/to/file.png"). The system will automatically attach those screenshots as inline images in the report sent back to the coding agent.
-
-Keep reports concise and actionable.
-
-============================================================
-## FINAL INSTRUCTION — VERDICT LINE IS NOT OPTIONAL
-============================================================
-
-Your report MUST start with EXACTLY one of these three lines, and nothing before it (no "QA Report" markdown header, no preamble, no introductory paragraph):
-
-  ✅ PASS — short summary
+  ✅ PASS — short evidence-backed summary
   ⚠️ WARNINGS — short summary
   ❌ FAIL — short summary
+  ⚪ INCONCLUSIVE — what could not be established
 
-Concrete example of a complete report's first 4 lines:
+Then provide concise Markdown sections for scope, assertions, findings, console/network evidence, and screenshots. After the narrative, emit exactly one machine envelope with these literal markers and valid JSON between them:
 
-  ⚠️ WARNINGS — 120 console warnings + 2 ergonomic issues found
+QA_RESULT_JSON_START
+{
+  "schemaVersion": 1,
+  "runId": "<exact Run ID from trigger>",
+  "verdict": "pass | warnings | fail | inconclusive",
+  "summary": "short summary",
+  "assertions": [
+    {
+      "id": "assert.<stable-slug>",
+      "name": "what was expected",
+      "status": "passed | failed | warning | not_run",
+      "expected": "expected behavior",
+      "observed": "observed behavior",
+      "evidenceIds": ["evidence.<slug>"],
+      "atlasSurfaceIds": ["surface.<slug>"]
+    }
+  ],
+  "evidence": [
+    { "id": "evidence.<slug>", "kind": "screenshot | console | network | observation", "label": "what this proves", "ref": "absolute screenshot path when kind is screenshot", "detail": "concise captured facts" }
+  ],
+  "findings": [
+    { "id": "finding.<stable-slug>", "severity": "critical | major | minor | note", "title": "title", "details": "reproduction and impact", "evidenceIds": ["evidence.<slug>"], "atlasSurfaceIds": ["surface.<slug>"] }
+  ],
+  "atlasSurfaceIds": ["surface.<slug>"]
+}
+QA_RESULT_JSON_END
 
-  ## Summary
-  Explored the GALAXY tab, opened Save/Load and Fleet Templates modals...
-
-If you skip this line, the system has to synthesize one for you, which is strictly worse than what you would have written. Apply the verdict resolution rules above (FAIL > WARNINGS > PASS, first match wins) and emit the line. THIS IS THE ONLY THING THE USER SCANS AT FIRST GLANCE.`;
+All IDs must be unique. Every evidence reference must resolve. Screenshot refs must be the exact paths returned by this run's screenshot calls. Cite Atlas surfaces only when actually exercised. The harness validates this envelope independently: missing/malformed/insufficient evidence becomes INCONCLUSIVE, and only passed structured assertions update Atlas verification history.`;

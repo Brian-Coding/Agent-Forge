@@ -23,7 +23,7 @@ import { handleUsageExport } from './routes/usage.routes';
 import { handleVercelIntegration } from './routes/integrations.routes';
 import { handleHarnessInstructions } from './routes/harness.routes';
 import { handleListSimulators, handleBootSimulator, handleShutdownSimulator, handleEraseSimulator, handleCleanDerivedData } from './routes/simulator.routes';
-import { handleBrowserNavigate, handleBrowserScreenshot, handleBrowserClick, handleBrowserType, handleBrowserWaitForReady, handleBrowserConsoleGet, handleBrowserConsoleClear, handleBrowserStatus, handleBrowserEvaluate, handleQaScreenshot, handleAtlasFile } from './routes/browser.routes';
+import { handleBrowserNavigate, handleBrowserScreenshot, handleBrowserClick, handleBrowserType, handleBrowserWaitForReady, handleBrowserConsoleGet, handleBrowserConsoleClear, handleBrowserStatus, handleBrowserEvaluate, handleBrowserNetworkGet, handleBrowserNetworkClear, handleBrowserViewport, handleBrowserContextClose, handleQaScreenshot, handleAtlasFile } from './routes/browser.routes';
 
 // Catch unhandled promise rejections to prevent silent crashes
 process.on('unhandledRejection', (reason, promise) => {
@@ -382,6 +382,10 @@ function startServer(preferredPort: number) {
           if (url.pathname === '/api/browser/console/clear' && req.method === 'POST') return handleBrowserConsoleClear(req);
           if (url.pathname === '/api/browser/status' && req.method === 'GET') return handleBrowserStatus(req);
           if (url.pathname === '/api/browser/evaluate' && req.method === 'POST') return handleBrowserEvaluate(req);
+          if (url.pathname === '/api/browser/network' && req.method === 'GET') return handleBrowserNetworkGet(req);
+          if (url.pathname === '/api/browser/network/clear' && req.method === 'POST') return handleBrowserNetworkClear(req);
+          if (url.pathname === '/api/browser/viewport' && req.method === 'POST') return handleBrowserViewport(req);
+          if (url.pathname === '/api/browser/context/close' && req.method === 'POST') return handleBrowserContextClose(req);
           if (url.pathname === '/api/qa/screenshot' && req.method === 'GET') return handleQaScreenshot(req);
           if (url.pathname === '/api/atlas/file' && req.method === 'GET') return handleAtlasFile(req);
 

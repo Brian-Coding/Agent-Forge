@@ -8,6 +8,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import * as path from 'node:path';
 import { persistenceService } from './persistence.service';
+import { getArtifactRoot } from './artifact-paths';
 
 interface ConsoleEntry {
   level: 'log' | 'info' | 'warn' | 'error' | 'debug';
@@ -15,8 +16,19 @@ interface ConsoleEntry {
   timestamp: number;
 }
 
+export interface NetworkEntry {
+  kind: 'response' | 'requestfailed';
+  url: string;
+  method: string;
+  status: number | null;
+  ok: boolean;
+  error?: string;
+  timestamp: number;
+}
+
 const WORKER_SCRIPT = path.resolve(import.meta.dir, '../../../scripts/browser-worker.mjs');
 const WORKER_READY_TIMEOUT_MS = 30_000;
+const WORKER_FETCH_TIMEOUT_MS = 30_000;
 
 interface WorkerState {
   proc: ChildProcess | null;
@@ -36,21 +48,37 @@ function workerUrl(pathname: string): string {
   return `http://127.0.0.1:${state.port}${pathname}`;
 }
 
-async function workerFetch(method: 'GET' | 'POST', pathname: string, body?: unknown): Promise<any> {
+async function workerFetch(
+  method: 'GET' | 'POST',
+  pathname: string,
+  body?: unknown,
+  timeoutMs = WORKER_FETCH_TIMEOUT_MS,
+): Promise<any> {
   if (state.ready) await state.ready;
   if (state.port == null) throw new Error('Browser worker is not running');
-  const init: RequestInit = { method };
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const init: RequestInit = { method, signal: controller.signal };
   if (method === 'POST') {
     init.headers = { 'content-type': 'application/json' };
     init.body = JSON.stringify(body ?? {});
   }
-  const res = await fetch(workerUrl(pathname), init);
-  const json = await res.json().catch(() => ({}));
-  if (!res.ok || (json && typeof json === 'object' && 'ok' in json && (json as any).ok === false)) {
-    const msg = (json as any)?.error || `worker returned HTTP ${res.status}`;
-    throw new Error(msg);
+  try {
+    const res = await fetch(workerUrl(pathname), init);
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok || (json && typeof json === 'object' && 'ok' in json && (json as any).ok === false)) {
+      const msg = (json as any)?.error || `worker returned HTTP ${res.status}`;
+      throw new Error(msg);
+    }
+    return json;
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error(`Browser worker ${method} ${pathname.split('?')[0]} timed out after ${timeoutMs}ms`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
   }
-  return json;
 }
 
 function spawnWorker(): Promise<void> {
@@ -60,6 +88,7 @@ function spawnWorker(): Promise<void> {
     const proc = spawn('node', [WORKER_SCRIPT], {
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
+      env: { ...process.env, AGENT_FORGE_ARTIFACT_ROOT: getArtifactRoot() },
     });
     state.proc = proc;
 
@@ -136,8 +165,9 @@ export const browserService = {
     if (!proc) return;
     // Ask the worker to shut down cleanly; if it doesn't exit in 3s, kill it.
     try {
-      await workerFetch('POST', '/shutdown');
+      await workerFetch('POST', '/shutdown', undefined, 3000);
     } catch { /* ignore — worker may already be down */ }
+    if (state.proc !== proc) return;
     await new Promise<void>((resolve) => {
       const t = setTimeout(() => {
         try { proc.kill('SIGTERM'); } catch {}
@@ -175,14 +205,15 @@ export const browserService = {
     void workspaceId;
   },
 
-  async closeContext(workspaceId: string): Promise<void> {
+  async closeContext(workspaceId: string, browserSessionId?: string): Promise<void> {
     if (!this.isRunning()) return;
-    await workerFetch('POST', '/context/close', { workspaceId });
+    await workerFetch('POST', '/context/close', { workspaceId, browserSessionId });
   },
 
-  async getStatus(workspaceId: string): Promise<{ running: boolean; url?: string; title?: string }> {
+  async getStatus(workspaceId: string, browserSessionId?: string): Promise<{ running: boolean; url?: string; title?: string; browserSessionId?: string }> {
     if (!this.isRunning()) return { running: false };
-    return await workerFetch('GET', `/status?workspaceId=${encodeURIComponent(workspaceId)}`);
+    const session = browserSessionId ? `&browserSessionId=${encodeURIComponent(browserSessionId)}` : '';
+    return await workerFetch('GET', `/status?workspaceId=${encodeURIComponent(workspaceId)}${session}`);
   },
 
   /** Called by the agent service when a `file_changed` event fires. */
@@ -193,15 +224,15 @@ export const browserService = {
 
   // ============== Navigation ==============
 
-  async navigate(workspaceId: string, url: string): Promise<{ url: string; title: string }> {
+  async navigate(workspaceId: string, url: string, browserSessionId?: string): Promise<{ url: string; title: string }> {
     await this.launch();
-    const r = await workerFetch('POST', '/navigate', { workspaceId, url });
+    const r = await workerFetch('POST', '/navigate', { workspaceId, browserSessionId, url });
     return { url: r.url, title: r.title };
   },
 
   // ============== Screenshots ==============
 
-  async screenshot(workspaceId: string, opts: { selector?: string; fullPage?: boolean; name?: string; outDir?: string } = {}): Promise<string> {
+  async screenshot(workspaceId: string, opts: { selector?: string; fullPage?: boolean; name?: string; outDir?: string; browserSessionId?: string; runId?: string } = {}): Promise<string> {
     await this.launch();
     const r = await workerFetch('POST', '/screenshot', { workspaceId, ...opts });
     return r.path;
@@ -209,42 +240,62 @@ export const browserService = {
 
   // ============== Interaction ==============
 
-  async click(workspaceId: string, selector: string): Promise<void> {
+  async click(workspaceId: string, selector: string, browserSessionId?: string): Promise<void> {
     await this.launch();
-    await workerFetch('POST', '/click', { workspaceId, selector });
+    await workerFetch('POST', '/click', { workspaceId, browserSessionId, selector });
   },
 
-  async type(workspaceId: string, selector: string, text: string): Promise<void> {
+  async type(workspaceId: string, selector: string, text: string, browserSessionId?: string): Promise<void> {
     await this.launch();
-    await workerFetch('POST', '/type', { workspaceId, selector, text });
+    await workerFetch('POST', '/type', { workspaceId, browserSessionId, selector, text });
   },
 
   // ============== Stability ==============
 
-  async waitForReady(workspaceId: string): Promise<{ duration: number }> {
+  async waitForReady(workspaceId: string, browserSessionId?: string): Promise<{ duration: number }> {
     await this.launch();
-    const r = await workerFetch('POST', '/wait-for-ready', { workspaceId });
+    const r = await workerFetch('POST', '/wait-for-ready', { workspaceId, browserSessionId });
     return { duration: r.duration };
   },
 
   // ============== Console ==============
 
-  async getConsoleOutput(workspaceId: string): Promise<ConsoleEntry[]> {
+  async getConsoleOutput(workspaceId: string, browserSessionId?: string): Promise<ConsoleEntry[]> {
     if (!this.isRunning()) return [];
-    const r = await workerFetch('GET', `/console?workspaceId=${encodeURIComponent(workspaceId)}`);
+    const session = browserSessionId ? `&browserSessionId=${encodeURIComponent(browserSessionId)}` : '';
+    const r = await workerFetch('GET', `/console?workspaceId=${encodeURIComponent(workspaceId)}${session}`);
     return r.entries || [];
   },
 
-  async clearConsole(workspaceId: string): Promise<void> {
+  async clearConsole(workspaceId: string, browserSessionId?: string): Promise<void> {
     if (!this.isRunning()) return;
-    await workerFetch('POST', '/console/clear', { workspaceId });
+    await workerFetch('POST', '/console/clear', { workspaceId, browserSessionId });
+  },
+
+  // ============== Network evidence ==============
+
+  async getNetworkOutput(workspaceId: string, browserSessionId?: string): Promise<NetworkEntry[]> {
+    if (!this.isRunning()) return [];
+    const session = browserSessionId ? `&browserSessionId=${encodeURIComponent(browserSessionId)}` : '';
+    const r = await workerFetch('GET', `/network?workspaceId=${encodeURIComponent(workspaceId)}${session}`);
+    return r.entries || [];
+  },
+
+  async clearNetwork(workspaceId: string, browserSessionId?: string): Promise<void> {
+    if (!this.isRunning()) return;
+    await workerFetch('POST', '/network/clear', { workspaceId, browserSessionId });
+  },
+
+  async setViewport(workspaceId: string, width: number, height: number, browserSessionId?: string): Promise<void> {
+    await this.launch();
+    await workerFetch('POST', '/viewport', { workspaceId, browserSessionId, width, height });
   },
 
   // ============== Arbitrary script evaluation (powerful — Atlas use) ==============
 
-  async evaluate(workspaceId: string, script: string): Promise<any> {
+  async evaluate(workspaceId: string, script: string, browserSessionId?: string): Promise<any> {
     await this.launch();
-    const r = await workerFetch('POST', '/evaluate', { workspaceId, script });
+    const r = await workerFetch('POST', '/evaluate', { workspaceId, browserSessionId, script }, 20_000);
     return r.result;
   },
 };

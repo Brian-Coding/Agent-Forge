@@ -516,8 +516,10 @@
     .workspace-atlas-btn:disabled { opacity: 0.4; cursor: not-allowed; }
     .workspace-atlas-running { padding: 4px 12px 6px; }
     .workspace-atlas-idle { padding: 4px 12px 6px; }
+    .workspace-atlas-partial { padding: 4px 12px 6px; }
     .workspace-atlas-status { display: flex; align-items: center; gap: 6px; padding: 5px 8px; border-radius: 4px; font-size: 11px; font-weight: 500; }
     .workspace-atlas-running .workspace-atlas-status { background: rgba(86, 211, 100, 0.1); border: 1px solid var(--qa-accent-strong); color: var(--qa-accent); }
+    .workspace-atlas-partial .workspace-atlas-status { background: rgba(210, 153, 34, 0.1); border: 1px solid rgba(210, 153, 34, 0.35); color: var(--warning); }
     .workspace-atlas-idle.workspace-atlas-fresh .workspace-atlas-status { background: rgba(86, 211, 100, 0.08); border: 1px solid rgba(86, 211, 100, 0.3); color: var(--qa-accent); }
     .workspace-atlas-idle.workspace-atlas-aging .workspace-atlas-status { background: rgba(210, 153, 34, 0.08); border: 1px solid rgba(210, 153, 34, 0.3); color: var(--warning); }
     .workspace-atlas-idle.workspace-atlas-stale .workspace-atlas-status { background: rgba(248, 81, 73, 0.08); border: 1px solid rgba(248, 81, 73, 0.3); color: var(--error); }
@@ -531,6 +533,7 @@
     .workspace-atlas-action-btn { flex: 1; background: var(--bg-tertiary); border: 1px solid var(--border); color: var(--text-secondary); padding: 3px 8px; border-radius: 3px; font-size: 10px; cursor: pointer; transition: all 0.15s; }
     .workspace-atlas-action-btn:hover:not(:disabled) { background: rgba(86, 211, 100, 0.1); border-color: var(--qa-accent); color: var(--text-primary); }
     .workspace-atlas-action-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .workspace-atlas-discard:hover:not(:disabled) { background: rgba(248, 81, 73, 0.12); border-color: var(--error); color: var(--error); }
 
     /* Atlas viewer panel */
     .atlas-panel { display: flex; flex-direction: column; height: 100%; overflow: hidden; }
@@ -565,6 +568,18 @@
     .atlas-error { color: var(--error); }
     .atlas-running-body { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 12px; }
     .atlas-running-explainer { font-size: 11px; color: var(--text-muted); padding: 8px 10px; background: var(--bg-secondary); border-left: 2px solid var(--qa-accent); border-radius: 4px; line-height: 1.5; }
+    .atlas-run-banner { padding: 9px 12px; border-bottom: 1px solid var(--border); background: rgba(86, 211, 100, 0.06); flex-shrink: 0; }
+    .atlas-run-banner-paused, .atlas-run-banner-failed { background: rgba(210, 153, 34, 0.07); }
+    .atlas-run-banner-failed { border-left: 3px solid var(--error); }
+    .atlas-run-banner-head { display: flex; align-items: center; gap: 8px; color: var(--text-primary); font-size: 11px; }
+    .atlas-run-banner-head > span { margin-left: auto; color: var(--text-muted); font-size: 10px; }
+    .atlas-run-summary { margin-top: 4px; color: var(--text-secondary); font-size: 10.5px; line-height: 1.45; }
+    .atlas-run-actions { display: flex; gap: 5px; margin-left: auto; }
+    .atlas-run-actions .atlas-rescan-btn { align-self: auto; }
+    .atlas-discard-btn:hover { border-color: var(--error); color: var(--error); background: rgba(248, 81, 73, 0.1); }
+    .atlas-validation-errors { margin: 6px 0 0 16px; padding: 0; color: var(--error); font-size: 10px; line-height: 1.4; max-height: 100px; overflow: auto; }
+    .atlas-activity-compact { margin-top: 7px; max-height: 120px; overflow: auto; }
+    .atlas-activity-compact .atlas-activity-msg { padding: 4px 6px; }
     .atlas-activity-feed { display: flex; flex-direction: column; gap: 6px; }
     .atlas-activity-heading { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; }
     .atlas-activity-msg { padding: 6px 8px; border-radius: 4px; font-size: 11px; line-height: 1.4; }
@@ -597,7 +612,7 @@
     .qa-verdict-active.qa-verdict-pass { background: rgba(86, 211, 100, 0.18); color: var(--qa-accent); border: 1px solid var(--qa-accent-strong); }
     .qa-verdict-active.qa-verdict-warn { background: rgba(210, 153, 34, 0.18); color: var(--warning); border: 1px solid rgba(210, 153, 34, 0.4); }
     .qa-verdict-active.qa-verdict-fail { background: rgba(248, 81, 73, 0.18); color: var(--error); border: 1px solid rgba(248, 81, 73, 0.4); }
-    .qa-verdict-inactive { background: var(--bg-tertiary); color: var(--text-muted); border: 1px solid var(--border); opacity: 0.5; font-weight: 500; text-transform: lowercase; }
+    .qa-verdict-active.qa-verdict-inconclusive { background: rgba(139, 148, 158, 0.14); color: var(--text-secondary); border: 1px solid var(--border); }
 
     /* QA test stats strip — renders directly under the QA panel header */
     .qa-subpanel-stats { display: flex; gap: 14px; padding: 4px 12px; background: rgba(86, 211, 100, 0.05); border-bottom: 1px solid var(--qa-accent-strong); font-size: 10px; color: var(--text-secondary); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; flex-shrink: 0; }
@@ -612,6 +627,46 @@
     .qa-verdict-change-same { background: var(--bg-tertiary); color: var(--text-muted); }
     .qa-verdict-change-better { background: rgba(86, 211, 100, 0.12); color: var(--qa-accent); }
     .qa-verdict-change-worse { background: rgba(248, 81, 73, 0.12); color: var(--error); }
+    .qa-verdict-change-inconclusive { background: rgba(139, 148, 158, 0.12); color: var(--text-muted); }
+
+    /* Structured QA run presentation. These cards render only persisted,
+       schema-validated run data; the hidden QA agent's raw transcript stays hidden. */
+    .qa-run-request { display: flex; flex-direction: column; gap: 3px; margin: 0 0 10px; padding: 8px 10px; border: 1px solid var(--border); border-left: 3px solid var(--qa-accent); border-radius: 4px; background: var(--bg-secondary); color: var(--text-secondary); font-size: 11px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .qa-run-request > span { color: var(--qa-accent); font-size: 9px; font-weight: 700; letter-spacing: 0.6px; text-transform: uppercase; }
+    .qa-run-request small { color: var(--text-muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
+    .qa-structured-section { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; padding-top: 9px; border-top: 1px dashed var(--border); }
+    .qa-structured-heading { color: var(--text-secondary); font-size: 10px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; }
+    .qa-assertion, .qa-finding { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 7px; align-items: start; padding: 7px 8px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-secondary); font-size: 11px; }
+    .qa-assertion-status { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 50%; color: var(--text-muted); background: var(--bg-tertiary); font-weight: 700; }
+    .qa-assertion-passed { border-left: 3px solid var(--success); }
+    .qa-assertion-passed .qa-assertion-status { color: var(--success); background: rgba(86, 211, 100, 0.12); }
+    .qa-assertion-warning { border-left: 3px solid var(--warning); }
+    .qa-assertion-warning .qa-assertion-status { color: var(--warning); background: rgba(210, 153, 34, 0.12); }
+    .qa-assertion-failed { border-left: 3px solid var(--error); }
+    .qa-assertion-failed .qa-assertion-status { color: var(--error); background: rgba(248, 81, 73, 0.12); }
+    .qa-assertion-not_run { border-left: 3px solid var(--text-muted); }
+    .qa-assertion-observed { margin-top: 2px; color: var(--text-secondary); line-height: 1.4; }
+    .qa-assertion small { display: block; margin-top: 3px; color: var(--text-muted); }
+    .qa-finding { grid-template-columns: minmax(52px, auto) minmax(0, 1fr); }
+    .qa-finding-severity { padding: 2px 5px; border-radius: 3px; background: var(--bg-tertiary); color: var(--text-muted); font-size: 9px; font-weight: 700; text-align: center; text-transform: uppercase; }
+    .qa-finding-critical, .qa-finding-major { border-left: 3px solid var(--error); }
+    .qa-finding-critical .qa-finding-severity, .qa-finding-major .qa-finding-severity { color: var(--error); background: rgba(248, 81, 73, 0.12); }
+    .qa-finding-minor { border-left: 3px solid var(--warning); }
+    .qa-finding-minor .qa-finding-severity { color: var(--warning); background: rgba(210, 153, 34, 0.12); }
+    .qa-finding-note { border-left: 3px solid var(--accent); }
+    .qa-validation-box { margin-top: 12px; padding: 8px 10px; border: 1px solid rgba(210, 153, 34, 0.4); border-radius: 4px; background: rgba(210, 153, 34, 0.08); color: var(--warning); font-size: 11px; }
+    .qa-validation-box ul { margin: 5px 0 0; padding-left: 18px; color: var(--text-secondary); }
+    .qa-run-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 12px; }
+    .qa-handoff-btn { border-left-color: var(--accent); }
+    .qa-history-list { display: flex; flex-direction: column; gap: 6px; }
+    .qa-history-item { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 7px; align-items: center; width: 100%; padding: 7px 8px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-secondary); color: var(--text-secondary); cursor: pointer; text-align: left; }
+    .qa-history-item:hover, .qa-history-item.selected { border-color: var(--qa-accent); background: rgba(86, 211, 100, 0.08); }
+    .qa-history-verdict { min-width: 70px; color: var(--text-muted); font-size: 9px; font-weight: 700; letter-spacing: 0.4px; text-transform: uppercase; }
+    .qa-history-item[data-verdict="pass"] .qa-history-verdict { color: var(--success); }
+    .qa-history-item[data-verdict="warnings"] .qa-history-verdict { color: var(--warning); }
+    .qa-history-item[data-verdict="fail"] .qa-history-verdict { color: var(--error); }
+    .qa-history-prompt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .qa-history-time { max-width: 96px; overflow: hidden; text-overflow: ellipsis; color: var(--text-muted); font-size: 9px; white-space: nowrap; }
 
     /* Continue-testing follow-up buttons under a completed report */
     .qa-continue-row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 12px; padding-top: 8px; border-top: 1px dashed var(--border); }
@@ -643,7 +698,7 @@
     .panel-body:not(.qa-split) > .qa-resizer { display: none; }
 
     /* Distinctive striped header so the QA panel is instantly recognizable across the grid */
-    .qa-subpanel-header { display: flex; align-items: center; justify-content: space-between; padding: 7px 10px; background: linear-gradient(135deg, rgba(86, 211, 100, 0.16) 0%, rgba(86, 211, 100, 0.06) 100%), repeating-linear-gradient(45deg, transparent 0 6px, rgba(86, 211, 100, 0.05) 6px 7px); border-bottom: 1px solid var(--qa-accent-strong); font-size: 12px; color: var(--qa-accent); font-weight: 600; flex-shrink: 0; letter-spacing: 0.3px; }
+    .qa-subpanel-header { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 4px; padding: 7px 10px; background: linear-gradient(135deg, rgba(86, 211, 100, 0.16) 0%, rgba(86, 211, 100, 0.06) 100%), repeating-linear-gradient(45deg, transparent 0 6px, rgba(86, 211, 100, 0.05) 6px 7px); border-bottom: 1px solid var(--qa-accent-strong); font-size: 12px; color: var(--qa-accent); font-weight: 600; flex-shrink: 0; letter-spacing: 0.3px; }
     .qa-subpanel-status { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1; overflow: hidden; }
     .qa-subpanel-status > span:not(:first-child) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .qa-subpanel-badge { display: inline-flex; align-items: center; padding: 1px 5px; background: var(--qa-accent); color: #0d1117; font-size: 9px; font-weight: 700; border-radius: 3px; letter-spacing: 0.5px; flex-shrink: 0; }
@@ -672,6 +727,7 @@
     /* Run-again button in QA header — icon-only to save space */
     .qa-rerun-btn { background: none; border: 1px solid var(--qa-accent-strong); color: var(--qa-accent); cursor: pointer; padding: 1px 6px; border-radius: 3px; font-size: 11px; font-weight: 500; flex-shrink: 0; transition: all 0.15s; line-height: 1; }
     .qa-rerun-btn:hover:not(:disabled) { background: var(--qa-accent); color: #0d1117; }
+    .qa-rerun-btn.active { background: var(--qa-accent); color: #0d1117; }
     .qa-rerun-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 
     /* Abort-test button — only visible when a test is in flight */
@@ -889,10 +945,18 @@
       const [qaLiveShots, setQaLiveShots] = useState({}); // workspaceId -> [{path, timestamp}]
       const wsRef = useRef(null);
       const agentsRef = useRef([]);
+      const workspacesRef = useRef([]);
       const queueRef = useRef({});
 
       agentsRef.current = agents;
+      workspacesRef.current = workspaces;
       queueRef.current = queued;
+
+      const isHiddenQaAgent = (agentId) => {
+        const agent = agentsRef.current.find(item => item.id === agentId);
+        return (agent?.hideFromGrid && agent?.name === 'QA Tester')
+          || workspacesRef.current.some(workspace => workspace.qaAgentId === agentId);
+      };
 
       const sendRaw = useCallback((msg) => {
         if (wsRef.current?.readyState === WebSocket.OPEN) {
@@ -974,7 +1038,9 @@
               case 'agents_list':
                 setAgents(msg.agents);
                 msg.agents.forEach(a => {
-                  sendRaw({ type: 'get_history', agentId: a.id });
+                  // Structured qaRuns are the QA UI's durable source. Do not
+                  // download the hidden QA implementation transcript.
+                  if (!(a.hideFromGrid && a.name === 'QA Tester')) sendRaw({ type: 'get_history', agentId: a.id });
                   // Drain messages queued while disconnected once we know the
                   // agent is actually idle (reconnect resync path).
                   if (a.status === 'idle') drainQueue(a.id);
@@ -994,15 +1060,6 @@
                     if (!wasRunning && isNowRunning) {
                       setThinkingOutput(prev2 => { const n = {...prev2}; delete n[msg.agent.id]; return n; });
                       setAgentActivity(prev2 => { const n = {...prev2}; delete n[msg.agent.id]; return n; });
-                    }
-                    // Toast when an Atlas agent finishes a scan (working/thinking → idle).
-                    if ((old.status === 'working' || old.status === 'thinking') && msg.agent.status === 'idle' && msg.agent.name === 'UI Atlas Agent') {
-                      const toastId = 'atlas-done-' + Date.now();
-                      setErrorToasts(prev2 => {
-                        const next = [...prev2, { id: toastId, message: '🗺️ Atlas scan complete — open the UI Atlas tab to view it.' }];
-                        return next.slice(-5);
-                      });
-                      setTimeout(() => setErrorToasts(prev2 => prev2.filter(t => t.id !== toastId)), 12000);
                     }
                   }
                   // Toast the moment a model mismatch latches, independent of
@@ -1033,6 +1090,7 @@
                 setAgentActivity(prev => { const n = {...prev}; delete n[msg.agentId]; return n; });
                 break;
               case 'message':
+                if (isHiddenQaAgent(msg.message.agentId)) break;
                 setMessages(prev => ({
                   ...prev,
                   [msg.message.agentId]: [...(prev[msg.message.agentId] || []), msg.message]
@@ -1042,6 +1100,7 @@
                 }
                 break;
               case 'history':
+                if (isHiddenQaAgent(msg.agentId)) break;
                 setMessages(prev => ({ ...prev, [msg.agentId]: msg.messages }));
                 break;
               case 'history_cleared':
@@ -1051,6 +1110,7 @@
                 setAgentActivity(prev => { const n = {...prev}; delete n[msg.agentId]; return n; });
                 break;
               case 'output': {
+                if (isHiddenQaAgent(msg.agentId)) break;
                 const MAX_LIVE_OUTPUT = 512000; // 500KB cap
                 setLiveOutput(prev => {
                   let updated = (prev[msg.agentId] || '') + msg.content;
@@ -1062,9 +1122,11 @@
                 break;
               }
               case 'agent_activity':
+                if (isHiddenQaAgent(msg.agentId)) break;
                 setAgentActivity(prev => ({ ...prev, [msg.agentId]: { label: msg.label, timestamp: msg.timestamp } }));
                 break;
               case 'thinking_output': {
+                if (isHiddenQaAgent(msg.agentId)) break;
                 const MAX_THINKING_OUTPUT = 16000;
                 setThinkingOutput(prev => {
                   let updated = (prev[msg.agentId] || '') + msg.content;
@@ -1110,14 +1172,19 @@
                 break;
               case 'qa_results_ready':
                 setQaUnread(prev => ({ ...prev, [msg.sourceAgentId]: true }));
-                // Clear the live-shots accumulator for this workspace since the report
-                // (with embedded screenshots) is the canonical view from now on.
-                setQaLiveShots(prev => { const { [msg.workspaceId]: _, ...rest } = prev; return rest; });
+                // Retire only this completed run's live strip. Atlas and a
+                // subsequently queued QA run use separate browser sessions.
+                setQaLiveShots(prev => {
+                  const kept = (prev[msg.workspaceId] || []).filter(shot => shot.browserSessionId !== 'qa-' + msg.runId);
+                  if (kept.length > 0) return { ...prev, [msg.workspaceId]: kept };
+                  const { [msg.workspaceId]: _, ...rest } = prev;
+                  return rest;
+                });
                 break;
               case 'qa_screenshot_taken':
                 setQaLiveShots(prev => ({
                   ...prev,
-                  [msg.workspaceId]: [...(prev[msg.workspaceId] || []), { path: msg.path, timestamp: msg.timestamp }],
+                  [msg.workspaceId]: [...(prev[msg.workspaceId] || []), { path: msg.path, timestamp: msg.timestamp, browserSessionId: msg.browserSessionId }].slice(-200),
                 }));
                 break;
               case 'qa_stuck_warning': {
@@ -1177,10 +1244,13 @@
         createAgent: (name, cwd, referencePaths, systemPrompt, workspaceId) => {
           sendRaw({ type: 'create_agent', name, cwd, referencePaths, systemPrompt, workspaceId });
         },
-        sendQaMessage: (workspaceId, sourceAgentId, content) => sendRaw({ type: 'send_qa_message', workspaceId, sourceAgentId, content }),
+        sendQaMessage: (workspaceId, sourceAgentId, content, rerunOf) => sendRaw({ type: 'send_qa_message', workspaceId, sourceAgentId, content, rerunOf }),
         abortQaTest: (workspaceId) => sendRaw({ type: 'abort_qa_test', workspaceId }),
+        handoffQaRun: (workspaceId, runId) => sendRaw({ type: 'handoff_qa_run', workspaceId, runId }),
         provisionAtlasAgent: (workspaceId, projectCwd) => sendRaw({ type: 'provision_atlas_agent', workspaceId, projectCwd }),
         rescanAtlas: (workspaceId) => sendRaw({ type: 'rescan_atlas', workspaceId }),
+        resumeAtlas: (workspaceId) => sendRaw({ type: 'resume_atlas', workspaceId }),
+        discardAtlasCandidate: (workspaceId) => sendRaw({ type: 'discard_atlas_candidate', workspaceId }),
         clearQaUnread: (sourceAgentId) => setQaUnread(prev => { if (!prev[sourceAgentId]) return prev; const { [sourceAgentId]: _, ...rest } = prev; return rest; }),
         sendMessage: (agentId, content) => {
           const agent = agentsRef.current.find(a => a.id === agentId);
@@ -1607,18 +1677,16 @@
       { kind: 'pass', label: 'PASS', emoji: '✅' },
       { kind: 'warn', label: 'WARN', emoji: '⚠️' },
       { kind: 'fail', label: 'FAIL', emoji: '❌' },
+      { kind: 'inconclusive', label: 'INCONCLUSIVE', emoji: '⚪' },
     ];
     function renderQaVerdictRow(verdict) {
       if (!verdict) return null;
+      const meta = QA_VERDICT_KINDS.find(item => item.kind === verdict.kind);
+      if (!meta) return null;
       return e('div', { className: 'qa-verdict-row' },
-        QA_VERDICT_KINDS.map(({ kind, label, emoji }) => {
-          const isActive = verdict.kind === kind;
-          const className = 'qa-verdict ' + (isActive ? 'qa-verdict-active qa-verdict-' + kind : 'qa-verdict-inactive');
-          const text = isActive
-            ? emoji + ' ' + label + (verdict.summary ? ' — ' + verdict.summary : '')
-            : emoji + ' ' + label;
-          return e('div', { key: kind, className }, text);
-        })
+        e('div', { className: 'qa-verdict qa-verdict-active qa-verdict-' + meta.kind },
+          meta.emoji + ' ' + meta.label + (verdict.summary ? ' — ' + verdict.summary : '')
+        )
       );
     }
 
@@ -1632,11 +1700,11 @@
       // then PASS / WARNINGS / FAIL (case-insensitive), then optional summary.
       // The agent has been inconsistent \u2014 sometimes "# \u2705 PASS \u2014 ...", sometimes just
       // "PASS \u2014 ..." or "**PASS**: ...". This catches all of those shapes.
-      const re = /^[ \t]*#{0,3}[ \t]*\*{0,2}[ \t]*(?:\u2705\s*)?(?:\u26A0\uFE0F\s*)?(?:\u274C\s*)?(PASS|WARNINGS?|FAIL)\b[ \t]*\*{0,2}\s*[\u2014:\-]?\s*([^\n]*)/im;
+      const re = /^[ \t]*#{0,3}[ \t]*\*{0,2}[ \t]*(?:\u2705\s*)?(?:\u26A0\uFE0F\s*)?(?:\u274C\s*)?(?:\u26AA\s*)?(PASS|WARNINGS?|FAIL|INCONCLUSIVE)\b[ \t]*\*{0,2}\s*[\u2014:\-]?\s*([^\n]*)/im;
       const m = re.exec(text);
       if (!m) return { verdict: null, body: text };
       const raw = m[1].toUpperCase();
-      const kind = raw.includes('PASS') ? 'pass' : raw.includes('FAIL') ? 'fail' : 'warn';
+      const kind = raw.includes('PASS') ? 'pass' : raw.includes('FAIL') ? 'fail' : raw.includes('INCONCLUSIVE') ? 'inconclusive' : 'warn';
       const summary = m[2].trim();
       const verdictEnd = m.index + m[0].length;
       const body = text.substring(verdictEnd).replace(/^\n+/, '');
@@ -1707,7 +1775,7 @@
     });
 
     // Terminal Panel
-    function TerminalPanel({ agent, messages, liveOutput, queuedMessages, fileChanges, thinkingOutput, agentActivity, statusStartTime, tokenUsage, terminals, terminalOutput, workspace, qaAgent, qaMessages, qaTokenUsage, qaHasUnread, qaLiveShots, onQaSend, onQaAbort, onClearQaUnread, onSendMessage, onSendImage, onSendImages, onStop, onClearHistory, onClearFileChanges, onMinimize, onMaximize, isMaximized, onFocus, isFocused, onCreateTerminal, onKillTerminal, onUpdateAgent, onResolveModelMismatch, isLocked, onToggleLock, isDragging, isDragOver, onDragStart, onDragEnd, onDragOver, onDragLeave, onDrop }) {
+    function TerminalPanel({ agent, messages, liveOutput, queuedMessages, fileChanges, thinkingOutput, agentActivity, statusStartTime, tokenUsage, terminals, terminalOutput, workspace, qaRuns, qaHasUnread, qaLiveShots, onQaSend, onQaAbort, onQaHandoff, onClearQaUnread, onSendMessage, onSendImage, onSendImages, onStop, onClearHistory, onClearFileChanges, onMinimize, onMaximize, isMaximized, onFocus, isFocused, onCreateTerminal, onKillTerminal, onUpdateAgent, onResolveModelMismatch, isLocked, onToggleLock, isDragging, isDragOver, onDragStart, onDragEnd, onDragOver, onDragLeave, onDrop }) {
       const [input, setInput] = useState('');
       const [inputHistory, setInputHistory] = useState([]);
       const [historyIdx, setHistoryIdx] = useState(-1);
@@ -1751,33 +1819,30 @@
       const [qaInput, setQaInput] = useState('');
       const [qaPanelWidthPct, setQaPanelWidthPct] = useState(40);
       const [qaResizing, setQaResizing] = useState(false);
-      const [lastQaPrompt, setLastQaPrompt] = useState('');
-      const [qaShowActivity, setQaShowActivity] = useState(false);
+      const [qaHistoryOpen, setQaHistoryOpen] = useState(false);
+      const [selectedQaRunId, setSelectedQaRunId] = useState(null);
       const qaContentRef = useRef(null);
+      const orderedQaRuns = useMemo(() => [...(qaRuns || [])].sort((a, b) => a.createdAt - b.createdAt), [qaRuns]);
+      const latestQaRun = orderedQaRuns.length > 0 ? orderedQaRuns[orderedQaRuns.length - 1] : null;
+      const activeQaRun = [...orderedQaRuns].reverse().find(run => run.status === 'queued' || run.status === 'running') || null;
+      const selectedQaRun = orderedQaRuns.find(run => run.id === selectedQaRunId) || latestQaRun;
+      const qaShowActivity = qaHistoryOpen;
+      const setQaShowActivity = setQaHistoryOpen;
 
       const scrollQaToBottom = () => {
         const el = qaContentRef.current;
         if (el) el.scrollTop = el.scrollHeight;
       };
 
-      const clearQaHistory = () => {
-        if (!qaAgent) return;
-        if (confirm('Clear QA agent chat history? This wipes all prior tests and resets the conversation context.')) {
-          if (onClearHistory) onClearHistory(qaAgent.id);
-          setLastQaPrompt('');
-        }
-      };
-
-      // Auto-scroll to bottom when QA messages arrive (best-effort; user can still scroll up freely).
+      // Follow a newly-created run while still allowing the user to select an
+      // older result from history afterward.
       useEffect(() => {
+        if (latestQaRun?.id) setSelectedQaRunId(latestQaRun.id);
         scrollQaToBottom();
-      }, [qaMessages?.length]);
+      }, [latestQaRun?.id]);
 
-      // Stats for the most recent QA test — surfaced as a strip under the QA panel header.
-      const qaLastAssistantMsg = (qaMessages && qaMessages.length > 0) ? [...qaMessages].reverse().find(m => m.role === 'assistant') : null;
-      const qaLastUserMsg = (qaMessages && qaMessages.length > 0) ? [...qaMessages].reverse().find(m => m.role === 'user') : null;
-      const qaDurationMs = (qaLastAssistantMsg && qaLastUserMsg && qaLastAssistantMsg.timestamp > qaLastUserMsg.timestamp)
-        ? qaLastAssistantMsg.timestamp - qaLastUserMsg.timestamp
+      const qaDurationMs = (selectedQaRun?.startedAt && selectedQaRun?.finishedAt)
+        ? selectedQaRun.finishedAt - selectedQaRun.startedAt
         : 0;
       const qaFmtDuration = (ms) => {
         if (ms <= 0) return null;
@@ -1793,10 +1858,24 @@
         return String(n);
       };
       const qaFmtCost = (c) => c < 0.01 ? '<$0.01' : '$' + c.toFixed(2);
-      const qaTokens = qaTokenUsage ? (qaTokenUsage.totalInputTokens + qaTokenUsage.totalOutputTokens) : 0;
-      const qaCost = qaTokenUsage ? qaTokenUsage.totalCostUsd : 0;
+      const qaTokens = selectedQaRun?.usage ? (selectedQaRun.usage.inputTokens + selectedQaRun.usage.outputTokens) : 0;
+      const qaCost = selectedQaRun?.usage?.costUsd || 0;
       const qaHasStats = qaDurationMs > 0 || qaTokens > 0 || qaCost > 0;
       const panelBodyRef = useRef(null);
+      const [qaStacked, setQaStacked] = useState(false);
+
+      // A grid cell can be narrow even on a wide monitor, so respond to this
+      // panel's own width instead of the browser viewport.
+      useEffect(() => {
+        const el = panelBodyRef.current;
+        if (!el || typeof ResizeObserver === 'undefined') return;
+        const observer = new ResizeObserver(entries => {
+          const width = entries[0]?.contentRect?.width || el.getBoundingClientRect().width;
+          setQaStacked(width < 760);
+        });
+        observer.observe(el);
+        return () => observer.disconnect();
+      }, []);
 
       // QA suggestion prompts shown on empty state
       const QA_SUGGESTIONS = [
@@ -1806,16 +1885,17 @@
         { title: 'Check console for errors', desc: 'Inspect runtime errors and warnings', prompt: 'Navigate to the test URL, wait for the page to load, then check the browser console for any errors or warnings. Report what you find with screenshots if helpful.' },
       ];
 
-      // QA agent status — real read from the workspace's QA agent (lazily provisioned on first send).
-      const qaStatus = qaAgent ? qaAgent.status : 'idle';
-      const qaStatusLabel = qaStatus === 'working' ? 'Working' : qaStatus === 'thinking' ? 'Thinking' : qaStatus === 'error' ? 'Error' : qaStatus === 'stopped' ? 'Stopped' : 'Ready';
+      const qaStatus = activeQaRun?.status || 'idle';
+      const qaStatusLabel = qaStatus === 'queued' ? 'Queued' : qaStatus === 'running' ? 'Running' : 'Ready';
+      const activeQaShots = activeQaRun
+        ? (qaLiveShots || []).filter(shot => !shot.browserSessionId || shot.browserSessionId === activeQaRun.browserSessionId)
+        : [];
 
-      const sendQaMessage = () => {
-        const trimmed = qaInput.trim();
+      const sendQaMessage = (explicitPrompt, rerunOf) => {
+        const trimmed = (explicitPrompt != null ? explicitPrompt : qaInput).trim();
         if (!trimmed || !workspace || !workspace.testUrl) return;
-        setLastQaPrompt(trimmed);
         setQaInput('');
-        if (onQaSend) onQaSend(workspace.id, agent.id, trimmed);
+        if (onQaSend) onQaSend(workspace.id, agent.id, trimmed, rerunOf);
       };
 
       // Clear the unread badge when the panel is opened.
@@ -2216,7 +2296,7 @@
         // Body \u2014 splits into [coding | resizer | QA] when QA panel is open and panel is wide enough; stacks otherwise
         e('div', {
           ref: panelBodyRef,
-          className: 'panel-body' + (qaPanelOpen ? ' qa-split' : ''),
+          className: 'panel-body' + (qaPanelOpen && !qaStacked ? ' qa-split' : ''),
         },
           e('div', { className: 'panel-main' },
             // Drop zone overlay (Feature 3)
@@ -2455,7 +2535,7 @@
           // QA sub-panel — sibling of .panel-main inside .panel-body
           qaPanelOpen && e('div', {
             className: 'qa-subpanel',
-            style: { width: qaPanelWidthPct + '%', flexBasis: qaPanelWidthPct + '%' },
+            style: qaStacked ? undefined : { width: qaPanelWidthPct + '%', flexBasis: qaPanelWidthPct + '%' },
           },
             e('div', { className: 'qa-subpanel-header' },
               e('div', { className: 'qa-subpanel-status' },
@@ -2473,26 +2553,26 @@
               ),
               e('button', {
                 className: 'qa-rerun-btn',
-                disabled: !qaMessages || qaMessages.length === 0,
+                disabled: orderedQaRuns.length === 0,
                 onClick: scrollQaToBottom,
-                title: 'Scroll to latest message',
+                title: 'Scroll to latest run',
               }, '↓'),
               e('button', {
-                className: 'qa-rerun-btn',
-                disabled: !qaAgent,
-                onClick: clearQaHistory,
-                title: qaAgent ? 'Clear QA chat history (wipes context)' : 'No QA agent yet',
-              }, 'Clear'),
+                className: 'qa-rerun-btn' + (qaHistoryOpen ? ' active' : ''),
+                disabled: orderedQaRuns.length === 0,
+                onClick: () => setQaHistoryOpen(value => !value),
+                title: 'Show structured QA run history',
+              }, 'History' + (orderedQaRuns.length ? ' ' + orderedQaRuns.length : '')),
               e('button', {
                 className: 'qa-rerun-btn',
-                disabled: !lastQaPrompt || !(workspace && workspace.testUrl),
-                onClick: () => { if (lastQaPrompt) setQaInput(lastQaPrompt); },
-                title: lastQaPrompt ? 'Run last prompt again' : 'No previous test to repeat',
-              }, '↻'),
-              (qaStatus === 'working' || qaStatus === 'thinking') && e('button', {
+                disabled: !selectedQaRun || !!activeQaRun || !(workspace && workspace.testUrl),
+                onClick: () => selectedQaRun && sendQaMessage(selectedQaRun.prompt, selectedQaRun.id),
+                title: selectedQaRun ? 'Execute the same request as a linked rerun' : 'No previous test to rerun',
+              }, '↻ Run again'),
+              qaStatus === 'running' && e('button', {
                 className: 'qa-abort-btn',
                 onClick: () => { if (workspace && onQaAbort) onQaAbort(workspace.id); },
-                title: 'Abort the in-flight QA test (partial report will be relayed)',
+                title: 'Abort the in-flight QA run; it will be recorded as inconclusive',
               }, '◼ Abort'),
               e('button', { className: 'qa-subpanel-close', onClick: () => setQaPanelOpen(false), title: 'Close QA panel' }, '×')
             ),
@@ -2502,11 +2582,11 @@
               qaCost > 0 && e('span', null, '💰 ' + qaFmtCost(qaCost))
             ),
             e('div', { className: 'qa-subpanel-content', ref: qaContentRef },
-              // Live screenshots streamed during an in-flight test. Cleared by qa_results_ready.
-              qaStatus === 'working' && qaLiveShots && qaLiveShots.length > 0 && e('div', { className: 'qa-live-shots' },
-                e('div', { className: 'qa-live-shots-heading' }, '🔴 Live screenshots (' + qaLiveShots.length + ')'),
+              // Live evidence is filtered to this run's isolated browser session.
+              qaStatus === 'running' && activeQaShots.length > 0 && e('div', { className: 'qa-live-shots' },
+                e('div', { className: 'qa-live-shots-heading' }, '🔴 Live screenshots (' + activeQaShots.length + ')'),
                 e('div', { className: 'qa-live-shots-row' },
-                  qaLiveShots.map((shot, i) => e('img', {
+                  activeQaShots.map((shot, i) => e('img', {
                     key: shot.timestamp + '-' + i,
                     className: 'qa-live-shot',
                     src: '/api/qa/screenshot?path=' + encodeURIComponent(shot.path),
@@ -2517,62 +2597,48 @@
                 )
               ),
               !(workspace && workspace.testUrl)
-                ? e('div', { className: 'qa-subpanel-empty' }, e('span', { style: { fontStyle: 'italic' } }, 'Set a Test URL on this workspace (left sidebar) to start chatting with the QA agent.'))
-                : (qaMessages && qaMessages.length > 0)
+                ? e('div', { className: 'qa-subpanel-empty' }, e('span', { style: { fontStyle: 'italic' } }, 'Set a Test URL on this workspace (left sidebar) to start a structured QA run.'))
+                : orderedQaRuns.length > 0
                   ? (() => {
-                      // Render strategy: by default surface only the last assistant turn (the report)
-                      // and a small toggle. When expanded, show all assistant turns plus user prompts
-                      // stripped to just the user's actual instruction (drops the chat-summary envelope).
-                      const lastAssistant = [...qaMessages].reverse().find(m => m.role === 'assistant');
-                      // Find the assistant message before the most recent — used for verdict-change indicator.
-                      const prevAssistant = (() => {
-                        const seen = [];
-                        for (let i = qaMessages.length - 1; i >= 0; i--) {
-                          if (qaMessages[i].role === 'assistant') {
-                            seen.push(qaMessages[i]);
-                            if (seen.length === 2) return qaMessages[i];
-                          }
-                        }
-                        return null;
-                      })();
-                      const stripUserTrigger = (text) => {
-                        const marker = '## User instruction';
-                        const idx = text.indexOf(marker);
-                        if (idx === -1) return text.length > 200 ? text.substring(0, 200) + '...' : text;
-                        return text.substring(idx + marker.length).trim();
-                      };
-
                       // Use the top-level parseQaVerdict so the QA panel and ChatTurn stay in sync.
                       const parseVerdict = parseQaVerdict;
+                      const selectedIndex = orderedQaRuns.findIndex(run => run.id === selectedQaRun?.id);
+                      const previousQaRun = selectedIndex > 0 ? orderedQaRuns[selectedIndex - 1] : null;
 
-                      // Find any screenshot paths the QA agent referenced in its report.
-                      const SCREENSHOT_PATH_RE = /(?:[A-Za-z]:[\\\/]|\/)[^\s"'`<>()]*agent-forge-qa[^\s"'`<>()]*\.png/g;
-                      const screenshotPaths = lastAssistant
-                        ? [...new Set(lastAssistant.content.match(SCREENSHOT_PATH_RE) || [])]
-                        : [];
+                      // Screenshot evidence comes from the validated envelope,
+                      // never by scraping arbitrary prose for path-like text.
+                      const screenshotPaths = [...new Set((selectedQaRun?.evidence || [])
+                        .filter(item => item.kind === 'screenshot' && item.ref)
+                        .map(item => item.ref))];
 
-                      const visibleMessages = qaShowActivity
-                        ? qaMessages.filter(m => m.role === 'user' || m.role === 'assistant')
-                        : (lastAssistant ? [lastAssistant] : []);
-
-                      // When NOT in activity view, render the latest report with the verdict pulled out
-                      // and styled, and screenshots inlined. Activity view shows everything as raw turns.
+                      // Render a persisted structured run. The hidden agent transcript
+                      // never reaches this presentation layer.
                       const renderReport = () => {
-                        if (!lastAssistant) return null;
-                        const { verdict, body } = parseVerdict(lastAssistant.content);
-                        const prevVerdict = prevAssistant ? parseVerdict(prevAssistant.content).verdict : null;
+                        if (!selectedQaRun) return null;
+                        const reportText = selectedQaRun.report || (selectedQaRun.status === 'queued'
+                          ? 'Run queued…'
+                          : selectedQaRun.status === 'running'
+                            ? 'Structured QA run is executing…'
+                            : 'No report was persisted.');
+                        const { verdict, body } = parseVerdict(reportText);
+                        const prevVerdict = previousQaRun?.report ? parseVerdict(previousQaRun.report).verdict : null;
                         // Strip any [Using tool: ...] annotations from the body so they don't render literally.
                         const cleanBody = filterToolMessages(body, false);
                         const isIdle = qaStatus === 'idle';
                         // Verdict-change indicator
                         let verdictChangeNote = null;
                         if (verdict && prevVerdict) {
-                          if (verdict.kind === prevVerdict.kind) {
+                          if (verdict.kind === 'inconclusive' || prevVerdict.kind === 'inconclusive') {
+                            verdictChangeNote = e('span', { className: 'qa-verdict-change qa-verdict-change-inconclusive' },
+                              '— not comparable with the previous run'
+                            );
+                          } else if (verdict.kind === prevVerdict.kind) {
                             verdictChangeNote = e('span', { className: 'qa-verdict-change qa-verdict-change-same' },
                               '↔ same as last run'
                             );
                           } else {
-                            const direction = (prevVerdict.kind === 'fail' || (prevVerdict.kind === 'warn' && verdict.kind === 'pass')) ? 'better' : 'worse';
+                            const verdictRank = { fail: 1, warn: 2, pass: 3 };
+                            const direction = verdictRank[verdict.kind] > verdictRank[prevVerdict.kind] ? 'better' : 'worse';
                             verdictChangeNote = e('span', { className: 'qa-verdict-change qa-verdict-change-' + direction },
                               (direction === 'better' ? '↗ improved: ' : '↘ regressed: ') + prevVerdict.kind.toUpperCase() + ' → ' + verdict.kind.toUpperCase()
                             );
@@ -2580,6 +2646,11 @@
                         }
                         return e('div', { className: 'chat-turn chat-turn-assistant' },
                           e('div', { className: 'chat-turn-role' }, 'QA Tester'),
+                          selectedQaRun && e('div', { className: 'qa-run-request' },
+                            e('span', null, 'Request'),
+                            selectedQaRun.prompt,
+                            selectedQaRun.rerunOf && e('small', null, 'Linked rerun of ' + selectedQaRun.rerunOf)
+                          ),
                           renderQaVerdictRow(verdict),
                           verdictChangeNote,
                           e(MarkdownContent, { content: cleanBody }),
@@ -2594,6 +2665,47 @@
                               e('div', { className: 'qa-inline-shot-caption' }, p)
                             ))
                           ),
+                          selectedQaRun?.assertions && selectedQaRun.assertions.length > 0 && e('div', { className: 'qa-structured-section' },
+                            e('div', { className: 'qa-structured-heading' }, 'Assertions (' + selectedQaRun.assertions.length + ')'),
+                            selectedQaRun.assertions.map(assertion => e('div', { key: assertion.id, className: 'qa-assertion qa-assertion-' + assertion.status },
+                              e('span', { className: 'qa-assertion-status' }, assertion.status === 'passed' ? '✓' : assertion.status === 'failed' ? '✕' : assertion.status === 'warning' ? '!' : '—'),
+                              e('div', null,
+                                e('strong', null, assertion.name),
+                                assertion.observed && e('div', { className: 'qa-assertion-observed' }, assertion.observed),
+                                e('small', null, (assertion.evidenceIds || []).length + ' evidence item' + ((assertion.evidenceIds || []).length === 1 ? '' : 's'))
+                              )
+                            ))
+                          ),
+                          selectedQaRun?.findings && selectedQaRun.findings.length > 0 && e('div', { className: 'qa-structured-section' },
+                            e('div', { className: 'qa-structured-heading' }, 'Findings (' + selectedQaRun.findings.length + ')'),
+                            selectedQaRun.findings.map(finding => e('div', { key: finding.id, className: 'qa-finding qa-finding-' + finding.severity },
+                              e('span', { className: 'qa-finding-severity' }, finding.severity),
+                              e('div', null, e('strong', null, finding.title), e('div', null, finding.details))
+                            ))
+                          ),
+                          selectedQaRun?.validationErrors && selectedQaRun.validationErrors.length > 0 && e('div', { className: 'qa-validation-box' },
+                            e('strong', null, 'Why this result is not authoritative'),
+                            e('ul', null, selectedQaRun.validationErrors.map((message, index) => e('li', { key: index }, message)))
+                          ),
+                          isIdle && selectedQaRun?.report && e('div', { className: 'qa-run-actions' },
+                            e('button', {
+                              className: 'qa-continue-btn',
+                              disabled: !!activeQaRun,
+                              onClick: () => sendQaMessage(selectedQaRun.prompt, selectedQaRun.id),
+                              title: 'Run the same request as a linked structured rerun',
+                            }, '↻ Run again'),
+                            e('button', {
+                              className: 'qa-continue-btn qa-handoff-btn',
+                              disabled: !!selectedQaRun.handedOffAt || !!selectedQaRun.handoffStartedAt,
+                              onClick: () => workspace && onQaHandoff && onQaHandoff(workspace.id, selectedQaRun.id),
+                              title: selectedQaRun.handedOffAt
+                                ? 'Already sent to the coding agent'
+                                : selectedQaRun.handoffStartedAt
+                                  ? 'The coding agent is receiving this QA evidence'
+                                  : 'Send this validated run as explicitly delimited, untrusted QA evidence',
+                            }, selectedQaRun.handedOffAt ? '✓ Sent to coding agent' : selectedQaRun.handoffStartedAt ? 'Sending…' : 'Send to coding agent')
+                          ),
+                          selectedQaRun?.handoffError && e('div', { className: 'qa-validation-box' }, selectedQaRun.handoffError),
                           // Continue-testing nudge — only after a completed test
                           isIdle && e('div', { className: 'qa-continue-row' },
                             e('button', {
@@ -2615,23 +2727,26 @@
                           e('button', {
                             className: 'qa-activity-toggle-btn',
                             onClick: () => setQaShowActivity(v => !v),
-                            title: qaShowActivity ? 'Hide intermediate steps; show only the report' : 'Show all messages from the QA agent',
-                          }, qaShowActivity ? '▴ Hide activity' : '▾ Show activity'),
+                            title: qaShowActivity ? 'Show only the latest structured run' : 'Show structured run history for this coding agent',
+                          }, qaShowActivity ? '▴ Hide history' : '▾ Show run history'),
                           e('span', { className: 'qa-activity-meta' },
-                            qaMessages.filter(m => m.role === 'assistant').length + ' message' + (qaMessages.filter(m => m.role === 'assistant').length === 1 ? '' : 's')
+                            orderedQaRuns.length + ' run' + (orderedQaRuns.length === 1 ? '' : 's')
                           )
                         ),
                         qaShowActivity
-                          ? visibleMessages.map((m, i) => e(ChatTurn, {
-                              key: m.id || i,
-                              role: m.role,
-                              content: m.role === 'user' ? stripUserTrigger(m.content) : m.content,
-                              imageData: m.imageData,
-                              imageMimeType: m.imageMimeType,
-                              showToolMessages: false,
-                            }))
+                          ? e('div', { className: 'qa-history-list' }, [...orderedQaRuns].reverse().map(run => e('button', {
+                              key: run.id,
+                              className: 'qa-history-item' + (run.id === selectedQaRun?.id ? ' selected' : ''),
+                              'data-verdict': run.verdict || run.status,
+                              onClick: () => { setSelectedQaRunId(run.id); setQaHistoryOpen(false); },
+                              title: 'Open this persisted QA run',
+                            },
+                              e('span', { className: 'qa-history-verdict' }, run.verdict || run.status),
+                              e('span', { className: 'qa-history-prompt' }, run.prompt),
+                              e('time', { className: 'qa-history-time', dateTime: new Date(run.createdAt).toISOString() }, new Date(run.createdAt).toLocaleString())
+                            )))
                           : renderReport(),
-                        qaStatus === 'working' && e('div', { className: 'qa-subpanel-working' }, 'QA agent is working...')
+                        qaStatus === 'running' && e('div', { className: 'qa-subpanel-working' }, 'Structured QA run is executing in an isolated browser session...')
                       );
                     })()
                   : e('div', { className: 'qa-subpanel-empty' },
@@ -2661,7 +2776,7 @@
                   }
                 },
                 placeholder: (workspace && workspace.testUrl)
-                  ? 'Message the QA agent...'
+                  ? 'Describe what you want QA to test...'
                   : 'Set a Test URL first',
                 rows: 1,
                 disabled: !(workspace && workspace.testUrl),
@@ -2669,8 +2784,8 @@
               e('button', {
                 className: 'qa-subpanel-send',
                 disabled: !qaInput.trim() || !(workspace && workspace.testUrl),
-                onClick: sendQaMessage,
-                title: 'Send message to QA agent',
+                onClick: () => sendQaMessage(),
+                title: 'Start a structured QA run',
               }, 'Send')
             )
           )
@@ -2795,7 +2910,7 @@
       );
     }
 
-    function WorkspacesSidebar({ workspaces, agents, activeWorkspaceId, onSelectWorkspace, onCreateWorkspace, onDeleteWorkspace, onRenameWorkspace, onReorderWorkspaces, onUpdateWorkspaceTesting, onProvisionAtlas, onStopAtlas, onRescanAtlas, onOpenAtlasViewer, qaLiveShots, onNewAgent, onEditAgent, onRemoveAgent, statusStartTimes }) {
+    function WorkspacesSidebar({ workspaces, agents, activeWorkspaceId, onSelectWorkspace, onCreateWorkspace, onDeleteWorkspace, onRenameWorkspace, onReorderWorkspaces, onUpdateWorkspaceTesting, onProvisionAtlas, onStopAtlas, onRescanAtlas, onResumeAtlas, onDiscardAtlasCandidate, onOpenAtlasViewer, qaLiveShots, onNewAgent, onEditAgent, onRemoveAgent, statusStartTimes }) {
       const [showNewModal, setShowNewModal] = useState(false);
       const [renamingId, setRenamingId] = useState(null);
       const [renameValue, setRenameValue] = useState('');
@@ -2901,11 +3016,14 @@
                   ),
                   isActive && (() => {
                     const atlasAgent = ws.atlasAgentId ? agents.find(a => a.id === ws.atlasAgentId) : null;
-                    const atlasIsRunning = atlasAgent && (atlasAgent.status === 'working' || atlasAgent.status === 'thinking');
-                    const allShots = atlasIsRunning ? (qaLiveShots && qaLiveShots[ws.id]) || [] : [];
-                    // Filter shots since the agent's most recent run start (current 'working' streak)
-                    const runStartedAt = atlasIsRunning ? statusStartTimes[atlasAgent.id] : 0;
-                    const runShots = allShots.filter(s => !runStartedAt || s.timestamp >= runStartedAt);
+                    const atlasRun = ws.atlasRun;
+                    const atlasRunActive = atlasRun && (atlasRun.status === 'running' || atlasRun.status === 'validating');
+                    const allShots = atlasRunActive ? (qaLiveShots && qaLiveShots[ws.id]) || [] : [];
+                    const runStartedAt = atlasRunActive ? atlasRun.startedAt : 0;
+                    const runShots = allShots.filter(s =>
+                      (!runStartedAt || s.timestamp >= runStartedAt)
+                      && (!s.browserSessionId || s.browserSessionId === atlasRun.browserSessionId)
+                    );
                     const elapsedMs = runStartedAt ? Date.now() - runStartedAt : 0;
                     const fmtElapsed = (ms) => {
                       if (ms < 60000) return Math.round(ms / 1000) + 's';
@@ -2913,23 +3031,50 @@
                       const s = Math.round((ms % 60000) / 1000);
                       return m + 'm' + (s ? ' ' + s + 's' : '');
                     };
-                    if (atlasIsRunning) {
-                      // State C — running
+                    if (atlasRunActive) {
                       return e('div', { className: 'workspace-atlas workspace-atlas-running', onClick: (ev) => ev.stopPropagation() },
                         e('div', { className: 'workspace-atlas-status' },
                           e('span', { className: 'workspace-atlas-pulse' }),
-                          e('span', { className: 'workspace-atlas-label' }, '🗺️ Atlas: ' + runShots.length + ' shots · ' + fmtElapsed(elapsedMs)),
-                          e('button', {
+                          e('span', { className: 'workspace-atlas-label', title: atlasRun.phase || '' },
+                            '🗺️ ' + (atlasRun.status === 'validating' ? 'Validating' : 'Scanning') + ': ' + runShots.length + ' shots · ' + fmtElapsed(elapsedMs)
+                          ),
+                          atlasAgent && (atlasAgent.status === 'working' || atlasAgent.status === 'thinking') && e('button', {
                             className: 'workspace-atlas-stop',
-                            onClick: (ev) => { ev.stopPropagation(); if (confirm('Abort the in-flight Atlas scan? Partial output will remain.')) onStopAtlas(atlasAgent.id); },
+                            onClick: (ev) => { ev.stopPropagation(); if (confirm('Pause this Atlas scan? The published Atlas stays available and the candidate can be resumed.')) onStopAtlas(atlasAgent.id); },
                             title: 'Stop current Atlas scan',
-                          }, 'Stop scan')
+                          }, 'Pause')
                         )
                       );
                     }
-                    // State B vs A: idle with prior atlas vs no atlas yet
-                    if (ws.atlasLastScanAt && atlasAgent) {
-                      // State B — atlas exists, idle. Show freshness + Re-scan + View.
+                    if (atlasRun && (atlasRun.status === 'paused' || atlasRun.status === 'failed')) {
+                      return e('div', { className: 'workspace-atlas workspace-atlas-partial', onClick: (ev) => ev.stopPropagation() },
+                        e('div', { className: 'workspace-atlas-status' },
+                          e('span', { className: 'workspace-atlas-label', title: atlasRun.error || '' },
+                            '🗺️ Candidate ' + (atlasRun.status === 'paused' ? 'paused' : 'needs attention')
+                          )
+                        ),
+                        e('div', { className: 'workspace-atlas-actions' },
+                          e('button', {
+                            className: 'workspace-atlas-action-btn',
+                            onClick: (ev) => { ev.stopPropagation(); onResumeAtlas(ws.id); },
+                            title: 'Continue from the saved candidate checkpoint',
+                          }, 'Resume'),
+                          ws.atlasLastScanAt && e('button', {
+                            className: 'workspace-atlas-action-btn',
+                            onClick: (ev) => { ev.stopPropagation(); if (onOpenAtlasViewer) onOpenAtlasViewer(ws.id); },
+                          }, 'View current'),
+                          e('button', {
+                            className: 'workspace-atlas-action-btn workspace-atlas-discard',
+                            onClick: (ev) => {
+                              ev.stopPropagation();
+                              if (confirm('Discard only the partial Atlas candidate? The published Atlas will not be changed.')) onDiscardAtlasCandidate(ws.id);
+                            },
+                            title: 'Delete the partial candidate and keep the published Atlas',
+                          }, 'Discard')
+                        )
+                      );
+                    }
+                    if (ws.atlasLastScanAt) {
                       const ageMs = Date.now() - ws.atlasLastScanAt;
                       const ageBucket = ageMs < 24 * 60 * 60 * 1000 ? 'fresh'
                         : ageMs < 7 * 24 * 60 * 60 * 1000 ? 'aging'
@@ -2952,8 +3097,8 @@
                           e('button', {
                             className: 'workspace-atlas-action-btn',
                             disabled: !ws.testUrl,
-                            onClick: (ev) => { ev.stopPropagation(); if (confirm('Re-scan the UI Atlas? The current atlas + screenshots will be archived to docs/ui-atlas/.history/<date>/, then a fresh scan will start.')) onRescanAtlas(ws.id); },
-                            title: !ws.testUrl ? 'Set a Test URL first' : 'Archive current atlas and run a fresh scan',
+                            onClick: (ev) => { ev.stopPropagation(); if (confirm('Start an Atlas update? The current published Atlas stays available until a validated replacement is ready.')) onRescanAtlas(ws.id); },
+                            title: !ws.testUrl ? 'Set a Test URL first' : 'Build and validate a replacement without removing the current Atlas',
                           }, 'Re-scan'),
                           e('button', {
                             className: 'workspace-atlas-action-btn',
@@ -2963,7 +3108,6 @@
                         )
                       );
                     }
-                    // State A — no atlas yet
                     return e('div', { className: 'workspace-atlas', onClick: (ev) => ev.stopPropagation() },
                       e('button', {
                         className: 'workspace-atlas-btn',
@@ -3071,7 +3215,7 @@
         headings: [],
       };
       if (!text) return out;
-      const fmMatch = text.match(/^---\n([\s\S]*?)\n---/);
+      const fmMatch = text.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n)?/);
       if (fmMatch) {
         const fm = fmMatch[1];
         const ts = fm.match(/^total_surfaces:\s*(\d+)/m); if (ts) out.totalSurfaces = parseInt(ts[1], 10);
@@ -3094,7 +3238,7 @@
       }
       // Skip headings inside frontmatter and code fences.
       const body = fmMatch ? text.slice(fmMatch[0].length) : text;
-      const lines = body.split('\n');
+      const lines = body.split(/\r?\n/);
       let inFence = false;
       const seen = new Map();
       for (const line of lines) {
@@ -3114,8 +3258,9 @@
       return out;
     }
 
-    function AtlasPanel({ activeWorkspace, agents, messages, statusStartTimes, qaLiveShots, onRescanAtlas, onProvisionAtlas }) {
+    function AtlasPanel({ activeWorkspace, agents, messages, qaLiveShots, onRescanAtlas, onResumeAtlas, onDiscardAtlasCandidate }) {
       const [content, setContent] = useState('');
+      const [graph, setGraph] = useState(null);
       const [loading, setLoading] = useState(false);
       const [error, setError] = useState(null);
       const [query, setQuery] = useState('');
@@ -3124,14 +3269,15 @@
 
       const wsId = activeWorkspace?.id;
       const wsHasAtlas = !!(activeWorkspace?.atlasLastScanAt && activeWorkspace?.atlasProjectCwd);
+      const atlasRun = activeWorkspace?.atlasRun;
       const atlasAgent = activeWorkspace?.atlasAgentId
         ? agents.find(a => a.id === activeWorkspace.atlasAgentId)
         : null;
-      const atlasIsRunning = atlasAgent && (atlasAgent.status === 'working' || atlasAgent.status === 'thinking');
+      const atlasRunActive = atlasRun && (atlasRun.status === 'running' || atlasRun.status === 'validating');
 
       // Fetch atlas.md whenever the workspace changes or a scan completes.
       useEffect(() => {
-        if (!wsId || !wsHasAtlas) { setContent(''); setError(null); return; }
+        if (!wsId || !wsHasAtlas) { setContent(''); setGraph(null); setError(null); return; }
         let cancelled = false;
         setLoading(true);
         setError(null);
@@ -3140,6 +3286,10 @@
           .then(text => { if (!cancelled) setContent(text); })
           .catch(e => { if (!cancelled) setError(e.message || String(e)); })
           .finally(() => { if (!cancelled) setLoading(false); });
+        fetch('/api/atlas/file?workspaceId=' + encodeURIComponent(wsId) + '&relPath=atlas.json')
+          .then(r => r.ok ? r.json() : null)
+          .then(value => { if (!cancelled) setGraph(value); })
+          .catch(() => { if (!cancelled) setGraph(null); });
         return () => { cancelled = true; };
       }, [wsId, activeWorkspace?.atlasLastScanAt]);
 
@@ -3154,14 +3304,17 @@
       }, [content, wsId]);
 
       const overview = useMemo(() => parseAtlasOverview(rewritten), [rewritten]);
+      // Frontmatter drives the coverage strip but is metadata, not reader
+      // content. Keep it out of the rendered document.
+      const displayAtlas = useMemo(() => rewritten.replace(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n)?/, ''), [rewritten]);
 
       // Inject HTML anchor tags before each ##/### heading so TOC links land
       // precisely. We do this on the markdown text (not the parsed HTML)
       // because marked passes inline HTML through unchanged.
       const anchored = useMemo(() => {
-        if (!rewritten) return rewritten;
+        if (!displayAtlas) return displayAtlas;
         const slugCount = new Map();
-        const lines = rewritten.split('\n');
+        const lines = displayAtlas.split('\n');
         let inFence = false;
         const out = [];
         for (const line of lines) {
@@ -3182,7 +3335,7 @@
           out.push(line);
         }
         return out.join('\n');
-      }, [rewritten]);
+      }, [displayAtlas]);
 
       const filtered = useMemo(() => {
         if (!query.trim()) return anchored;
@@ -3212,47 +3365,57 @@
         );
       }
 
-      if (atlasIsRunning) {
-        const liveCount = (qaLiveShots && qaLiveShots[wsId]) ? qaLiveShots[wsId].length : 0;
-        const runStartedAt = statusStartTimes[atlasAgent.id];
-        const elapsedMs = runStartedAt ? Date.now() - runStartedAt : 0;
-        // Show the agent's recent activity so the user can see what it's doing
-        // even though the agent is hidden from the grid/chip list.
-        const atlasMsgs = (messages && messages[atlasAgent.id]) || [];
-        const recentMsgs = atlasMsgs.slice(-8); // last few turns
-        return e('div', { className: 'atlas-panel' },
-          e('div', { className: 'atlas-header' },
-            e('div', { className: 'atlas-title' }, '🗺️ UI Atlas'),
-            e('div', { className: 'atlas-status atlas-status-running' },
-              'Scanning... ' + liveCount + ' shots · ' + Math.floor(elapsedMs / 60000) + 'm elapsed'
-            )
-          ),
-          e('div', { className: 'atlas-running-body' },
-            e('div', { className: 'atlas-running-explainer' },
-              'The agent is working through its passes (project structure → code reading → browser walkthrough → state construction → reconciliation → self-verification → write atlas). The first ~10 minutes are typically code reading with no browser activity. Screenshots accumulate during the walkthrough phase.'
-            ),
-            recentMsgs.length > 0 && e('div', { className: 'atlas-activity-feed' },
-              e('div', { className: 'atlas-activity-heading' }, 'Recent activity'),
-              recentMsgs.map((m, i) => {
-                // Strip [Using tool: Bash] noise + truncate.
-                const text = (m.content || '').replace(/\n?\[Using tool: [^\]]+\]\n?/g, '').trim();
-                const preview = text.length > 280 ? text.slice(0, 280) + '...' : text;
-                return e('div', { key: m.id || i, className: 'atlas-activity-msg atlas-activity-' + m.role },
-                  e('div', { className: 'atlas-activity-role' }, m.role === 'user' ? '→ Trigger' : 'Atlas'),
-                  e('div', { className: 'atlas-activity-text' }, preview || '(no text content)')
-                );
-              })
-            )
+      const runShots = atlasRun
+        ? ((qaLiveShots && qaLiveShots[wsId]) || []).filter(shot =>
+            (!shot.browserSessionId || shot.browserSessionId === atlasRun.browserSessionId)
+            && shot.timestamp >= atlasRun.startedAt
           )
-        );
-      }
+        : [];
+      const runElapsedMs = atlasRunActive ? Date.now() - atlasRun.startedAt : 0;
+      const atlasMsgs = atlasAgent ? ((messages && messages[atlasAgent.id]) || []) : [];
+      const recentMsgs = atlasMsgs.slice(-4);
+      const showRunBanner = atlasRun && ['running', 'validating', 'paused', 'failed'].includes(atlasRun.status);
+      const runBanner = showRunBanner && e('div', { className: 'atlas-run-banner atlas-run-banner-' + atlasRun.status },
+        e('div', { className: 'atlas-run-banner-head' },
+          e('strong', null,
+            atlasRun.status === 'running' ? 'Candidate scan in progress'
+              : atlasRun.status === 'validating' ? 'Validating candidate'
+                : atlasRun.status === 'paused' ? 'Candidate paused' : 'Candidate needs attention'
+          ),
+          atlasRunActive && e('span', null, runShots.length + ' shots · ' + Math.max(0, Math.floor(runElapsedMs / 60000)) + 'm'),
+          !atlasRunActive && e('div', { className: 'atlas-run-actions' },
+            e('button', { className: 'atlas-rescan-btn', onClick: () => onResumeAtlas(wsId) }, 'Resume'),
+            e('button', {
+              className: 'atlas-rescan-btn atlas-discard-btn',
+              onClick: () => { if (confirm('Discard only this partial candidate? The published Atlas stays unchanged.')) onDiscardAtlasCandidate(wsId); },
+            }, 'Discard candidate')
+          )
+        ),
+        e('div', { className: 'atlas-run-summary' },
+          atlasRunActive
+            ? ((atlasRun.phase || 'Scanning') + '. The last published Atlas remains available below until this candidate passes validation.')
+            : (atlasRun.error || 'The candidate was not published. Resume it or discard it; the last published Atlas is unchanged.')
+        ),
+        atlasRun.validationErrors && atlasRun.validationErrors.length > 0 && e('ul', { className: 'atlas-validation-errors' },
+          atlasRun.validationErrors.slice(0, 6).map((message, index) => e('li', { key: index }, message)),
+          atlasRun.validationErrors.length > 6 && e('li', null, '+' + (atlasRun.validationErrors.length - 6) + ' more validation issues')
+        ),
+        atlasRunActive && recentMsgs.length > 0 && e('div', { className: 'atlas-activity-feed atlas-activity-compact' },
+          recentMsgs.map((m, i) => {
+            const text = (m.content || '').replace(/\n?\[Using tool: [^\]]+\]\n?/g, '').trim();
+            const preview = text.length > 180 ? text.slice(0, 180) + '...' : text;
+            return e('div', { key: m.id || i, className: 'atlas-activity-msg atlas-activity-' + m.role }, preview || '(activity recorded)');
+          })
+        )
+      );
 
       if (!wsHasAtlas) {
         return e('div', { className: 'atlas-panel' },
           e('div', { className: 'atlas-header' },
             e('div', { className: 'atlas-title' }, '🗺️ UI Atlas'),
-            e('div', { className: 'atlas-status' }, 'Not built yet')
+            e('div', { className: 'atlas-status' }, atlasRunActive ? 'Building candidate' : 'Not built yet')
           ),
+          runBanner,
           e('div', { className: 'atlas-empty' },
             e('div', null, 'No UI Atlas exists for this workspace.'),
             e('div', { style: { marginTop: 8, fontSize: 11, color: 'var(--text-muted)' } },
@@ -3274,11 +3437,22 @@
       const qaTouchedCount = activeWorkspace.qaSurfaceVerifications
         ? Object.keys(activeWorkspace.qaSurfaceVerifications).length
         : 0;
+      const graphSurfaces = Array.isArray(graph?.surfaces) ? graph.surfaces : null;
+      const graphEntities = Array.isArray(graph?.entities) ? graph.entities : null;
+      const graphVerified = graphSurfaces ? graphSurfaces.filter(surface => surface.status === 'verified').length : null;
+      const graphPartial = graphSurfaces ? graphSurfaces.filter(surface => surface.status === 'partial' || surface.status === 'unverified').length : null;
+      const graphExcluded = graphSurfaces ? graphSurfaces.filter(surface => surface.status === 'excluded').length : null;
 
       const coverageBits = [];
-      if (overview.totalSurfaces != null) coverageBits.push(overview.totalSurfaces + ' surfaces');
-      if (overview.totalEntities != null) coverageBits.push(overview.totalEntities + ' entities');
-      if (totalCounted > 0) {
+      if (graphSurfaces) coverageBits.push(graphSurfaces.length + ' surfaces');
+      else if (overview.totalSurfaces != null) coverageBits.push(overview.totalSurfaces + ' surfaces');
+      if (graphEntities) coverageBits.push(graphEntities.length + ' entities');
+      else if (overview.totalEntities != null) coverageBits.push(overview.totalEntities + ' entities');
+      if (graphVerified != null) {
+        coverageBits.push(graphVerified + '/' + graphSurfaces.length + ' verified');
+        if (graphPartial > 0) coverageBits.push(graphPartial + ' gaps');
+        if (graphExcluded > 0) coverageBits.push(graphExcluded + ' excluded');
+      } else if (totalCounted > 0) {
         coverageBits.push(totalVerified + '/' + totalCounted + ' verified');
       }
       if (qaTouchedCount > 0) coverageBits.push(qaTouchedCount + ' QA-touched');
@@ -3293,12 +3467,13 @@
           e('div', { className: 'atlas-status atlas-status-' + ageBucket },
             'Last scan ' + fmtAgo(ageMs) + (ageBucket === 'stale' ? ' · stale' : '')
           ),
-          e('button', {
+          !showRunBanner && e('button', {
             className: 'atlas-rescan-btn',
-            onClick: () => { if (confirm('Re-scan the UI Atlas? Current atlas + screenshots are archived to docs/ui-atlas/.history/<date>/, then a fresh scan starts.')) onRescanAtlas(wsId); },
-            title: 'Archive current atlas and run a fresh scan',
-          }, 'Re-scan')
+            onClick: () => { if (confirm('Start an Atlas update? The current Atlas remains published until the candidate validates successfully.')) onRescanAtlas(wsId); },
+            title: 'Build a validated replacement while keeping the current Atlas available',
+          }, 'Update Atlas')
         ),
+        runBanner,
         coverageBits.length > 0 && e('div', { className: 'atlas-coverage-strip' },
           coverageBits.map((b, i) => e('span', { key: i, className: 'atlas-coverage-pill' }, b))
         ),
@@ -4272,6 +4447,8 @@
             onProvisionAtlas: (workspaceId, projectCwd) => ws.provisionAtlasAgent(workspaceId, projectCwd),
             onStopAtlas: (agentId) => ws.stopAgent(agentId),
             onRescanAtlas: (workspaceId) => ws.rescanAtlas(workspaceId),
+            onResumeAtlas: (workspaceId) => ws.resumeAtlas(workspaceId),
+            onDiscardAtlasCandidate: (workspaceId) => ws.discardAtlasCandidate(workspaceId),
             onOpenAtlasViewer: (workspaceId) => setSidebarTab('atlas'),
             qaLiveShots: ws.qaLiveShots,
             onNewAgent: () => { setEditingAgent(null); setShowModal(true); },
@@ -4283,10 +4460,10 @@
             activeWorkspace,
             agents,
             messages,
-            statusStartTimes,
             qaLiveShots: ws.qaLiveShots,
             onRescanAtlas: ws.rescanAtlas,
-            onProvisionAtlas: ws.provisionAtlasAgent,
+            onResumeAtlas: ws.resumeAtlas,
+            onDiscardAtlasCandidate: ws.discardAtlasCandidate,
           }),
           sidebarTab === 'commands' && e(CommandsPanel, { commands: SLASH_COMMANDS }),
           sidebarTab === 'emulators' && e(EmulatorsPanel, { settings, onUpdateSettings: ws.updateSettings }),
@@ -4335,13 +4512,12 @@
                   terminals,
                   terminalOutput,
                   workspace: activeWorkspace,
-                  qaAgent: activeWorkspace && activeWorkspace.qaAgentId ? agents.find(a => a.id === activeWorkspace.qaAgentId) : null,
-                  qaMessages: activeWorkspace && activeWorkspace.qaAgentId ? (messages[activeWorkspace.qaAgentId] || []) : [],
-                  qaTokenUsage: activeWorkspace && activeWorkspace.qaAgentId ? tokenUsage[activeWorkspace.qaAgentId] : null,
+                  qaRuns: activeWorkspace ? (activeWorkspace.qaRuns || []).filter(run => run.sourceAgentId === agent.id) : [],
                   qaLiveShots: activeWorkspace ? (ws.qaLiveShots[activeWorkspace.id] || []) : [],
                   qaHasUnread: !!ws.qaUnread[agent.id],
                   onQaSend: ws.sendQaMessage,
                   onQaAbort: ws.abortQaTest,
+                  onQaHandoff: ws.handoffQaRun,
                   onClearQaUnread: ws.clearQaUnread,
                   onSendMessage: (content) => ws.sendMessage(agent.id, content),
                   onSendImage: ws.sendImage,
@@ -4389,13 +4565,12 @@
                   terminals,
                   terminalOutput,
                   workspace: activeWorkspace,
-                  qaAgent: activeWorkspace && activeWorkspace.qaAgentId ? agents.find(a => a.id === activeWorkspace.qaAgentId) : null,
-                  qaMessages: activeWorkspace && activeWorkspace.qaAgentId ? (messages[activeWorkspace.qaAgentId] || []) : [],
-                  qaTokenUsage: activeWorkspace && activeWorkspace.qaAgentId ? tokenUsage[activeWorkspace.qaAgentId] : null,
+                  qaRuns: activeWorkspace ? (activeWorkspace.qaRuns || []).filter(run => run.sourceAgentId === agent.id) : [],
                   qaLiveShots: activeWorkspace ? (ws.qaLiveShots[activeWorkspace.id] || []) : [],
                   qaHasUnread: !!ws.qaUnread[agent.id],
                   onQaSend: ws.sendQaMessage,
                   onQaAbort: ws.abortQaTest,
+                  onQaHandoff: ws.handoffQaRun,
                   onClearQaUnread: ws.clearQaUnread,
                   onSendMessage: (content) => ws.sendMessage(agent.id, content),
                   onSendImage: ws.sendImage,

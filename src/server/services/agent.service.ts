@@ -2,7 +2,8 @@
 import { join } from 'path';
 import { tmpdir } from 'os';
 import type { AgentInfo, AgentProvider, AgentStatus, ChatMessage } from '../../shared/protocol';
-import { STATIC_AGENT_DEFINITIONS, stripModelTier } from '../agents/agent-kinds';
+import { stripModelTier } from '../agents/agent-kinds';
+import { resolveAgentModel, resolveAgentReasoningLevel } from '../agents/registry';
 import { generateId } from '../utils';
 import { persistenceService } from './persistence.service';
 import { documentService } from './document.service';
@@ -40,6 +41,13 @@ interface ManagedAgent {
   totalCostUsd: number;
   numTurns: number;
   lastModelRan?: string;
+}
+
+export interface CreateAgentOptions {
+  hideFromGrid?: boolean;
+  provider?: AgentProvider;
+  model?: string;
+  reasoningLevel?: string;
 }
 
 // HMR-safe state
@@ -353,7 +361,7 @@ export const agentService = {
 
   // --- Agent CRUD ---
 
-  async createAgent(name: string, cwd: string, referencePaths: string[] = [], systemPrompt: string = '', workspaceId?: string, opts: { hideFromGrid?: boolean } = {}): Promise<AgentInfo> {
+  async createAgent(name: string, cwd: string, referencePaths: string[] = [], systemPrompt: string = '', workspaceId?: string, opts: CreateAgentOptions = {}): Promise<AgentInfo> {
     if (!existsSync(cwd)) {
       throw new Error(`Working directory does not exist: ${cwd}`);
     }
@@ -384,6 +392,17 @@ export const agentService = {
       }
     }
 
+    const provider = opts.provider ?? 'codex';
+    const model = resolveAgentModel(provider, opts.model);
+    if (opts.model && model !== opts.model) {
+      throw new Error(`Unsupported ${provider} model requested for new agent: ${opts.model}`);
+    }
+    const reasoningLevel = resolveAgentReasoningLevel(provider, model, opts.reasoningLevel);
+    const normalizedRequestedReasoning = opts.reasoningLevel === 'extra_high' ? 'xhigh' : opts.reasoningLevel;
+    if (normalizedRequestedReasoning && reasoningLevel !== normalizedRequestedReasoning) {
+      throw new Error(`Unsupported ${provider} reasoning level requested for ${model || 'the selected model'}: ${opts.reasoningLevel}`);
+    }
+
     const id = generateId();
     const info: AgentInfo = {
       id,
@@ -394,9 +413,9 @@ export const agentService = {
       status: 'idle',
       createdAt: Date.now(),
       workspaceId: wsId,
-      provider: 'codex',
-      model: STATIC_AGENT_DEFINITIONS.codex.defaultModel,
-      reasoningLevel: STATIC_AGENT_DEFINITIONS.codex.defaultReasoningLevel,
+      provider,
+      model,
+      reasoningLevel,
     };
     if (opts.hideFromGrid) info.hideFromGrid = true;
 
