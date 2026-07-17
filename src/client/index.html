@@ -553,12 +553,13 @@
     .atlas-body { flex: 1; overflow-y: auto; padding: 12px; font-size: 13px; line-height: 1.55; scroll-behavior: smooth; }
     .atlas-body img { max-width: 100%; height: auto; border: 1px solid var(--qa-accent-strong); border-radius: 4px; margin: 4px 0; cursor: zoom-in; }
     .atlas-body img:hover { border-color: var(--qa-accent); }
+    .atlas-body img:focus-visible { outline: 2px solid var(--qa-accent); outline-offset: 3px; }
     .atlas-anchor { display: block; position: relative; top: -8px; visibility: hidden; height: 0; }
     .atlas-coverage-strip { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px 12px; border-bottom: 1px solid var(--border); flex-shrink: 0; background: var(--bg-secondary); }
     .atlas-coverage-pill { font-size: 10.5px; padding: 2px 8px; border-radius: 10px; background: var(--bg-tertiary); border: 1px solid var(--border); color: var(--text-secondary); white-space: nowrap; }
     .atlas-toc { border-bottom: 1px solid var(--border); flex-shrink: 0; max-height: 220px; display: flex; flex-direction: column; }
     .atlas-toc.collapsed { max-height: none; }
-    .atlas-toc-header { display: flex; align-items: center; gap: 6px; padding: 6px 12px; font-size: 10.5px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; cursor: pointer; user-select: none; }
+    .atlas-toc-header { display: flex; align-items: center; gap: 6px; width: 100%; padding: 6px 12px; border: 0; background: var(--bg-secondary); text-align: left; font-size: 10.5px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; cursor: pointer; user-select: none; }
     .atlas-toc-header:hover { color: var(--text-secondary); }
     .atlas-toc-chevron { font-size: 10px; }
     .atlas-toc-list { display: flex; flex-direction: column; padding: 0 8px 6px; overflow-y: auto; }
@@ -587,6 +588,132 @@
     .atlas-activity-assistant { background: rgba(86, 211, 100, 0.04); border-left: 2px solid var(--qa-accent); }
     .atlas-activity-role { font-size: 10px; font-weight: 600; color: var(--text-muted); margin-bottom: 2px; }
     .atlas-activity-text { color: var(--text-secondary); white-space: pre-wrap; word-wrap: break-word; }
+    .atlas-header-top { display: flex; align-items: flex-start; gap: 8px; flex-wrap: wrap; }
+    .atlas-header-main { display: flex; flex-direction: column; gap: 5px; min-width: 0; flex: 1; }
+    .atlas-header-actions { display: flex; gap: 5px; flex-wrap: wrap; }
+    .atlas-view-tabs { display: flex; gap: 3px; padding: 7px 8px; overflow-x: auto; border-bottom: 1px solid var(--border); background: var(--bg-secondary); flex-shrink: 0; scrollbar-width: thin; }
+    .atlas-view-tab { border: 1px solid transparent; background: transparent; color: var(--text-muted); padding: 4px 8px; border-radius: 4px; font-size: 10.5px; cursor: pointer; white-space: nowrap; }
+    .atlas-view-tab:hover { color: var(--text-primary); background: var(--bg-tertiary); }
+    .atlas-view-tab.active { color: var(--qa-accent); border-color: var(--qa-accent-strong); background: rgba(86, 211, 100, 0.1); }
+    .atlas-filter-strip { display: flex; align-items: center; gap: 4px; padding: 6px 10px; border-bottom: 1px solid var(--border); overflow-x: auto; flex-shrink: 0; }
+    .atlas-filter-label { color: var(--text-muted); font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.5px; margin-right: 2px; }
+    .atlas-filter-chip { border: 1px solid var(--border); background: var(--bg-tertiary); color: var(--text-muted); border-radius: 12px; padding: 2px 7px; font-size: 9.5px; cursor: pointer; white-space: nowrap; }
+    .atlas-filter-chip:hover { color: var(--text-primary); border-color: var(--text-muted); }
+    .atlas-filter-chip.active { color: var(--qa-accent); border-color: var(--qa-accent-strong); background: rgba(86, 211, 100, 0.1); }
+    .atlas-view-body { flex: 1; overflow-y: auto; min-height: 0; padding: 10px; }
+    .atlas-dashboard { display: flex; flex-direction: column; gap: 10px; }
+    .atlas-metric-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(105px, 1fr)); gap: 6px; }
+    .atlas-metric { border: 1px solid var(--border); border-radius: 6px; padding: 9px; background: var(--bg-secondary); min-width: 0; text-align: left; font: inherit; }
+    button.atlas-metric { cursor: pointer; transition: border-color 0.15s, background 0.15s, transform 0.15s; }
+    button.atlas-metric:hover { border-color: var(--qa-accent-strong); background: rgba(86, 211, 100, 0.05); transform: translateY(-1px); }
+    .atlas-metric-value { color: var(--text-primary); font-size: 18px; font-weight: 700; line-height: 1.1; }
+    .atlas-metric-label { color: var(--text-muted); font-size: 9.5px; margin-top: 4px; text-transform: uppercase; letter-spacing: 0.45px; }
+    .atlas-section { border: 1px solid var(--border); border-radius: 6px; background: var(--bg-secondary); overflow: hidden; }
+    .atlas-section-head { display: flex; align-items: center; gap: 7px; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+    .atlas-section-title { color: var(--text-primary); font-weight: 600; font-size: 11px; flex: 1; }
+    .atlas-section-meta { color: var(--text-muted); font-size: 9.5px; }
+    .atlas-section-content { padding: 9px 10px; color: var(--text-secondary); font-size: 11px; line-height: 1.5; }
+    .atlas-progress { height: 7px; overflow: hidden; border-radius: 6px; background: var(--bg-tertiary); margin-top: 7px; }
+    .atlas-progress-fill { height: 100%; background: var(--qa-accent); border-radius: inherit; }
+    .atlas-card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(235px, 1fr)); gap: 8px; }
+    .atlas-card { border: 1px solid var(--border); border-radius: 6px; background: var(--bg-secondary); padding: 9px; min-width: 0; scroll-margin-top: 8px; }
+    .atlas-card.selected { border-color: var(--qa-accent); box-shadow: 0 0 0 1px var(--qa-accent-strong); }
+    .atlas-card-head { display: flex; align-items: flex-start; gap: 7px; margin-bottom: 5px; }
+    .atlas-card-title { color: var(--text-primary); font-size: 11.5px; font-weight: 600; flex: 1; line-height: 1.35; }
+    .atlas-card-status { font-size: 9px; padding: 2px 6px; border-radius: 8px; text-transform: uppercase; letter-spacing: 0.35px; border: 1px solid var(--border); color: var(--text-muted); }
+    .atlas-card-status.verified { color: var(--qa-accent); border-color: var(--qa-accent-strong); }
+    .atlas-card-status.gap { color: var(--warning); border-color: rgba(210, 153, 34, 0.4); }
+    .atlas-id-row { display: flex; align-items: center; gap: 3px; margin-bottom: 7px; min-width: 0; }
+    .atlas-id-link { border: 0; background: none; padding: 0; color: var(--accent); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 9.5px; cursor: pointer; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+    .atlas-id-link:hover { text-decoration: underline; }
+    .atlas-icon-btn { border: 1px solid transparent; background: none; color: var(--text-muted); border-radius: 3px; padding: 1px 4px; font-size: 9px; cursor: pointer; flex-shrink: 0; }
+    .atlas-icon-btn:hover { color: var(--text-primary); border-color: var(--border); background: var(--bg-tertiary); }
+    .atlas-card-block { margin-top: 7px; }
+    .atlas-card-label { color: var(--text-muted); font-size: 8.5px; text-transform: uppercase; letter-spacing: 0.45px; margin-bottom: 3px; }
+    .atlas-card-list { margin: 0; padding-left: 16px; color: var(--text-secondary); font-size: 10px; line-height: 1.45; }
+    .atlas-card-list li + li { margin-top: 2px; }
+    .atlas-chip-row { display: flex; flex-wrap: wrap; gap: 3px; }
+    .atlas-link-chip { border: 1px solid var(--border); background: var(--bg-tertiary); color: var(--text-secondary); border-radius: 10px; padding: 2px 6px; font-size: 8.5px; cursor: pointer; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .atlas-link-chip:hover { color: var(--accent); border-color: var(--accent); }
+    .atlas-trait-chip { border: 1px solid var(--border); color: var(--text-muted); border-radius: 8px; padding: 1px 5px; font-size: 8px; }
+    .atlas-code-ref { display: block; color: var(--text-muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 8.5px; overflow-wrap: anywhere; }
+    .atlas-thumb-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(92px, 1fr)); gap: 5px; margin-top: 7px; }
+    .atlas-thumb { width: 100%; aspect-ratio: 16 / 10; object-fit: cover; object-position: top; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-primary); cursor: zoom-in; }
+    .atlas-thumb:hover { border-color: var(--qa-accent); }
+    .atlas-gallery-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(165px, 1fr)); gap: 8px; }
+    .atlas-gallery-item { margin: 0; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-secondary); overflow: hidden; }
+    .atlas-gallery-item img { display: block; width: 100%; aspect-ratio: 16 / 10; object-fit: cover; object-position: top; cursor: zoom-in; background: var(--bg-primary); }
+    .atlas-gallery-caption { padding: 7px; display: flex; flex-direction: column; gap: 3px; }
+    .atlas-gallery-name { color: var(--text-primary); font-size: 10.5px; font-weight: 600; }
+    .atlas-empty-view { color: var(--text-muted); text-align: center; padding: 28px 12px; font-size: 11px; }
+    .atlas-findings-stack { display: flex; flex-direction: column; gap: 9px; }
+    .atlas-findings-stack .chat-turn-content { font-size: 11px; line-height: 1.55; }
+    .atlas-ask { display: flex; flex-direction: column; gap: 12px; }
+    .atlas-ask-toolbar { display: flex; align-items: flex-start; gap: 10px; }
+    .atlas-ask-heading { flex: 1; min-width: 0; }
+    .atlas-ask-title { color: var(--text-primary); font-size: 14px; font-weight: 650; }
+    .atlas-ask-subtitle { margin-top: 3px; color: var(--text-muted); font-size: 10px; line-height: 1.45; }
+    .atlas-ask-trust-row { display: flex; flex-wrap: wrap; gap: 4px; }
+    .atlas-ask-trust { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--qa-accent-strong); background: rgba(86, 211, 100, 0.06); color: var(--text-secondary); border-radius: 12px; padding: 3px 7px; font-size: 9px; }
+    .atlas-ask-trust::before { content: ''; width: 5px; height: 5px; border-radius: 50%; background: var(--qa-accent); }
+    .atlas-ask-composer { border: 1px solid var(--border); border-radius: 7px; background: var(--bg-secondary); padding: 10px; }
+    .atlas-ask-intro { color: var(--text-secondary); font-size: 10.5px; line-height: 1.5; margin-bottom: 8px; }
+    .atlas-ask-form { display: flex; flex-direction: column; gap: 7px; }
+    .atlas-ask-input { width: 100%; min-height: 82px; resize: vertical; background: var(--bg-primary); border: 1px solid var(--border); border-radius: 5px; color: var(--text-primary); padding: 9px; font: inherit; font-size: 11px; line-height: 1.5; outline: none; box-sizing: border-box; }
+    .atlas-ask-input:focus { border-color: var(--qa-accent); }
+    .atlas-ask-actions { display: flex; align-items: center; gap: 6px; }
+    .atlas-ask-submit { border: 1px solid var(--qa-accent-strong); background: rgba(86, 211, 100, 0.12); color: var(--qa-accent); border-radius: 4px; padding: 5px 10px; font-size: 10.5px; cursor: pointer; }
+    .atlas-ask-submit:disabled { opacity: 0.45; cursor: not-allowed; }
+    .atlas-ask-meta { color: var(--text-muted); font-size: 9px; margin-left: auto; }
+    .atlas-ask-suggestions { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+    .atlas-ask-suggestion { border: 1px solid var(--border); background: var(--bg-tertiary); color: var(--text-secondary); border-radius: 12px; padding: 3px 8px; font-size: 9px; cursor: pointer; }
+    .atlas-ask-suggestion:hover { color: var(--text-primary); border-color: var(--text-muted); }
+    .atlas-ask-progress { display: flex; align-items: flex-start; gap: 9px; border: 1px solid var(--qa-accent-strong); border-radius: 6px; background: rgba(86, 211, 100, 0.06); padding: 9px 10px; }
+    .atlas-ask-spinner { width: 14px; height: 14px; flex-shrink: 0; margin-top: 1px; border: 2px solid rgba(86, 211, 100, 0.22); border-top-color: var(--qa-accent); border-radius: 50%; animation: atlas-spin 0.8s linear infinite; }
+    @keyframes atlas-spin { to { transform: rotate(360deg); } }
+    .atlas-ask-progress-title { color: var(--text-primary); font-size: 10.5px; font-weight: 600; }
+    .atlas-ask-progress-detail { color: var(--text-muted); font-size: 9.5px; line-height: 1.45; margin-top: 2px; }
+    .atlas-ask-error { color: var(--error); font-size: 10px; border: 1px solid rgba(248, 81, 73, 0.35); background: rgba(248, 81, 73, 0.07); padding: 7px; border-radius: 4px; }
+    .atlas-ask-results-head { display: flex; align-items: center; gap: 8px; padding-top: 2px; }
+    .atlas-ask-results-title { color: var(--text-primary); font-size: 11px; font-weight: 600; }
+    .atlas-ask-results-count { color: var(--text-muted); font-size: 9px; }
+    .atlas-answer { border: 1px solid var(--border); border-radius: 7px; background: var(--bg-secondary); overflow: hidden; }
+    .atlas-answer-head { padding: 7px 9px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 7px; color: var(--text-muted); font-size: 9.5px; background: rgba(86, 211, 100, 0.035); }
+    .atlas-answer-status { display: inline-flex; align-items: center; gap: 5px; color: var(--qa-accent); font-weight: 600; }
+    .atlas-answer-status::before { content: '✓'; display: grid; place-items: center; width: 13px; height: 13px; border-radius: 50%; background: rgba(86, 211, 100, 0.14); font-size: 9px; }
+    .atlas-answer-model { margin-left: auto; white-space: nowrap; }
+    .atlas-answer-question { padding: 9px; border-bottom: 1px solid var(--border); color: var(--text-primary); font-size: 10.5px; line-height: 1.45; }
+    .atlas-answer-label { display: block; color: var(--text-muted); font-size: 8.5px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 3px; }
+    .atlas-answer-citations { padding: 8px 9px; border-bottom: 1px solid var(--border); display: flex; align-items: flex-start; flex-wrap: wrap; gap: 5px; }
+    .atlas-answer-citations .atlas-answer-label { width: 100%; margin: 0; }
+    .atlas-answer-body { padding: 10px 11px; overflow-wrap: anywhere; }
+    .atlas-answer-body .chat-turn-content { font-size: 11px; line-height: 1.65; }
+    .atlas-answer-body .chat-turn-content > :first-child { margin-top: 0; }
+    .atlas-answer-body .chat-turn-content > :last-child { margin-bottom: 0; }
+    .atlas-answer-body .chat-turn-content ol, .atlas-answer-body .chat-turn-content ul { padding-left: 20px; }
+    .atlas-lightbox { position: fixed; inset: 0; z-index: 10000; background: rgba(0, 0, 0, 0.9); display: flex; align-items: center; justify-content: center; padding: 20px; }
+    .atlas-lightbox-dialog { width: min(1400px, 96vw); height: min(920px, 94vh); display: grid; grid-template-rows: auto minmax(0, 1fr) auto; background: var(--bg-primary); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; box-shadow: 0 20px 80px rgba(0,0,0,0.6); }
+    .atlas-lightbox-head, .atlas-lightbox-foot { display: flex; align-items: center; gap: 8px; padding: 8px 10px; background: var(--bg-secondary); }
+    .atlas-lightbox-head { border-bottom: 1px solid var(--border); }
+    .atlas-lightbox-foot { border-top: 1px solid var(--border); }
+    .atlas-lightbox-title { color: var(--text-primary); font-size: 11px; font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .atlas-lightbox-stage { position: relative; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 12px 52px; overflow: auto; }
+    .atlas-lightbox-stage img { max-width: 100%; max-height: 100%; object-fit: contain; border: 1px solid var(--border); background: #05070a; }
+    .atlas-lightbox-nav { position: absolute; top: 50%; transform: translateY(-50%); width: 34px; height: 52px; border: 1px solid var(--border); border-radius: 5px; background: rgba(22, 27, 34, 0.86); color: var(--text-primary); cursor: pointer; font-size: 20px; }
+    .atlas-lightbox-nav.prev { left: 9px; }
+    .atlas-lightbox-nav.next { right: 9px; }
+    .atlas-lightbox-button { border: 1px solid var(--border); background: var(--bg-tertiary); color: var(--text-secondary); border-radius: 4px; padding: 4px 8px; font-size: 10px; cursor: pointer; }
+    .atlas-lightbox-button:hover { color: var(--text-primary); border-color: var(--text-muted); }
+    .atlas-lightbox-count { color: var(--text-muted); font-size: 9.5px; margin-left: auto; }
+    @media (max-width: 700px) {
+      .atlas-header-top { flex-direction: column; }
+      .atlas-card-grid { grid-template-columns: 1fr; }
+      .atlas-gallery-grid { grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); }
+      .atlas-lightbox { padding: 6px; }
+      .atlas-lightbox-dialog { width: 100%; height: 96vh; }
+      .atlas-lightbox-stage { padding: 8px 38px; }
+      .atlas-lightbox-head, .atlas-lightbox-foot { flex-wrap: wrap; }
+    }
 
     /* QA testing button in panel header */
     .qa-header-btn.active { background: rgba(86, 211, 100, 0.18); color: var(--qa-accent); }
@@ -889,6 +1016,19 @@
       return String(model || '').replace(/\[[^\]]*\]$/, '');
     }
 
+    const ACTIVE_WORKSPACE_STORAGE_KEY = 'agent-forge:active-workspace-id';
+    const ATLAS_RESCAN_CONFIRMATION = 'Re-scan the UI Atlas now?\n\nThis can use substantial model time and browser automation. The current published Atlas will stay available until a replacement passes validation.';
+
+    function readStoredActiveWorkspaceId() {
+      try { return localStorage.getItem(ACTIVE_WORKSPACE_STORAGE_KEY); }
+      catch { return null; }
+    }
+
+    function storeActiveWorkspaceId(id) {
+      try { localStorage.setItem(ACTIVE_WORKSPACE_STORAGE_KEY, id); }
+      catch {}
+    }
+
     // ======================== HOOKS ========================
 
     // Hook: elapsed time since a status started (Feature 5)
@@ -928,6 +1068,7 @@
       const [agentActivity, setAgentActivity] = useState({});
       const [settings, setSettings] = useState({});
       const [workspaces, setWorkspaces] = useState([]);
+      const [activeWorkspaceId, setActiveWorkspaceId] = useState(readStoredActiveWorkspaceId);
       const [providerCatalog, setProviderCatalog] = useState(AGENT_PROVIDERS);
       const [statusStartTimes, setStatusStartTimes] = useState({});
       const [tokenUsage, setTokenUsage] = useState({});
@@ -951,6 +1092,21 @@
       agentsRef.current = agents;
       workspacesRef.current = workspaces;
       queueRef.current = queued;
+
+      useEffect(() => {
+        if (workspaces.length === 0 || workspaces.some(workspace => workspace.id === activeWorkspaceId)) return;
+        const fallbackId = workspaces.some(workspace => workspace.id === settings.activeWorkspaceId)
+          ? settings.activeWorkspaceId
+          : workspaces[0].id;
+        setActiveWorkspaceId(fallbackId);
+        storeActiveWorkspaceId(fallbackId);
+      }, [activeWorkspaceId, settings.activeWorkspaceId, workspaces]);
+
+      const selectActiveWorkspace = useCallback((id) => {
+        if (!workspacesRef.current.some(workspace => workspace.id === id)) return;
+        setActiveWorkspaceId(id);
+        storeActiveWorkspaceId(id);
+      }, []);
 
       const isHiddenQaAgent = (agentId) => {
         const agent = agentsRef.current.find(item => item.id === agentId);
@@ -1239,7 +1395,7 @@
       }, [drainQueue, sendRaw]);
 
       return {
-        connected, agents, messages, liveOutput, queued, sharedContext, fileChanges, thinkingOutput, agentActivity, settings, workspaces, providerCatalog, statusStartTimes, tokenUsage, usageReport, limits, terminals, terminalOutput, errorToasts, qaUnread, qaLiveShots,
+        connected, agents, messages, liveOutput, queued, sharedContext, fileChanges, thinkingOutput, agentActivity, settings, workspaces, activeWorkspaceId, providerCatalog, statusStartTimes, tokenUsage, usageReport, limits, terminals, terminalOutput, errorToasts, qaUnread, qaLiveShots,
         refreshLimits: () => sendRaw({ type: 'refresh_limits' }),
         createAgent: (name, cwd, referencePaths, systemPrompt, workspaceId) => {
           sendRaw({ type: 'create_agent', name, cwd, referencePaths, systemPrompt, workspaceId });
@@ -1285,7 +1441,7 @@
         reorderWorkspaces: (orderedIds) => sendRaw({ type: 'reorder_workspaces', orderedIds }),
         updateWorkspace: (id, updates) => sendRaw({ type: 'update_workspace', id, ...updates }),
         deleteWorkspace: (id) => sendRaw({ type: 'delete_workspace', id }),
-        setActiveWorkspace: (id) => sendRaw({ type: 'set_active_workspace', id }),
+        setActiveWorkspace: selectActiveWorkspace,
         // Terminals
         createTerminal: (agentId, command) => sendRaw({ type: 'create_terminal', agentId, command }),
         killTerminal: (id) => sendRaw({ type: 'kill_terminal', id }),
@@ -1311,7 +1467,31 @@
     // Agent responses can contain arbitrary HTML/JS; DOMPurify strips it before
     // it reaches dangerouslySetInnerHTML. If DOMPurify failed to load, fall back
     // to escaped plain text rather than raw HTML so a CDN miss can't reopen XSS.
-    function renderMarkdown(content) {
+    function projectFilePathFromHref(href) {
+      let value = String(href || '');
+      try { value = decodeURIComponent(value); } catch {}
+      if (/^file:\/\/\//i.test(value)) {
+        try { value = new URL(value).pathname; } catch { return null; }
+      }
+      if (/^\/[a-zA-Z]:[\\/]/.test(value)) value = value.slice(1);
+      return /^[a-zA-Z]:[\\/]/.test(value) ? value : null;
+    }
+
+    function rewriteProjectFileLinks(html, agentId) {
+      if (!agentId || !html.includes('href=')) return html;
+      const documentFragment = new DOMParser().parseFromString(html, 'text/html');
+      documentFragment.querySelectorAll('a[href]').forEach(anchor => {
+        const projectPath = projectFilePathFromHref(anchor.getAttribute('href'));
+        if (!projectPath) return;
+        anchor.setAttribute('href', '/api/project-file?agentId=' + encodeURIComponent(agentId) + '&path=' + encodeURIComponent(projectPath));
+        anchor.setAttribute('target', '_blank');
+        anchor.setAttribute('rel', 'noopener noreferrer');
+        anchor.setAttribute('title', 'Open project file in a new tab');
+      });
+      return documentFragment.body.innerHTML;
+    }
+
+    function renderMarkdown(content, agentId) {
       const src = content || '';
       let html;
       try {
@@ -1321,7 +1501,7 @@
         return html;
       }
       if (window.DOMPurify && typeof window.DOMPurify.sanitize === 'function') {
-        return window.DOMPurify.sanitize(html);
+        return rewriteProjectFileLinks(window.DOMPurify.sanitize(html), agentId);
       }
       return src.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     }
@@ -1338,7 +1518,7 @@
     }
 
     // Markdown renderer for assistant messages (memoized)
-    const MarkdownContent = React.memo(function MarkdownContent({ content, searchQuery }) {
+    const MarkdownContent = React.memo(function MarkdownContent({ content, searchQuery, agentId }) {
       const ref = useRef(null);
       useEffect(() => {
         if (ref.current) {
@@ -1359,10 +1539,10 @@
         }
       }, [content, searchQuery]);
       const html = useMemo(() => {
-        let parsed = renderMarkdown(content);
+        let parsed = renderMarkdown(content, agentId);
         if (searchQuery) parsed = highlightInHtml(parsed, searchQuery);
         return parsed;
-      }, [content, searchQuery]);
+      }, [content, searchQuery, agentId]);
       return e('div', { ref, className: 'chat-turn-content', dangerouslySetInnerHTML: { __html: html } });
     });
 
@@ -1711,7 +1891,7 @@
       return { verdict: { kind, summary, raw: m[1].trim() }, body };
     }
 
-    const ChatTurn = React.memo(function ChatTurn({ role, content, isStreaming, imageData, imageMimeType, showToolMessages, searchQuery, showRetry, onRetry, source, provider, model }) {
+    const ChatTurn = React.memo(function ChatTurn({ role, content, isStreaming, imageData, imageMimeType, showToolMessages, searchQuery, showRetry, onRetry, source, provider, model, agentId }) {
       const [copied, setCopied] = useState(false);
       const isQa = source === 'qa';
       // Per-message provider stamp (newer messages); fall back to 'Claude' for
@@ -1749,7 +1929,7 @@
       const renderBody = () => {
         if (isQa || (role === 'assistant' && !isStreaming)) {
           return e(React.Fragment, null,
-            e(MarkdownContent, { content: displayContent, searchQuery }),
+            e(MarkdownContent, { content: displayContent, searchQuery, agentId }),
             hiddenCount > 0 && e('div', { className: 'tool-hidden-count' }, hiddenCount + ' tool call' + (hiddenCount > 1 ? 's' : '') + ' hidden')
           );
         }
@@ -2338,6 +2518,7 @@
                         source: m.source,
                         provider: m.provider,
                         model: m.model,
+                        agentId: agent.id,
                         showToolMessages,
                         searchQuery: searchVisible ? searchQuery : '',
                         showRetry: realIdx === lastUserMsgIndex && m.role === 'user' && !isWorking,
@@ -2351,7 +2532,7 @@
                   e('span', { className: 'agent-activity-dot' }),
                   activity.label || 'Working...'
                 ),
-                liveOutput && e(ChatTurn, { key: 'live', role: 'assistant', content: liveOutput, isStreaming: isWorking, showToolMessages, provider: agent.provider, model: agent.model }),
+                liveOutput && e(ChatTurn, { key: 'live', role: 'assistant', content: liveOutput, isStreaming: isWorking, showToolMessages, provider: agent.provider, model: agent.model, agentId: agent.id }),
                 queued.map((q, i) => e('div', { key: 'q' + i, className: 'chat-turn chat-turn-queued' },
                   e('div', { className: 'chat-turn-role' }, 'Queued'),
                   e('div', { className: 'chat-turn-content' }, q)
@@ -3097,7 +3278,7 @@
                           e('button', {
                             className: 'workspace-atlas-action-btn',
                             disabled: !ws.testUrl,
-                            onClick: (ev) => { ev.stopPropagation(); if (confirm('Start an Atlas update? The current published Atlas stays available until a validated replacement is ready.')) onRescanAtlas(ws.id); },
+                            onClick: (ev) => { ev.stopPropagation(); if (window.confirm(ATLAS_RESCAN_CONFIRMATION)) onRescanAtlas(ws.id); },
                             title: !ws.testUrl ? 'Set a Test URL first' : 'Build and validate a replacement without removing the current Atlas',
                           }, 'Re-scan'),
                           e('button', {
@@ -3258,13 +3439,101 @@
       return out;
     }
 
+    const ATLAS_VIEW_TABS = [
+      ['overview', 'Overview'],
+      ['surfaces', 'Surfaces'],
+      ['entities', 'Entities'],
+      ['flows', 'Flows'],
+      ['findings', 'Findings'],
+      ['gallery', 'Gallery'],
+      ['document', 'Document'],
+      ['ask', 'Ask Atlas'],
+    ];
+
+    const ATLAS_SURFACE_FILTERS = [
+      ['verified', 'Verified'],
+      ['gaps', 'Gaps'],
+      ['changed', 'Changed'],
+      ['destructive', 'Destructive'],
+      ['modal', 'Modal'],
+      ['mobile', 'Mobile'],
+      ['error', 'Error state'],
+    ];
+
+    function atlasFileUrl(workspaceId, relPath) {
+      return '/api/atlas/file?workspaceId=' + encodeURIComponent(workspaceId) + '&relPath=' + encodeURIComponent(relPath);
+    }
+
+    function atlasArray(value) {
+      return Array.isArray(value) ? value : [];
+    }
+
+    function atlasSearchText(item) {
+      if (!item || typeof item !== 'object') return '';
+      return Object.values(item).flatMap(value => Array.isArray(value) ? value : [value])
+        .filter(value => typeof value === 'string')
+        .join(' ')
+        .toLowerCase();
+    }
+
+    function atlasSurfaceTraits(surface, changelogText) {
+      const text = atlasSearchText(surface);
+      const changedHaystack = String(changelogText || '').toLowerCase();
+      return {
+        verified: surface?.status === 'verified',
+        gaps: surface?.status !== 'verified',
+        changed: changedHaystack.includes(String(surface?.id || '').toLowerCase())
+          || (!!surface?.name && changedHaystack.includes(String(surface.name).toLowerCase())),
+        destructive: /\b(delete|remove|erase|destroy|reset|clear all|cleanup|restore|replace workspace|publish|unpublish)\b/.test(text),
+        modal: /\b(modal|dialog|drawer|sheet|popover|picker)\b/.test(text),
+        mobile: /\b(mobile|narrow|phone|responsive|small viewport)\b/.test(text),
+        error: /\b(error|failure|failed|malformed|invalid|empty|offline|missing|unavailable)\b/.test(text),
+      };
+    }
+
+    function atlasMarkdownSection(markdown, labels) {
+      if (!markdown) return '';
+      const wanted = labels.map(label => label.toLowerCase());
+      const lines = markdown.split(/\r?\n/);
+      const out = [];
+      let capturing = false;
+      for (const line of lines) {
+        const heading = line.match(/^##\s+(?:\d+\.\s*)?(.+?)\s*$/);
+        if (heading) {
+          if (capturing) break;
+          const title = heading[1].replace(/`/g, '').toLowerCase();
+          capturing = wanted.some(label => title.includes(label));
+        }
+        if (capturing) out.push(line);
+      }
+      return out.join('\n').trim();
+    }
+
+    function atlasViewForId(id) {
+      if (String(id).startsWith('surface.')) return 'surfaces';
+      if (String(id).startsWith('entity.')) return 'entities';
+      if (String(id).startsWith('flow.')) return 'flows';
+      return 'overview';
+    }
+
     function AtlasPanel({ activeWorkspace, agents, messages, qaLiveShots, onRescanAtlas, onResumeAtlas, onDiscardAtlasCandidate }) {
       const [content, setContent] = useState('');
       const [graph, setGraph] = useState(null);
+      const [changelog, setChangelog] = useState('');
       const [loading, setLoading] = useState(false);
       const [error, setError] = useState(null);
       const [query, setQuery] = useState('');
       const [tocOpen, setTocOpen] = useState(true);
+      const [activeView, setActiveView] = useState('overview');
+      const [activeFilters, setActiveFilters] = useState([]);
+      const [selectedAtlasId, setSelectedAtlasId] = useState(null);
+      const [copiedAtlasValue, setCopiedAtlasValue] = useState(null);
+      const [lightboxIndex, setLightboxIndex] = useState(null);
+      const [askQuestion, setAskQuestion] = useState('');
+      const [askBusy, setAskBusy] = useState(false);
+      const [askError, setAskError] = useState(null);
+      const [askHistory, setAskHistory] = useState([]);
+      const [askComposerOpen, setAskComposerOpen] = useState(true);
       const bodyRef = useRef(null);
 
       const wsId = activeWorkspace?.id;
@@ -3275,9 +3544,32 @@
         : null;
       const atlasRunActive = atlasRun && (atlasRun.status === 'running' || atlasRun.status === 'validating');
 
+      useEffect(() => {
+        if (!wsId) return;
+        try {
+          const savedView = localStorage.getItem('atlas-view-' + wsId);
+          if (ATLAS_VIEW_TABS.some(([id]) => id === savedView)) setActiveView(savedView);
+          const savedToc = localStorage.getItem('atlas-toc-open-' + wsId);
+          setTocOpen(savedToc === null ? true : savedToc === 'true');
+          const savedAskHistory = JSON.parse(localStorage.getItem('atlas-ask-history-' + wsId) || '[]');
+          const history = Array.isArray(savedAskHistory) ? savedAskHistory.slice(0, 8) : [];
+          setAskHistory(history);
+          setAskComposerOpen(history.length === 0);
+        } catch {
+          setAskHistory([]);
+          setAskComposerOpen(true);
+        }
+        setAskQuestion('');
+        setQuery('');
+        setActiveFilters([]);
+        setSelectedAtlasId(null);
+        setLightboxIndex(null);
+        setAskError(null);
+      }, [wsId]);
+
       // Fetch atlas.md whenever the workspace changes or a scan completes.
       useEffect(() => {
-        if (!wsId || !wsHasAtlas) { setContent(''); setGraph(null); setError(null); return; }
+        if (!wsId || !wsHasAtlas) { setContent(''); setGraph(null); setChangelog(''); setError(null); return; }
         let cancelled = false;
         setLoading(true);
         setError(null);
@@ -3290,6 +3582,10 @@
           .then(r => r.ok ? r.json() : null)
           .then(value => { if (!cancelled) setGraph(value); })
           .catch(() => { if (!cancelled) setGraph(null); });
+        fetch('/api/atlas/file?workspaceId=' + encodeURIComponent(wsId) + '&relPath=changelog.md')
+          .then(r => r.ok ? r.text() : '')
+          .then(value => { if (!cancelled) setChangelog(value); })
+          .catch(() => { if (!cancelled) setChangelog(''); });
         return () => { cancelled = true; };
       }, [wsId, activeWorkspace?.atlasLastScanAt]);
 
@@ -3298,7 +3594,7 @@
       const rewritten = useMemo(() => {
         if (!content || !wsId) return content;
         return content.replace(/`(shots\/[^`]+\.png)`/g, (_, p) => {
-          const url = '/api/atlas/file?workspaceId=' + encodeURIComponent(wsId) + '&relPath=' + encodeURIComponent(p);
+          const url = atlasFileUrl(wsId, p);
           return '![' + p + '](' + url + ')';
         });
       }, [content, wsId]);
@@ -3345,12 +3641,234 @@
         return sections.filter(s => s.toLowerCase().includes(q)).join('\n\n');
       }, [anchored, query]);
 
+      const graphSurfaces = useMemo(() => atlasArray(graph?.surfaces), [graph]);
+      const graphEntities = useMemo(() => atlasArray(graph?.entities), [graph]);
+      const graphFlows = useMemo(() => atlasArray(graph?.flows), [graph]);
+      const atlasIdSet = useMemo(() => new Set([
+        ...graphSurfaces.map(item => item.id),
+        ...graphEntities.map(item => item.id),
+        ...graphFlows.map(item => item.id),
+      ].filter(Boolean)), [graphSurfaces, graphEntities, graphFlows]);
+      const surfaceMap = useMemo(() => new Map(graphSurfaces.map(item => [item.id, item])), [graphSurfaces]);
+      const normalizedQuery = query.trim().toLowerCase();
+      const filteredSurfaces = useMemo(() => graphSurfaces.filter(surface => {
+        if (normalizedQuery && !atlasSearchText(surface).includes(normalizedQuery)) return false;
+        const traits = atlasSurfaceTraits(surface, changelog);
+        return activeFilters.every(filter => traits[filter]);
+      }), [graphSurfaces, normalizedQuery, activeFilters, changelog]);
+      const filteredEntities = useMemo(() => graphEntities.filter(entity =>
+        !normalizedQuery || atlasSearchText(entity).includes(normalizedQuery)
+      ), [graphEntities, normalizedQuery]);
+      const filteredFlows = useMemo(() => graphFlows.filter(flow => {
+        if (!normalizedQuery) return true;
+        return atlasSearchText(flow).includes(normalizedQuery)
+          || atlasSearchText(surfaceMap.get(flow.fromSurfaceId)).includes(normalizedQuery)
+          || atlasSearchText(surfaceMap.get(flow.toSurfaceId)).includes(normalizedQuery);
+      }), [graphFlows, normalizedQuery, surfaceMap]);
+      const screenshotItems = useMemo(() => {
+        const byPath = new Map();
+        for (const surface of graphSurfaces) {
+          for (const relPath of atlasArray(surface.screenshotRefs)) {
+            if (typeof relPath !== 'string' || !relPath) continue;
+            let item = byPath.get(relPath);
+            if (!item) {
+              item = { relPath, src: atlasFileUrl(wsId, relPath), surfaceIds: [], surfaceNames: [] };
+              byPath.set(relPath, item);
+            }
+            item.surfaceIds.push(surface.id);
+            item.surfaceNames.push(surface.name || surface.id);
+          }
+        }
+        return Array.from(byPath.values());
+      }, [graphSurfaces, wsId]);
+      const filteredScreenshotItems = useMemo(() => {
+        if (!normalizedQuery && activeFilters.length === 0) return screenshotItems;
+        const visibleIds = new Set(filteredSurfaces.map(surface => surface.id));
+        return screenshotItems.filter(item => item.surfaceIds.some(id => visibleIds.has(id)));
+      }, [screenshotItems, filteredSurfaces, normalizedQuery, activeFilters]);
+      const observedFindings = useMemo(() => atlasMarkdownSection(displayAtlas, ['observed inconsistencies']), [displayAtlas]);
+      const openQuestions = useMemo(() => atlasMarkdownSection(displayAtlas, ['open questions']), [displayAtlas]);
+      const changeFindings = useMemo(() => atlasMarkdownSection(displayAtlas, ['changes since last scan']), [displayAtlas]);
+      const lightboxItem = lightboxIndex == null ? null : screenshotItems[lightboxIndex] || null;
+
+      const changeView = useCallback((view) => {
+        setActiveView(view);
+        setQuery('');
+        if (wsId) {
+          try { localStorage.setItem('atlas-view-' + wsId, view); } catch {}
+        }
+      }, [wsId]);
+
+      const toggleFilter = useCallback((filter) => {
+        setActiveFilters(previous => {
+          if (previous.includes(filter)) return previous.filter(item => item !== filter);
+          const withoutOpposite = filter === 'verified'
+            ? previous.filter(item => item !== 'gaps')
+            : filter === 'gaps' ? previous.filter(item => item !== 'verified') : previous;
+          return [...withoutOpposite, filter];
+        });
+      }, []);
+
+      const toggleToc = useCallback(() => {
+        setTocOpen(previous => {
+          const next = !previous;
+          if (wsId) {
+            try { localStorage.setItem('atlas-toc-open-' + wsId, String(next)); } catch {}
+          }
+          return next;
+        });
+      }, [wsId]);
+
+      const navigateAtlasId = useCallback((id) => {
+        if (!id) return;
+        changeView(atlasViewForId(id));
+        setSelectedAtlasId(id);
+        window.history.replaceState(null, '', window.location.pathname + window.location.search + '#atlas-item=' + encodeURIComponent(id));
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          document.getElementById('atlas-item-' + id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }));
+      }, [changeView]);
+
+      const copyAtlasText = useCallback(async (value, stateKey) => {
+        const showCopied = () => {
+          setCopiedAtlasValue(stateKey);
+          setTimeout(() => setCopiedAtlasValue(current => current === stateKey ? null : current), 1400);
+        };
+        try {
+          if (!navigator.clipboard?.writeText) throw new Error('Clipboard API unavailable');
+          await navigator.clipboard.writeText(value);
+          showCopied();
+        } catch {
+          const textarea = document.createElement('textarea');
+          textarea.value = value;
+          textarea.style.position = 'fixed';
+          textarea.style.opacity = '0';
+          document.body.appendChild(textarea);
+          textarea.select();
+          document.execCommand('copy');
+          textarea.remove();
+          showCopied();
+        }
+      }, []);
+
+      const copyAtlasLink = useCallback((id) => {
+        const link = window.location.origin + window.location.pathname + window.location.search + '#atlas-item=' + encodeURIComponent(id);
+        copyAtlasText(link, 'link:' + id);
+      }, [copyAtlasText]);
+
+      const openLightbox = useCallback((relPath) => {
+        const index = screenshotItems.findIndex(item => item.relPath === relPath);
+        if (index >= 0) setLightboxIndex(index);
+      }, [screenshotItems]);
+
+      const moveLightbox = useCallback((delta) => {
+        setLightboxIndex(current => {
+          if (current == null || screenshotItems.length === 0) return current;
+          return (current + delta + screenshotItems.length) % screenshotItems.length;
+        });
+      }, [screenshotItems.length]);
+
+      const askAtlas = useCallback(async (event) => {
+        event.preventDefault();
+        const question = askQuestion.trim();
+        if (!question || !wsId || askBusy) return;
+        setAskBusy(true);
+        setAskError(null);
+        try {
+          const response = await fetch('/api/atlas/ask', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ workspaceId: wsId, question }),
+          });
+          const result = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(result.error || 'Ask Atlas failed (' + response.status + ')');
+          const entry = { ...result, question, askedAt: Date.now() };
+          setAskHistory(previous => {
+            const next = [entry, ...previous].slice(0, 8);
+            try { localStorage.setItem('atlas-ask-history-' + wsId, JSON.stringify(next)); } catch {}
+            return next;
+          });
+          setAskQuestion('');
+          setAskComposerOpen(false);
+        } catch (askFailure) {
+          setAskError(askFailure.message || String(askFailure));
+        } finally {
+          setAskBusy(false);
+        }
+      }, [askQuestion, wsId, askBusy]);
+
+      useEffect(() => {
+        if (!atlasIdSet.size) return;
+        const applyHash = () => {
+          const match = window.location.hash.match(/^#atlas-item=(.+)$/);
+          if (!match) return;
+          let id;
+          try { id = decodeURIComponent(match[1]); } catch { return; }
+          if (!atlasIdSet.has(id)) return;
+          setActiveView(atlasViewForId(id));
+          setSelectedAtlasId(id);
+          requestAnimationFrame(() => requestAnimationFrame(() => {
+            document.getElementById('atlas-item-' + id)?.scrollIntoView({ block: 'start' });
+          }));
+        };
+        applyHash();
+        window.addEventListener('hashchange', applyHash);
+        return () => window.removeEventListener('hashchange', applyHash);
+      }, [atlasIdSet]);
+
+      useEffect(() => {
+        if (lightboxIndex == null) return;
+        const handleKey = (event) => {
+          if (event.key === 'Escape') setLightboxIndex(null);
+          if (event.key === 'ArrowLeft') moveLightbox(-1);
+          if (event.key === 'ArrowRight') moveLightbox(1);
+        };
+        window.addEventListener('keydown', handleKey);
+        return () => window.removeEventListener('keydown', handleKey);
+      }, [lightboxIndex, moveLightbox]);
+
       const scrollToSlug = useCallback((slug) => {
         const root = bodyRef.current;
         if (!root) return;
         const el = root.querySelector('#' + CSS.escape(slug));
         if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }, []);
+
+      const openAtlasImage = useCallback((image) => {
+        const src = image && (image.currentSrc || image.getAttribute('src'));
+        if (src) window.open(src, '_blank', 'noopener,noreferrer');
+      }, []);
+
+      const handleAtlasImageClick = useCallback((ev) => {
+        const image = ev.target && ev.target.closest ? ev.target.closest('img') : null;
+        if (!image || !ev.currentTarget.contains(image)) return;
+        ev.preventDefault();
+        openAtlasImage(image);
+      }, [openAtlasImage]);
+
+      const handleAtlasImageKeyDown = useCallback((ev) => {
+        if (ev.key !== 'Enter' && ev.key !== ' ') return;
+        const image = ev.target && ev.target.closest ? ev.target.closest('img') : null;
+        if (!image || !ev.currentTarget.contains(image)) return;
+        ev.preventDefault();
+        openAtlasImage(image);
+      }, [openAtlasImage]);
+
+      useEffect(() => {
+        if (activeView !== 'document') return;
+        const root = bodyRef.current;
+        if (!root) return;
+        root.querySelectorAll('img').forEach(image => {
+          image.loading = 'lazy';
+          image.decoding = 'async';
+          image.tabIndex = 0;
+          image.setAttribute('role', 'link');
+          image.setAttribute('title', 'Open full-size image in a new tab');
+          if (!image.getAttribute('aria-label')) {
+            image.setAttribute('aria-label', (image.getAttribute('alt') || 'Atlas screenshot') + ' — open full-size image in a new tab');
+          }
+        });
+      }, [filtered, loading, activeView]);
 
       const fmtAgo = (ms) => {
         if (ms < 60_000) return 'just now';
@@ -3437,18 +3955,16 @@
       const qaTouchedCount = activeWorkspace.qaSurfaceVerifications
         ? Object.keys(activeWorkspace.qaSurfaceVerifications).length
         : 0;
-      const graphSurfaces = Array.isArray(graph?.surfaces) ? graph.surfaces : null;
-      const graphEntities = Array.isArray(graph?.entities) ? graph.entities : null;
-      const graphVerified = graphSurfaces ? graphSurfaces.filter(surface => surface.status === 'verified').length : null;
-      const graphPartial = graphSurfaces ? graphSurfaces.filter(surface => surface.status === 'partial' || surface.status === 'unverified').length : null;
-      const graphExcluded = graphSurfaces ? graphSurfaces.filter(surface => surface.status === 'excluded').length : null;
+      const graphVerified = graphSurfaces.filter(surface => surface.status === 'verified').length;
+      const graphPartial = graphSurfaces.filter(surface => surface.status === 'partial' || surface.status === 'unverified').length;
+      const graphExcluded = graphSurfaces.filter(surface => surface.status === 'excluded').length;
 
       const coverageBits = [];
-      if (graphSurfaces) coverageBits.push(graphSurfaces.length + ' surfaces');
+      if (graphSurfaces.length) coverageBits.push(graphSurfaces.length + ' surfaces');
       else if (overview.totalSurfaces != null) coverageBits.push(overview.totalSurfaces + ' surfaces');
-      if (graphEntities) coverageBits.push(graphEntities.length + ' entities');
+      if (graphEntities.length) coverageBits.push(graphEntities.length + ' entities');
       else if (overview.totalEntities != null) coverageBits.push(overview.totalEntities + ' entities');
-      if (graphVerified != null) {
+      if (graphSurfaces.length) {
         coverageBits.push(graphVerified + '/' + graphSurfaces.length + ' verified');
         if (graphPartial > 0) coverageBits.push(graphPartial + ' gaps');
         if (graphExcluded > 0) coverageBits.push(graphExcluded + ' excluded');
@@ -3460,52 +3976,427 @@
       // Limit TOC to top-level sections (h2). h3 entries (per-entity, per-surface)
       // would balloon the list — search handles that case.
       const tocItems = overview.headings.filter(h => h.level === 2);
+      const coveragePercent = graphSurfaces.length ? Math.round((graphVerified / graphSurfaces.length) * 100) : 0;
+      const riskySurfaces = graphSurfaces.filter(surface => {
+        const traits = atlasSurfaceTraits(surface, changelog);
+        return traits.destructive || traits.error;
+      });
+
+      const renderIdRow = (id) => e('div', { className: 'atlas-id-row' },
+        e('button', { className: 'atlas-id-link', onClick: () => navigateAtlasId(id), title: 'Open ' + id }, id),
+        e('button', {
+          className: 'atlas-icon-btn',
+          onClick: () => copyAtlasText(id, 'id:' + id),
+          title: 'Copy identifier',
+        }, copiedAtlasValue === 'id:' + id ? 'Copied' : 'Copy'),
+        e('button', {
+          className: 'atlas-icon-btn',
+          onClick: () => copyAtlasLink(id),
+          title: 'Copy deep link',
+        }, copiedAtlasValue === 'link:' + id ? 'Copied' : 'Link')
+      );
+
+      const renderLinkedChips = (ids) => ids.length > 0 && e('div', { className: 'atlas-chip-row' },
+        ids.map(id => e('button', {
+          key: id,
+          className: 'atlas-link-chip',
+          onClick: () => navigateAtlasId(id),
+          title: 'Open ' + id,
+        }, id))
+      );
+
+      const renderScreenshots = (surface) => atlasArray(surface.screenshotRefs).length > 0 && e('div', { className: 'atlas-thumb-strip' },
+        atlasArray(surface.screenshotRefs).map(relPath => e('img', {
+          key: relPath,
+          className: 'atlas-thumb',
+          src: atlasFileUrl(wsId, relPath),
+          alt: (surface.name || surface.id) + ' screenshot',
+          loading: 'lazy',
+          decoding: 'async',
+          onClick: () => openLightbox(relPath),
+          title: 'Open in screenshot viewer',
+        }))
+      );
+
+      const renderSurfaceCard = (surface) => {
+        const traits = atlasSurfaceTraits(surface, changelog);
+        const visibleTraits = Object.entries(traits).filter(([, active]) => active).map(([name]) => name);
+        return e('article', {
+          key: surface.id,
+          id: 'atlas-item-' + surface.id,
+          className: 'atlas-card' + (selectedAtlasId === surface.id ? ' selected' : ''),
+        },
+          e('div', { className: 'atlas-card-head' },
+            e('div', { className: 'atlas-card-title' }, surface.name || surface.id),
+            e('span', { className: 'atlas-card-status ' + (surface.status === 'verified' ? 'verified' : 'gap') }, surface.status || 'unknown')
+          ),
+          renderIdRow(surface.id),
+          visibleTraits.length > 0 && e('div', { className: 'atlas-chip-row' },
+            visibleTraits.map(trait => e('span', { key: trait, className: 'atlas-trait-chip' }, trait))
+          ),
+          atlasArray(surface.actions).length > 0 && e('div', { className: 'atlas-card-block' },
+            e('div', { className: 'atlas-card-label' }, 'Actions'),
+            e('ul', { className: 'atlas-card-list' }, atlasArray(surface.actions).map((action, index) => e('li', { key: index }, action)))
+          ),
+          atlasArray(surface.states).length > 0 && e('div', { className: 'atlas-card-block' },
+            e('div', { className: 'atlas-card-label' }, 'States'),
+            e('ul', { className: 'atlas-card-list' }, atlasArray(surface.states).map((state, index) => e('li', { key: index }, state)))
+          ),
+          atlasArray(surface.entityIds).length > 0 && e('div', { className: 'atlas-card-block' },
+            e('div', { className: 'atlas-card-label' }, 'Entities'),
+            renderLinkedChips(atlasArray(surface.entityIds))
+          ),
+          renderScreenshots(surface),
+          atlasArray(surface.codeRefs).length > 0 && e('div', { className: 'atlas-card-block' },
+            e('div', { className: 'atlas-card-label' }, 'Code references'),
+            atlasArray(surface.codeRefs).map((ref, index) => e('span', { key: index, className: 'atlas-code-ref' }, ref))
+          )
+        );
+      };
+
+      const renderEntityCard = (entity) => {
+        const relatedSurfaces = graphSurfaces.filter(surface => atlasArray(surface.entityIds).includes(entity.id));
+        return e('article', {
+          key: entity.id,
+          id: 'atlas-item-' + entity.id,
+          className: 'atlas-card' + (selectedAtlasId === entity.id ? ' selected' : ''),
+        },
+          e('div', { className: 'atlas-card-head' }, e('div', { className: 'atlas-card-title' }, entity.name || entity.id)),
+          renderIdRow(entity.id),
+          atlasArray(entity.fields).length > 0 && e('div', { className: 'atlas-card-block' },
+            e('div', { className: 'atlas-card-label' }, 'Fields'),
+            e('ul', { className: 'atlas-card-list' }, atlasArray(entity.fields).map((field, index) =>
+              e('li', { key: index }, typeof field === 'string' ? field : JSON.stringify(field))
+            ))
+          ),
+          relatedSurfaces.length > 0 && e('div', { className: 'atlas-card-block' },
+            e('div', { className: 'atlas-card-label' }, 'Appears on ' + relatedSurfaces.length + ' surface' + (relatedSurfaces.length === 1 ? '' : 's')),
+            renderLinkedChips(relatedSurfaces.map(surface => surface.id))
+          ),
+          atlasArray(entity.codeRefs).length > 0 && e('div', { className: 'atlas-card-block' },
+            e('div', { className: 'atlas-card-label' }, 'Code references'),
+            atlasArray(entity.codeRefs).map((ref, index) => e('span', { key: index, className: 'atlas-code-ref' }, ref))
+          )
+        );
+      };
+
+      const renderFlowCard = (flow) => e('article', {
+        key: flow.id,
+        id: 'atlas-item-' + flow.id,
+        className: 'atlas-card' + (selectedAtlasId === flow.id ? ' selected' : ''),
+      },
+        e('div', { className: 'atlas-card-head' }, e('div', { className: 'atlas-card-title' }, flow.name || flow.id)),
+        renderIdRow(flow.id),
+        flow.trigger && e('div', { className: 'atlas-card-block' },
+          e('div', { className: 'atlas-card-label' }, 'Trigger'),
+          e('div', null, flow.trigger)
+        ),
+        e('div', { className: 'atlas-card-block' },
+          e('div', { className: 'atlas-card-label' }, 'Route'),
+          renderLinkedChips([flow.fromSurfaceId, flow.toSurfaceId].filter(Boolean))
+        )
+      );
+
+      const renderGallery = (items, preview) => e('div', { className: 'atlas-gallery-grid' },
+        (preview ? items.slice(0, 4) : items).map(item => e('figure', { key: item.relPath, className: 'atlas-gallery-item' },
+          e('img', {
+            src: item.src,
+            alt: item.surfaceNames.join(', ') + ' screenshot',
+            loading: 'lazy',
+            decoding: 'async',
+            onClick: () => openLightbox(item.relPath),
+            title: 'Open in screenshot viewer',
+          }),
+          e('figcaption', { className: 'atlas-gallery-caption' },
+            e('span', { className: 'atlas-gallery-name' }, item.surfaceNames.join(', ')),
+            renderLinkedChips(item.surfaceIds)
+          )
+        ))
+      );
+
+      let viewBody;
+      if (loading) {
+        viewBody = e('div', { className: 'atlas-empty' }, 'Loading UI Atlas...');
+      } else if (error) {
+        viewBody = e('div', { className: 'atlas-empty atlas-error' }, 'Error: ' + error);
+      } else if (activeView === 'overview') {
+        viewBody = e('div', { className: 'atlas-view-body atlas-dashboard' },
+          e('div', { className: 'atlas-metric-grid' },
+            [
+              ['Surfaces', graphSurfaces.length, 'surfaces'],
+              ['Entities', graphEntities.length, 'entities'],
+              ['Flows', graphFlows.length, 'flows'],
+              ['Screenshots', screenshotItems.length, 'gallery'],
+            ].map(([label, value, view]) => e('button', { key: label, className: 'atlas-metric', onClick: () => changeView(view) },
+                e('div', { className: 'atlas-metric-value' }, value),
+                e('div', { className: 'atlas-metric-label' }, label + ' — open')
+              ))
+          ),
+          e('section', { className: 'atlas-section' },
+            e('div', { className: 'atlas-section-head' },
+              e('div', { className: 'atlas-section-title' }, 'Evidence coverage'),
+              e('div', { className: 'atlas-section-meta' }, graphVerified + '/' + graphSurfaces.length + ' verified')
+            ),
+            e('div', { className: 'atlas-section-content' },
+              coveragePercent + '% of catalogued surfaces have verified evidence.',
+              e('div', { className: 'atlas-progress', role: 'progressbar', 'aria-valuenow': coveragePercent, 'aria-valuemin': 0, 'aria-valuemax': 100 },
+                e('div', { className: 'atlas-progress-fill', style: { width: coveragePercent + '%' } })
+              ),
+              qaTouchedCount > 0 && e('div', { style: { marginTop: 6 } }, qaTouchedCount + ' surfaces have recent evidence-backed QA coverage.')
+            )
+          ),
+          e('section', { className: 'atlas-section' },
+            e('div', { className: 'atlas-section-head' },
+              e('div', { className: 'atlas-section-title' }, 'Priority surfaces'),
+              e('div', { className: 'atlas-section-meta' }, riskySurfaces.length + ' destructive or error-related')
+            ),
+            e('div', { className: 'atlas-section-content' },
+              riskySurfaces.length
+                ? e(React.Fragment, null,
+                    renderLinkedChips(riskySurfaces.slice(0, 8).map(surface => surface.id)),
+                    e('button', { className: 'atlas-icon-btn', style: { marginTop: 7 }, onClick: () => changeView('surfaces') }, 'Review all surfaces')
+                  )
+                : 'No high-risk traits were detected in the current graph.'
+            )
+          ),
+          e('section', { className: 'atlas-section' },
+            e('div', { className: 'atlas-section-head' },
+              e('div', { className: 'atlas-section-title' }, 'Screenshot evidence'),
+              e('button', { className: 'atlas-icon-btn', onClick: () => changeView('gallery') }, 'View all ' + screenshotItems.length)
+            ),
+            e('div', { className: 'atlas-section-content' }, screenshotItems.length ? renderGallery(screenshotItems, true) : 'No graph-connected screenshots were found.')
+          ),
+          e('section', { className: 'atlas-section' },
+            e('div', { className: 'atlas-section-head' }, e('div', { className: 'atlas-section-title' }, 'Ask this Atlas')),
+            e('div', { className: 'atlas-section-content' },
+              'Ask impact, coverage, and relationship questions. Answers are checked against exact published surface, entity, and flow IDs.',
+              e('div', { style: { marginTop: 7 } }, e('button', { className: 'atlas-ask-submit', onClick: () => changeView('ask') }, 'Open Ask Atlas'))
+            )
+          )
+        );
+      } else if (activeView === 'surfaces') {
+        viewBody = e('div', { className: 'atlas-view-body' },
+          filteredSurfaces.length
+            ? e('div', { className: 'atlas-card-grid' }, filteredSurfaces.map(renderSurfaceCard))
+            : e('div', { className: 'atlas-empty-view' }, 'No surfaces match the active search and filters.')
+        );
+      } else if (activeView === 'entities') {
+        viewBody = e('div', { className: 'atlas-view-body' },
+          filteredEntities.length
+            ? e('div', { className: 'atlas-card-grid' }, filteredEntities.map(renderEntityCard))
+            : e('div', { className: 'atlas-empty-view' }, 'No entities match this search.')
+        );
+      } else if (activeView === 'flows') {
+        viewBody = e('div', { className: 'atlas-view-body' },
+          filteredFlows.length
+            ? e('div', { className: 'atlas-card-grid' }, filteredFlows.map(renderFlowCard))
+            : e('div', { className: 'atlas-empty-view' }, 'No flows match this search.')
+        );
+      } else if (activeView === 'findings') {
+        const findings = [
+          ['Observed inconsistencies', observedFindings],
+          ['Open questions', openQuestions],
+          ['Changes since last scan', changeFindings || changelog],
+        ];
+        viewBody = e('div', { className: 'atlas-view-body atlas-findings-stack' },
+          findings.map(([title, markdown]) => e('section', { key: title, className: 'atlas-section' },
+            e('div', { className: 'atlas-section-head' }, e('div', { className: 'atlas-section-title' }, title)),
+            e('div', { className: 'atlas-section-content' },
+              markdown ? e(MarkdownContent, { content: markdown }) : 'No findings recorded in this section.'
+            )
+          ))
+        );
+      } else if (activeView === 'gallery') {
+        viewBody = e('div', { className: 'atlas-view-body' },
+          filteredScreenshotItems.length
+            ? renderGallery(filteredScreenshotItems, false)
+            : e('div', { className: 'atlas-empty-view' }, 'No screenshot evidence matches the active search and filters.')
+        );
+      } else if (activeView === 'ask') {
+        const askSuggestions = [
+          'Which destructive surfaces should QA prioritize?',
+          'What changed in the latest Atlas scan?',
+          'Which entities appear across the most surfaces?',
+        ];
+        viewBody = e('div', { className: 'atlas-view-body atlas-ask' },
+          e('div', { className: 'atlas-ask-toolbar' },
+            e('div', { className: 'atlas-ask-heading' },
+              e('div', { className: 'atlas-ask-title' }, 'Ask Atlas'),
+              e('div', { className: 'atlas-ask-subtitle' }, 'Question the current published UI map. Every answer must resolve to IDs that actually exist in atlas.json.')
+            ),
+            !askComposerOpen && e('button', { className: 'atlas-ask-submit', onClick: () => setAskComposerOpen(true) }, 'Ask another question')
+          ),
+          e('div', { className: 'atlas-ask-trust-row', 'aria-label': 'Ask Atlas safeguards' },
+            e('span', { className: 'atlas-ask-trust' }, 'Read-only'),
+            e('span', { className: 'atlas-ask-trust' }, 'Published snapshot'),
+            e('span', { className: 'atlas-ask-trust' }, 'Exact-ID validation')
+          ),
+          askComposerOpen && e('div', { className: 'atlas-ask-composer' },
+            e('div', { className: 'atlas-ask-intro' },
+              'A temporary GPT-5.6 Sol xhigh analyst reads only this workspace\'s Atlas. It cannot edit the application or invent citations.'
+            ),
+            e('form', { className: 'atlas-ask-form', onSubmit: askAtlas, 'aria-busy': askBusy },
+              e('textarea', {
+                className: 'atlas-ask-input',
+                value: askQuestion,
+                onChange: event => setAskQuestion(event.target.value),
+                maxLength: 2000,
+                disabled: askBusy,
+                autoFocus: true,
+                placeholder: 'Ask about surfaces, entities, flows, risk, or QA coverage...',
+              }),
+              e('div', { className: 'atlas-ask-actions' },
+                e('button', { className: 'atlas-ask-submit', type: 'submit', disabled: askBusy || !askQuestion.trim() }, askBusy ? 'Analyzing...' : 'Ask Atlas'),
+                e('span', { className: 'atlas-ask-meta' }, askQuestion.length + '/2000')
+              )
+            ),
+            !askBusy && !askQuestion && e('div', { className: 'atlas-ask-suggestions', 'aria-label': 'Suggested questions' },
+              askSuggestions.map(question => e('button', {
+                key: question,
+                className: 'atlas-ask-suggestion',
+                onClick: () => setAskQuestion(question),
+              }, question))
+            )
+          ),
+          askBusy && e('div', { className: 'atlas-ask-progress', role: 'status', 'aria-live': 'polite' },
+            e('span', { className: 'atlas-ask-spinner', 'aria-hidden': true }),
+            e('div', null,
+              e('div', { className: 'atlas-ask-progress-title' }, 'Analyzing the published Atlas'),
+              e('div', { className: 'atlas-ask-progress-detail' }, 'Reading the graph, grounding claims in exact IDs, and validating the answer. This can take a few minutes; keep this tab open.')
+            )
+          ),
+          askError && e('div', { className: 'atlas-ask-error' }, askError),
+          askHistory.length > 0 && e('div', { className: 'atlas-ask-results-head' },
+            e('span', { className: 'atlas-ask-results-title' }, 'Grounded answers'),
+            e('span', { className: 'atlas-ask-results-count' }, askHistory.length + ' saved in this browser')
+          ),
+          askHistory.map((answer, index) => e('article', { key: answer.askedAt || index, className: 'atlas-answer' },
+            e('div', { className: 'atlas-answer-head' },
+              e('span', { className: 'atlas-answer-status' }, 'Grounded answer'),
+              answer.askedAt && e('span', null, new Date(answer.askedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })),
+              e('span', { className: 'atlas-answer-model' }, answer.model === 'gpt-5.6-sol' ? 'GPT-5.6 Sol · ' + (answer.reasoningLevel || 'xhigh') : (answer.model || 'Atlas Analyst')),
+              e('button', {
+                className: 'atlas-icon-btn',
+                onClick: () => copyAtlasText(answer.answer || '', 'answer:' + (answer.askedAt || index)),
+              }, copiedAtlasValue === 'answer:' + (answer.askedAt || index) ? 'Copied' : 'Copy')
+            ),
+            e('div', { className: 'atlas-answer-question' },
+              e('span', { className: 'atlas-answer-label' }, 'Question'),
+              answer.question
+            ),
+            e('div', { className: 'atlas-answer-citations' },
+              e('span', { className: 'atlas-answer-label' }, 'Atlas citations (' + atlasArray(answer.citations).length + ')'),
+              renderLinkedChips(atlasArray(answer.citations))
+            ),
+            e('div', { className: 'atlas-answer-body' },
+              e('span', { className: 'atlas-answer-label' }, 'Answer'),
+              e(MarkdownContent, { content: answer.answer || '' })
+            )
+          )),
+          !askBusy && !askHistory.length && e('div', { className: 'atlas-empty-view' },
+            e('div', { style: { color: 'var(--text-secondary)', marginBottom: 4 } }, 'No grounded answers yet.'),
+            e('div', null, 'Ask a question above or choose a suggested starting point.')
+          )
+        );
+      } else {
+        viewBody = e(React.Fragment, null,
+          tocItems.length > 0 && !query && e('div', { className: 'atlas-toc' + (tocOpen ? '' : ' collapsed') },
+            e('button', { className: 'atlas-toc-header', type: 'button', onClick: toggleToc, 'aria-expanded': tocOpen },
+              e('span', { className: 'atlas-toc-chevron' }, tocOpen ? 'v' : '>'),
+              e('span', null, 'Contents (' + tocItems.length + ')')
+            ),
+            tocOpen && e('div', { className: 'atlas-toc-list' },
+              tocItems.map(heading => e('button', {
+                key: heading.slug,
+                className: 'atlas-toc-link',
+                onClick: () => scrollToSlug(heading.slug),
+                title: heading.text,
+              }, heading.text))
+            )
+          ),
+          rewritten && e('div', {
+            className: 'atlas-body',
+            ref: bodyRef,
+            onClick: handleAtlasImageClick,
+            onKeyDown: handleAtlasImageKeyDown,
+          }, e(MarkdownContent, { content: filtered || anchored }))
+        );
+      }
+
+      const searchViews = ['surfaces', 'entities', 'flows', 'gallery', 'document'];
+      const showFilters = activeView === 'surfaces' || activeView === 'gallery';
 
       return e('div', { className: 'atlas-panel' },
         e('div', { className: 'atlas-header' },
-          e('div', { className: 'atlas-title' }, '🗺️ UI Atlas — ' + activeWorkspace.name),
-          e('div', { className: 'atlas-status atlas-status-' + ageBucket },
-            'Last scan ' + fmtAgo(ageMs) + (ageBucket === 'stale' ? ' · stale' : '')
-          ),
-          !showRunBanner && e('button', {
-            className: 'atlas-rescan-btn',
-            onClick: () => { if (confirm('Start an Atlas update? The current Atlas remains published until the candidate validates successfully.')) onRescanAtlas(wsId); },
-            title: 'Build a validated replacement while keeping the current Atlas available',
-          }, 'Update Atlas')
-        ),
-        runBanner,
-        coverageBits.length > 0 && e('div', { className: 'atlas-coverage-strip' },
-          coverageBits.map((b, i) => e('span', { key: i, className: 'atlas-coverage-pill' }, b))
-        ),
-        e('div', { className: 'atlas-search-row' },
-          e('input', {
-            type: 'text',
-            className: 'atlas-search',
-            placeholder: 'Search atlas (e.g. "fleet", "modal", "console")...',
-            value: query,
-            onChange: (ev) => setQuery(ev.target.value),
-          }),
-          query && e('button', { className: 'atlas-search-clear', onClick: () => setQuery('') }, '×')
-        ),
-        tocItems.length > 0 && !query && e('div', { className: 'atlas-toc' + (tocOpen ? '' : ' collapsed') },
-          e('div', { className: 'atlas-toc-header', onClick: () => setTocOpen(o => !o) },
-            e('span', { className: 'atlas-toc-chevron' }, tocOpen ? '▾' : '▸'),
-            e('span', null, 'Contents (' + tocItems.length + ')')
-          ),
-          tocOpen && e('div', { className: 'atlas-toc-list' },
-            tocItems.map(h => e('button', {
-              key: h.slug,
-              className: 'atlas-toc-link',
-              onClick: () => scrollToSlug(h.slug),
-              title: h.text,
-            }, h.text))
+          e('div', { className: 'atlas-header-top' },
+            e('div', { className: 'atlas-header-main' },
+              e('div', { className: 'atlas-title' }, '🗺️ UI Atlas — ' + activeWorkspace.name),
+              e('div', { className: 'atlas-status atlas-status-' + ageBucket },
+                'Last scan ' + fmtAgo(ageMs) + (ageBucket === 'stale' ? ' · stale' : '')
+              )
+            ),
+            e('div', { className: 'atlas-header-actions' },
+              !showRunBanner && e('button', {
+                className: 'atlas-rescan-btn',
+                onClick: () => { if (window.confirm(ATLAS_RESCAN_CONFIRMATION)) onRescanAtlas(wsId); },
+                title: 'Build a validated replacement while keeping the current Atlas available',
+              }, 'Update Atlas')
+            )
           )
         ),
-        loading && e('div', { className: 'atlas-empty' }, 'Loading atlas.md...'),
-        error && e('div', { className: 'atlas-empty atlas-error' }, 'Error: ' + error),
-        !loading && !error && rewritten && e('div', { className: 'atlas-body', ref: bodyRef },
-          e(MarkdownContent, { content: filtered || anchored })
-        )
+        runBanner,
+        activeView !== 'overview' && activeView !== 'ask' && e('div', { className: 'atlas-coverage-strip' },
+          coverageBits.map((bit, index) => e('span', { key: index, className: 'atlas-coverage-pill' }, bit))
+        ),
+        e('nav', { className: 'atlas-view-tabs', 'aria-label': 'UI Atlas views' },
+          ATLAS_VIEW_TABS.map(([id, label]) => e('button', {
+            key: id,
+            className: 'atlas-view-tab' + (activeView === id ? ' active' : ''),
+            onClick: () => changeView(id),
+            'aria-current': activeView === id ? 'page' : undefined,
+          }, label))
+        ),
+        searchViews.includes(activeView) && e('div', { className: 'atlas-search-row' },
+          e('input', {
+            type: 'search',
+            className: 'atlas-search',
+            placeholder: activeView === 'document' ? 'Search the full Atlas document...' : 'Search ' + activeView + '...',
+            value: query,
+            onChange: event => setQuery(event.target.value),
+          }),
+          query && e('button', { className: 'atlas-search-clear', onClick: () => setQuery(''), 'aria-label': 'Clear search' }, '×')
+        ),
+        showFilters && e('div', { className: 'atlas-filter-strip' },
+          e('span', { className: 'atlas-filter-label' }, 'Filters'),
+          ATLAS_SURFACE_FILTERS.map(([id, label]) => e('button', {
+            key: id,
+            className: 'atlas-filter-chip' + (activeFilters.includes(id) ? ' active' : ''),
+            onClick: () => toggleFilter(id),
+            'aria-pressed': activeFilters.includes(id),
+          }, label)),
+          activeFilters.length > 0 && e('button', { className: 'atlas-filter-chip', onClick: () => setActiveFilters([]) }, 'Clear')
+        ),
+        viewBody,
+        lightboxItem && e('div', {
+          className: 'atlas-lightbox',
+          role: 'presentation',
+          onClick: event => { if (event.target === event.currentTarget) setLightboxIndex(null); },
+        }, e('div', { className: 'atlas-lightbox-dialog', role: 'dialog', 'aria-modal': true, 'aria-label': lightboxItem.surfaceNames.join(', ') + ' screenshot' },
+          e('div', { className: 'atlas-lightbox-head' },
+            e('div', { className: 'atlas-lightbox-title' }, lightboxItem.surfaceNames.join(', ')),
+            e('button', { className: 'atlas-lightbox-button', onClick: () => window.open(lightboxItem.src, '_blank', 'noopener,noreferrer') }, 'Open in new tab'),
+            e('button', { className: 'atlas-lightbox-button', onClick: () => setLightboxIndex(null), 'aria-label': 'Close screenshot viewer' }, 'Close')
+          ),
+          e('div', { className: 'atlas-lightbox-stage' },
+            screenshotItems.length > 1 && e('button', { className: 'atlas-lightbox-nav prev', onClick: () => moveLightbox(-1), 'aria-label': 'Previous screenshot' }, '‹'),
+            e('img', { src: lightboxItem.src, alt: lightboxItem.surfaceNames.join(', ') + ' full-size screenshot' }),
+            screenshotItems.length > 1 && e('button', { className: 'atlas-lightbox-nav next', onClick: () => moveLightbox(1), 'aria-label': 'Next screenshot' }, '›')
+          ),
+          e('div', { className: 'atlas-lightbox-foot' },
+            renderLinkedChips(lightboxItem.surfaceIds),
+            e('span', { className: 'atlas-lightbox-count' }, (lightboxIndex + 1) + ' / ' + screenshotItems.length)
+          )
+        ))
       );
     }
 
@@ -4106,7 +4997,7 @@
 
     function App() {
       const ws = useWebSocket();
-      const { connected, agents, messages, liveOutput, queued, sharedContext, fileChanges, thinkingOutput, agentActivity, settings, workspaces, statusStartTimes, tokenUsage, usageReport, terminals, terminalOutput, errorToasts } = ws;
+      const { connected, agents, messages, liveOutput, queued, sharedContext, fileChanges, thinkingOutput, agentActivity, settings, workspaces, activeWorkspaceId, statusStartTimes, tokenUsage, usageReport, terminals, terminalOutput, errorToasts } = ws;
       const [showModal, setShowModal] = useState(false);
       const [showSharedContext, setShowSharedContext] = useState(false);
       const [sidebarTab, setSidebarTab] = useState('agents');
@@ -4126,8 +5017,9 @@
       const [draggedAgent, setDraggedAgent] = useState(null);
       const [dragOverSlot, setDragOverSlot] = useState(null);
 
-      // Derive active workspace and grid settings from server-owned workspace
-      const activeWorkspace = workspaces.find(w => w.id === settings.activeWorkspaceId) || workspaces[0];
+      // Workspace choice is local to this browser, so another tab or automated
+      // browser cannot move the viewport. Workspace grid settings remain shared.
+      const activeWorkspace = workspaces.find(w => w.id === activeWorkspaceId) || workspaces[0];
       const columns = activeWorkspace ? activeWorkspace.gridColumns : 2;
       const rows = activeWorkspace ? activeWorkspace.gridRows : 2;
       const totalPanels = columns * rows;

@@ -48,6 +48,11 @@ When asked to create or update a plan, use the Write tool to write a markdown fi
 - Plans marked [APPROVED] should be followed as-is
 - Plans marked [DRAFT] are pending user review`;
 
+const REPORT_DELIVERY_INSTRUCTIONS = `Report Delivery:
+- Put user-facing reports, runbooks, QA findings, and completion summaries directly in the final chat response whenever practical.
+- If a report is too long for chat, write the complete Markdown file inside the current project and still include its conclusions and useful summary in chat.
+- Never make a bare local filesystem link the only delivery of work the user asked to read.`;
+
 const CONVERSATION_SCOPE_INSTRUCTIONS = `Conversation Scope:
 You are primarily a software engineering agent for this workspace, but the user may also ask harmless general questions, casual questions, or quick factual questions. Answer those directly.
 - Do not refuse or redirect solely because a question is not about the project.
@@ -81,6 +86,12 @@ export function getBuiltInHarnessInstructionManifest(): {
         content: BUILT_IN_HARNESS_STANDARDS,
       },
       {
+        id: 'reports',
+        title: 'Report delivery',
+        description: 'Ensures reports are readable in chat and never delivered only as inaccessible filesystem links.',
+        content: REPORT_DELIVERY_INSTRUCTIONS,
+      },
+      {
         id: 'plans',
         title: 'Plan management',
         description: 'Defines how agents create, update, and interpret files in the project .plans directory.',
@@ -98,6 +109,7 @@ export function getBuiltInHarnessInstructionManifest(): {
       'Per-agent persona or system prompt, when configured',
       'Additional shared project context from this settings screen',
       'Relevant project plans and documents',
+      'Report-delivery instructions',
       'Plan-management and conversation-scope instructions',
       'Simulator, reference-directory, and UI Atlas context when relevant',
     ],
@@ -133,10 +145,11 @@ export interface PromptBuildResult {
  *   2. Agent persona (from agent.systemPrompt)
  *   3. Project context (workspace-shared)
  *   4. Documents (plans relevant to this agent / workspace)
- *   5. Plan Management instructions (so the agent knows .plans/* is special)
- *   6. Default iOS simulator (if set and cwd looks iOS-ish)
- *   7. Reference directories
- *   8. Atlas citation (when the workspace has a built atlas and the agent isn't a workspace tool)
+ *   5. Report Delivery instructions
+ *   6. Plan Management instructions (so the agent knows .plans/* is special)
+ *   7. Default iOS simulator (if set and cwd looks iOS-ish)
+ *   8. Reference directories
+ *   9. Atlas citation (when the workspace has a built atlas and the agent isn't a workspace tool)
  */
 export const promptBuilderService = {
   build(agentInfo: AgentInfo, sharedContext: string): PromptBuildResult {
@@ -153,6 +166,7 @@ export const promptBuilderService = {
     if (docsContext) {
       parts.push(docsContext);
     }
+    parts.push(REPORT_DELIVERY_INSTRUCTIONS);
     parts.push(PLAN_MANAGEMENT_INSTRUCTIONS);
     parts.push(CONVERSATION_SCOPE_INSTRUCTIONS);
 
