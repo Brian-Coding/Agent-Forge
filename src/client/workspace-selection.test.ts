@@ -21,3 +21,11 @@ test('every published Atlas re-scan entry point requires confirmation', () => {
   expect(clientSource).toContain("const ATLAS_RESCAN_CONFIRMATION = 'Re-scan the UI Atlas now?");
   expect(clientSource.match(/window\.confirm\(ATLAS_RESCAN_CONFIRMATION\)\) onRescanAtlas\(/g)).toHaveLength(2);
 });
+
+test('chat image batches use the 100-image native upload path instead of base64 WebSocket frames', () => {
+  expect(clientSource).toContain('const MAX_CHAT_IMAGES = 100;');
+  expect(clientSource).toContain("fetch('/api/chat/image-upload?' + query.toString()");
+  expect(clientSource).toContain("type: 'send_uploaded_images'");
+  expect(clientSource).toContain('imageAttachments: m.imageAttachments');
+  expect(clientSource).not.toContain('reader.readAsDataURL(file)');
+});

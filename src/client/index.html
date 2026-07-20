@@ -437,8 +437,15 @@
     .drop-zone-active span { background: var(--accent); color: white; padding: 8px 16px; border-radius: 8px; font-size: 14px; font-weight: 600; }
     .chat-image { max-width: 200px; max-height: 150px; border-radius: 6px; border: 1px solid var(--border); margin: 4px 0; cursor: pointer; }
     .chat-image:hover { border-color: var(--accent); }
+    .chat-image-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); gap: 6px; max-height: 250px; overflow-y: auto; margin: 6px 0; padding: 6px; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 6px; }
+    .chat-image-gallery img { width: 100%; height: 72px; object-fit: cover; border-radius: 4px; border: 1px solid var(--border); cursor: pointer; background: var(--bg-primary); }
+    .chat-image-gallery img:hover { border-color: var(--accent); }
+    .pending-image-strip { max-height: 128px; overflow-y: auto; border-top: 1px solid var(--border); background: var(--bg-secondary); }
+    .image-upload-error { width: 100%; color: var(--error); font-size: 11px; }
+    .image-upload-progress { color: var(--accent); font-weight: 600; }
     .image-upload-btn { background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 4px 6px; font-size: 16px; }
     .image-upload-btn:hover { color: var(--text-primary); }
+    .image-upload-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 
     /* Inline provider + model dropdowns under each agent's chat input */
     .agent-provider-row { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 11px; }
@@ -947,6 +954,10 @@
     // without supplying their own arguments. Lets the agent fall back to either
     // recent-conversation context or a general codebase pass.
     const SLASH_DEFAULT_ARGS = 'If no specific target was provided here, infer one from our recent conversation; otherwise do a general pass over this codebase.';
+    const MAX_CHAT_IMAGES = 100;
+    const MAX_CHAT_IMAGE_TOTAL_BYTES = 512 * 1024 * 1024;
+    const CHAT_IMAGE_UPLOAD_CONCURRENCY = 4;
+    const SUPPORTED_CHAT_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
 
     function expandSlashTemplate(template) {
       return (template || '').replace(/\{args\}/g, SLASH_DEFAULT_ARGS).trim();
@@ -1394,6 +1405,55 @@
         };
       }, [drainQueue, sendRaw]);
 
+      const uploadAndSendImages = useCallback(async (agentId, images, prompt, onProgress) => {
+        if (!Array.isArray(images) || images.length === 0) throw new Error('Choose at least one image');
+        if (images.length > MAX_CHAT_IMAGES) throw new Error('A single message can contain at most ' + MAX_CHAT_IMAGES + ' images');
+        const totalBytes = images.reduce((sum, image) => sum + (image.file?.size || image.size || 0), 0);
+        if (totalBytes > MAX_CHAT_IMAGE_TOTAL_BYTES) throw new Error('The image batch exceeds the 512 MiB model input limit');
+
+        // Retry can reuse already-persisted attachments without uploading the
+        // same original files again. The server revalidates every path.
+        if (images.every(image => image?.path && !image.file)) {
+          if (wsRef.current?.readyState !== WebSocket.OPEN) throw new Error('Agent Forge is disconnected');
+          wsRef.current.send(JSON.stringify({ type: 'send_uploaded_images', agentId, images, prompt }));
+          return;
+        }
+
+        const uploaded = new Array(images.length);
+        let nextIndex = 0;
+        let completed = 0;
+        let uploadFailure = null;
+        onProgress?.(completed, images.length);
+
+        const worker = async () => {
+          while (!uploadFailure && nextIndex < images.length) {
+            const index = nextIndex++;
+            const image = images[index];
+            try {
+              if (!image?.file) throw new Error('Image ' + (index + 1) + ' is no longer available');
+              const query = new URLSearchParams({ agentId, name: image.name || image.file.name || ('image-' + (index + 1)) });
+              const response = await fetch('/api/chat/image-upload?' + query.toString(), {
+                method: 'POST',
+                headers: { 'Content-Type': image.mimeType || image.file.type || 'application/octet-stream' },
+                body: image.file,
+              });
+              const result = await response.json().catch(() => ({}));
+              if (!response.ok) throw new Error(result.error || ('Image ' + (index + 1) + ' upload failed'));
+              uploaded[index] = result;
+              completed++;
+              onProgress?.(completed, images.length);
+            } catch (error) {
+              uploadFailure = error;
+            }
+          }
+        };
+
+        await Promise.all(Array.from({ length: Math.min(CHAT_IMAGE_UPLOAD_CONCURRENCY, images.length) }, worker));
+        if (uploadFailure) throw uploadFailure;
+        if (wsRef.current?.readyState !== WebSocket.OPEN) throw new Error('Agent Forge disconnected before the image batch could be sent');
+        wsRef.current.send(JSON.stringify({ type: 'send_uploaded_images', agentId, images: uploaded, prompt }));
+      }, []);
+
       return {
         connected, agents, messages, liveOutput, queued, sharedContext, fileChanges, thinkingOutput, agentActivity, settings, workspaces, activeWorkspaceId, providerCatalog, statusStartTimes, tokenUsage, usageReport, limits, terminals, terminalOutput, errorToasts, qaUnread, qaLiveShots,
         refreshLimits: () => sendRaw({ type: 'refresh_limits' }),
@@ -1430,8 +1490,7 @@
         // Settings
         updateSettings: (settings) => sendRaw({ type: 'update_settings', settings }),
         // Image
-        sendImage: (agentId, imageData, mimeType, prompt) => sendRaw({ type: 'send_image', agentId, imageData, mimeType, prompt }),
-        sendImages: (agentId, images, prompt) => sendRaw({ type: 'send_images', agentId, images, prompt }),
+        sendImages: uploadAndSendImages,
         // Update agent
         updateAgent: (id, updates) => sendRaw({ type: 'update_agent', id, ...updates }),
         // Resolve a latched model mismatch ('continue-actual' | 'fresh-requested')
@@ -1891,7 +1950,7 @@
       return { verdict: { kind, summary, raw: m[1].trim() }, body };
     }
 
-    const ChatTurn = React.memo(function ChatTurn({ role, content, isStreaming, imageData, imageMimeType, showToolMessages, searchQuery, showRetry, onRetry, source, provider, model, agentId }) {
+    const ChatTurn = React.memo(function ChatTurn({ role, content, isStreaming, imageData, imageMimeType, imageAttachments, showToolMessages, searchQuery, showRetry, onRetry, source, provider, model, agentId }) {
       const [copied, setCopied] = useState(false);
       const isQa = source === 'qa';
       // Per-message provider stamp (newer messages); fall back to 'Claude' for
@@ -1947,15 +2006,28 @@
         ),
         renderQaVerdictRow(verdict),
         imageData && e('img', { className: 'chat-image', src: 'data:' + (imageMimeType || 'image/png') + ';base64,' + imageData, alt: 'Uploaded image', onClick: () => window.open('data:' + (imageMimeType || 'image/png') + ';base64,' + imageData) }),
+        imageAttachments?.length > 0 && e('div', { className: 'chat-image-gallery', 'aria-label': imageAttachments.length + ' attached images' },
+          imageAttachments.map((image, index) => {
+            const src = '/api/chat/image?path=' + encodeURIComponent(image.path);
+            return e('img', {
+              key: image.path + '-' + index,
+              src,
+              loading: 'lazy',
+              alt: 'Image ' + (index + 1) + ': ' + image.name,
+              title: 'Image ' + (index + 1) + ': ' + image.name,
+              onClick: () => window.open(src, '_blank'),
+            });
+          })
+        ),
         renderBody(),
         showRetry && onRetry && e('button', { className: 'retry-btn', onClick: onRetry }, '\u21BB Retry')
       );
     }, (prev, next) => {
-      return prev.content === next.content && prev.role === next.role && prev.isStreaming === next.isStreaming && prev.searchQuery === next.searchQuery && prev.showToolMessages === next.showToolMessages && prev.showRetry === next.showRetry && prev.imageData === next.imageData && prev.source === next.source && prev.provider === next.provider && prev.model === next.model;
+      return prev.content === next.content && prev.role === next.role && prev.isStreaming === next.isStreaming && prev.searchQuery === next.searchQuery && prev.showToolMessages === next.showToolMessages && prev.showRetry === next.showRetry && prev.imageData === next.imageData && prev.imageAttachments === next.imageAttachments && prev.source === next.source && prev.provider === next.provider && prev.model === next.model;
     });
 
     // Terminal Panel
-    function TerminalPanel({ agent, messages, liveOutput, queuedMessages, fileChanges, thinkingOutput, agentActivity, statusStartTime, tokenUsage, terminals, terminalOutput, workspace, qaRuns, qaHasUnread, qaLiveShots, onQaSend, onQaAbort, onQaHandoff, onClearQaUnread, onSendMessage, onSendImage, onSendImages, onStop, onClearHistory, onClearFileChanges, onMinimize, onMaximize, isMaximized, onFocus, isFocused, onCreateTerminal, onKillTerminal, onUpdateAgent, onResolveModelMismatch, isLocked, onToggleLock, isDragging, isDragOver, onDragStart, onDragEnd, onDragOver, onDragLeave, onDrop }) {
+    function TerminalPanel({ agent, messages, liveOutput, queuedMessages, fileChanges, thinkingOutput, agentActivity, statusStartTime, tokenUsage, terminals, terminalOutput, workspace, qaRuns, qaHasUnread, qaLiveShots, onQaSend, onQaAbort, onQaHandoff, onClearQaUnread, onSendMessage, onSendImages, onStop, onClearHistory, onClearFileChanges, onMinimize, onMaximize, isMaximized, onFocus, isFocused, onCreateTerminal, onKillTerminal, onUpdateAgent, onResolveModelMismatch, isLocked, onToggleLock, isDragging, isDragOver, onDragStart, onDragEnd, onDragOver, onDragLeave, onDrop }) {
       const [input, setInput] = useState('');
       const [inputHistory, setInputHistory] = useState([]);
       const [historyIdx, setHistoryIdx] = useState(-1);
@@ -1964,6 +2036,9 @@
       const [showToolMessages, setShowToolMessages] = useState(false);
       const [dragging, setDragging] = useState(false);
       const [pendingImages, setPendingImages] = useState([]);
+      const pendingImagesRef = useRef([]);
+      const [imageUploadError, setImageUploadError] = useState('');
+      const [uploadProgress, setUploadProgress] = useState(null);
       // Slash command autocomplete: matches when input starts with "/" and no space yet.
       const slashMatches = useMemo(() => {
         if (!input.startsWith('/') || input.includes(' ') || input.includes('\n')) return [];
@@ -2188,17 +2263,37 @@
         return () => { window.removeEventListener('focus', focusInput); document.removeEventListener('visibilitychange', onVis); };
       }, [isFocused]);
 
-      const handleSubmit = () => {
-        if (!agent) return;
+      const replacePendingImages = useCallback((next) => {
+        pendingImagesRef.current = next;
+        setPendingImages(next);
+      }, []);
+
+      useEffect(() => () => {
+        for (const image of pendingImagesRef.current) {
+          if (image.previewUrl) URL.revokeObjectURL(image.previewUrl);
+        }
+      }, []);
+
+      const handleSubmit = async () => {
+        if (!agent || uploadProgress) return;
         const text = input.trim();
         // If there are pending images, send them (with or without text)
-        if (pendingImages.length > 0) {
-          if (pendingImages.length === 1) {
-            onSendImage(agent.id, pendingImages[0].data, pendingImages[0].mimeType, text || undefined);
-          } else {
-            onSendImages(agent.id, pendingImages.map(img => ({ imageData: img.data, mimeType: img.mimeType })), text || undefined);
+        if (pendingImagesRef.current.length > 0) {
+          const batch = [...pendingImagesRef.current];
+          setImageUploadError('');
+          setUploadProgress({ completed: 0, total: batch.length });
+          try {
+            await onSendImages(agent.id, batch, text || undefined, (completed, total) => {
+              setUploadProgress({ completed, total });
+            });
+          } catch (error) {
+            setImageUploadError(error instanceof Error ? error.message : String(error));
+            setUploadProgress(null);
+            return;
           }
-          setPendingImages([]);
+          for (const image of batch) URL.revokeObjectURL(image.previewUrl);
+          replacePendingImages([]);
+          setUploadProgress(null);
           if (text) setInputHistory(prev => [...prev, text]);
           setHistoryIdx(-1);
           setInput('');
@@ -2279,39 +2374,66 @@
       }, [input]);
 
       // Image handling (Feature 3) — stage images, send on Enter
-      const handleImageUpload = useCallback((file) => {
-        if (!file || !file.type.startsWith('image/') || !agent) return;
-        const reader = new FileReader();
-        reader.onload = () => {
-          const base64 = reader.result.split(',')[1];
-          setPendingImages(prev => [...prev, { data: base64, mimeType: file.type, name: file.name }]);
-          inputRef.current?.focus();
-        };
-        reader.readAsDataURL(file);
-      }, [agent]);
+      const stageImageFiles = useCallback((files) => {
+        if (!agent || uploadProgress) return;
+        const incoming = Array.from(files || []).filter(Boolean);
+        if (incoming.length === 0) return;
+
+        const current = pendingImagesRef.current;
+        const next = [...current];
+        let totalBytes = current.reduce((sum, image) => sum + image.size, 0);
+        const errors = [];
+
+        for (const file of incoming) {
+          if (!SUPPORTED_CHAT_IMAGE_TYPES.has(file.type)) {
+            errors.push((file.name || 'Image') + ' is not PNG, JPEG, WEBP, or GIF');
+            continue;
+          }
+          if (next.length >= MAX_CHAT_IMAGES) {
+            errors.push('A single message can contain at most ' + MAX_CHAT_IMAGES + ' images');
+            break;
+          }
+          if (totalBytes + file.size > MAX_CHAT_IMAGE_TOTAL_BYTES) {
+            errors.push('The image batch exceeds the 512 MiB model input limit');
+            continue;
+          }
+          next.push({
+            file,
+            name: file.name || ('pasted-image-' + (next.length + 1)),
+            mimeType: file.type,
+            size: file.size,
+            previewUrl: URL.createObjectURL(file),
+          });
+          totalBytes += file.size;
+        }
+
+        replacePendingImages(next);
+        setImageUploadError(errors[0] || '');
+        inputRef.current?.focus();
+      }, [agent, replacePendingImages, uploadProgress]);
 
       const handleDrop = useCallback((ev) => {
         ev.preventDefault();
         setDragging(false);
         const files = ev.dataTransfer?.files;
-        if (files) {
-          for (let i = 0; i < files.length; i++) {
-            handleImageUpload(files[i]);
-          }
-        }
-      }, [handleImageUpload]);
+        if (files) stageImageFiles(files);
+      }, [stageImageFiles]);
 
       const handlePaste = useCallback((ev) => {
         const items = ev.clipboardData?.items;
         if (!items) return;
-        let hasImage = false;
+        const images = [];
         for (const item of items) {
           if (item.type.startsWith('image/')) {
-            if (!hasImage) { ev.preventDefault(); hasImage = true; }
-            handleImageUpload(item.getAsFile());
+            const file = item.getAsFile();
+            if (file) images.push(file);
           }
         }
-      }, [handleImageUpload]);
+        if (images.length > 0) {
+          ev.preventDefault();
+          stageImageFiles(images);
+        }
+      }, [stageImageFiles]);
 
       // Search matches (Feature 1)
       const searchMatches = useMemo(() => {
@@ -2480,7 +2602,7 @@
         },
           e('div', { className: 'panel-main' },
             // Drop zone overlay (Feature 3)
-            dragging && e('div', { className: 'drop-zone-active' }, e('span', null, 'Drop image here')),
+            dragging && e('div', { className: 'drop-zone-active' }, e('span', null, 'Drop up to 100 images here')),
             // Chat content
             e('div', {
           className: 'panel-content', ref: contentRef, onClick: handleContentClick,
@@ -2515,6 +2637,7 @@
                         content: m.content,
                         imageData: m.imageData,
                         imageMimeType: m.imageMimeType,
+                        imageAttachments: m.imageAttachments,
                         source: m.source,
                         provider: m.provider,
                         model: m.model,
@@ -2522,7 +2645,15 @@
                         showToolMessages,
                         searchQuery: searchVisible ? searchQuery : '',
                         showRetry: realIdx === lastUserMsgIndex && m.role === 'user' && !isWorking,
-                        onRetry: realIdx === lastUserMsgIndex ? () => onSendMessage(m.content) : undefined,
+                        onRetry: realIdx === lastUserMsgIndex
+                          ? (m.imageAttachments?.length
+                            ? () => onSendImages(
+                                agent.id,
+                                m.imageAttachments,
+                                m.content.replace(/^\[\d+ images? attached at original resolution\]\s*/i, '') || undefined,
+                              ).catch(error => setImageUploadError(error instanceof Error ? error.message : String(error)))
+                            : () => onSendMessage(m.content))
+                          : undefined,
                       });
                     })
                   );
@@ -2591,17 +2722,33 @@
               }, 'Fresh session on ' + agent.modelMismatch.requested)
             )
           ),
-          pendingImages.length > 0 && e('div', { style: { display: 'flex', alignItems: 'center', gap: 8, padding: '4px 12px', fontSize: 11, color: 'var(--text-secondary)', flexWrap: 'wrap' } },
+          pendingImages.length > 0 && e('div', { className: 'pending-image-strip', style: { display: 'flex', alignItems: 'center', gap: 8, padding: '4px 12px', fontSize: 11, color: 'var(--text-secondary)', flexWrap: 'wrap' } },
             pendingImages.map((img, idx) =>
               e('div', { key: idx, style: { position: 'relative', display: 'inline-block' } },
-                e('img', { src: 'data:' + img.mimeType + ';base64,' + img.data, style: { width: 32, height: 32, borderRadius: 4, objectFit: 'cover', border: '1px solid var(--border)' } }),
-                e('button', { style: { position: 'absolute', top: -4, right: -4, background: 'var(--error)', border: 'none', color: 'white', cursor: 'pointer', fontSize: 10, width: 14, height: 14, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0, lineHeight: 1 }, onClick: () => setPendingImages(prev => prev.filter((_, i) => i !== idx)), title: 'Remove image' }, '\u00D7')
+                e('img', { src: img.previewUrl, title: 'Image ' + (idx + 1) + ': ' + img.name, style: { width: 32, height: 32, borderRadius: 4, objectFit: 'cover', border: '1px solid var(--border)' } }),
+                e('button', {
+                  style: { position: 'absolute', top: -4, right: -4, background: 'var(--error)', border: 'none', color: 'white', cursor: uploadProgress ? 'not-allowed' : 'pointer', fontSize: 10, width: 14, height: 14, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0, lineHeight: 1 },
+                  disabled: !!uploadProgress,
+                  onClick: () => {
+                    const removed = pendingImagesRef.current[idx];
+                    if (removed?.previewUrl) URL.revokeObjectURL(removed.previewUrl);
+                    replacePendingImages(pendingImagesRef.current.filter((_, i) => i !== idx));
+                    setImageUploadError('');
+                  },
+                  title: 'Remove image',
+                }, '\u00D7')
               )
             ),
-            e('span', { style: { color: 'var(--text-muted)', marginLeft: 'auto' } }, pendingImages.length + ' image' + (pendingImages.length > 1 ? 's' : '') + ' \u2014 Enter to send')
+            e('span', { className: uploadProgress ? 'image-upload-progress' : '', style: { color: uploadProgress ? undefined : 'var(--text-muted)', marginLeft: 'auto' } },
+              uploadProgress
+                ? 'Uploading ' + uploadProgress.completed + '/' + uploadProgress.total + ' at original quality...'
+                : pendingImages.length + '/' + MAX_CHAT_IMAGES + ' images \u00B7 ' + (pendingImages.reduce((sum, image) => sum + image.size, 0) / (1024 * 1024)).toFixed(1) + ' MiB \u00B7 Enter to send'
+            ),
+            imageUploadError && e('div', { className: 'image-upload-error' }, imageUploadError)
           ),
+          pendingImages.length === 0 && imageUploadError && e('div', { className: 'image-upload-error', style: { padding: '4px 12px' } }, imageUploadError),
           e('div', { className: 'panel-input-wrapper' },
-            e('button', { className: 'image-upload-btn', onClick: () => fileInputRef.current?.click(), title: 'Upload image' }, '\uD83D\uDCCE'),
+            e('button', { className: 'image-upload-btn', disabled: !!uploadProgress || pendingImages.length >= MAX_CHAT_IMAGES, onClick: () => fileInputRef.current?.click(), title: 'Upload up to 100 images' }, '\uD83D\uDCCE'),
             e('textarea', {
               ref: inputRef,
               className: 'panel-textarea',
@@ -2609,9 +2756,11 @@
               onChange: (ev) => { setInput(ev.target.value); setHistoryIdx(-1); },
               onKeyDown: handleKeyDown,
               onPaste: handlePaste,
-              disabled: !!agent.modelMismatch,
+              disabled: !!agent.modelMismatch || !!uploadProgress,
               placeholder: agent.modelMismatch
                 ? 'Blocked \u2014 resolve the model mismatch above first'
+                : uploadProgress
+                  ? 'Uploading images at original quality...'
                 : pendingImages.length > 0
                   ? 'Add context for the image' + (pendingImages.length > 1 ? 's' : '') + '... (Enter to send)'
                   : isWorking
@@ -2620,7 +2769,7 @@
               rows: 1,
               autoFocus: true,
             }),
-            e('input', { ref: fileInputRef, type: 'file', accept: 'image/*', multiple: true, style: { display: 'none' }, onChange: (ev) => { for (let i = 0; i < ev.target.files.length; i++) handleImageUpload(ev.target.files[i]); ev.target.value = ''; } }),
+            e('input', { ref: fileInputRef, type: 'file', accept: 'image/png,image/jpeg,image/webp,image/gif', multiple: true, style: { display: 'none' }, onChange: (ev) => { stageImageFiles(ev.target.files); ev.target.value = ''; } }),
             slashOpen && e('div', { className: 'slash-autocomplete' },
               slashMatches.map((cmd, i) => e('div', {
                 key: cmd._id,
@@ -5412,7 +5561,6 @@
                   onQaHandoff: ws.handoffQaRun,
                   onClearQaUnread: ws.clearQaUnread,
                   onSendMessage: (content) => ws.sendMessage(agent.id, content),
-                  onSendImage: ws.sendImage,
                   onSendImages: ws.sendImages,
                   onStop: ws.stopAgent,
                   onClearHistory: ws.clearHistory,
@@ -5465,7 +5613,6 @@
                   onQaHandoff: ws.handoffQaRun,
                   onClearQaUnread: ws.clearQaUnread,
                   onSendMessage: (content) => ws.sendMessage(agent.id, content),
-                  onSendImage: ws.sendImage,
                   onSendImages: ws.sendImages,
                   onStop: ws.stopAgent,
                   onClearHistory: ws.clearHistory,

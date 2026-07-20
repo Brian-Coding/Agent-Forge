@@ -1,7 +1,7 @@
-﻿import { watch, existsSync, mkdirSync, type FSWatcher } from 'fs';
+﻿import { watch, existsSync, type FSWatcher } from 'fs';
 import { join } from 'path';
-import { tmpdir } from 'os';
-import type { AgentInfo, AgentProvider, AgentStatus, ChatMessage } from '../../shared/protocol';
+import type { AgentInfo, AgentProvider, AgentStatus, ChatImageAttachment, ChatMessage } from '../../shared/protocol';
+import type { ChatTurnOptions } from './chat.service';
 import { stripModelTier } from '../agents/agent-kinds';
 import { resolveAgentModel, resolveAgentReasoningLevel } from '../agents/registry';
 import { generateId } from '../utils';
@@ -11,6 +11,11 @@ import { workspaceService } from './workspace.service';
 import { settingsService } from './settings.service';
 import { broadcast } from '../broadcast';
 import { normalizeSharedProjectContext } from './prompt-builder.service';
+import {
+  buildExhaustiveImagePrompt,
+  storeChatImageBytes,
+  validateChatImageAttachments,
+} from './chat-image.service';
 
 // MAX_OUTPUT_BUFFER, DEFAULT_GUARDRAILS, readWithTimeout, and the Claude-specific
 // spawn/parse code (spawnProcess, readStreamJson, readStderr, _sendMessageImpl)
@@ -81,7 +86,7 @@ async function notifyLifecycle(kind: 'onIdle' | 'onStop' | 'onRemoved', agentId:
 //   src/server/services/prompts/{qa,atlas}-system-prompt.ts
 // They subscribe to agent lifecycle via agentService.onAgentIdle / onAgentRemoved.
 
-function addMessage(agentId: string, role: ChatMessage['role'], content: string, imageData?: string, imageMimeType?: string, source?: 'qa', provider?: AgentProvider, model?: string): ChatMessage {
+function addMessage(agentId: string, role: ChatMessage['role'], content: string, imageData?: string, imageMimeType?: string, source?: 'qa', provider?: AgentProvider, model?: string, imageAttachments?: readonly ChatImageAttachment[]): ChatMessage {
   const msg: ChatMessage = {
     id: generateId(),
     agentId,
@@ -94,6 +99,7 @@ function addMessage(agentId: string, role: ChatMessage['role'], content: string,
   if (source) msg.source = source;
   if (provider) msg.provider = provider;
   if (model) msg.model = model;
+  if (imageAttachments?.length) msg.imageAttachments = [...imageAttachments];
   if (!messages.has(agentId)) {
     messages.set(agentId, []);
   }
@@ -264,8 +270,8 @@ export const agentService = {
   },
 
   /** Internal: append any-role message. Used by chat.service when broadcasting user turns. */
-  appendMessage(agentId: string, role: ChatMessage['role'], content: string, imageData?: string, imageMimeType?: string, source?: 'qa', provider?: AgentProvider, model?: string): ChatMessage {
-    return addMessage(agentId, role, content, imageData, imageMimeType, source, provider, model);
+  appendMessage(agentId: string, role: ChatMessage['role'], content: string, imageData?: string, imageMimeType?: string, source?: 'qa', provider?: AgentProvider, model?: string, imageAttachments?: readonly ChatImageAttachment[]): ChatMessage {
+    return addMessage(agentId, role, content, imageData, imageMimeType, source, provider, model, imageAttachments);
   },
 
   /** Internal: set agent status + broadcast agent_updated. No-op if status unchanged. */
@@ -637,12 +643,12 @@ export const agentService = {
    * sendLock chain now; the legacy sendLocks map here is unused but kept
    * for HMR compatibility until Phase 1D removes the legacy spawn path.
    */
-  async sendMessage(agentId: string, content: string, source?: 'qa'): Promise<void> {
+  async sendMessage(agentId: string, content: string, source?: 'qa', options?: ChatTurnOptions): Promise<void> {
     // Dynamic import to avoid module-load-time circular reference. chat.service
     // imports agent.service, so the top-level import would deadlock; deferring
     // until the first call lets both modules finish loading first.
     const { chatService } = await import('./chat.service');
-    return chatService.sendMessage(agentId, content, source);
+    return chatService.sendMessage(agentId, content, source, options);
   },
 
   async stopAgent(agentId: string, reason: 'user' | 'timeout' | 'system' = 'user'): Promise<boolean> {
@@ -675,25 +681,13 @@ export const agentService = {
   async sendImage(agentId: string, imageData: string, mimeType: string, prompt?: string): Promise<void> {
     const agent = agents.get(agentId);
     if (!agent) return;
-
-    const ext = mimeType === 'image/png' ? '.png' : mimeType === 'image/jpeg' ? '.jpg' : mimeType === 'image/gif' ? '.gif' : mimeType === 'image/webp' ? '.webp' : '.png';
-    const filename = `screenshot_${Date.now()}${ext}`;
-    const filepath = join(tmpdir(), filename);
-
     try {
       const buffer = Buffer.from(imageData, 'base64');
-      await Bun.write(filepath, buffer);
-
-      const imgMsg = addMessage(agentId, 'user', `[Image uploaded: ${filename}]` + (prompt ? '\n' + prompt : ''), imageData, mimeType);
-      broadcast({ type: 'message', message: imgMsg });
-
-      const content = prompt
-        ? `I've uploaded a screenshot/image for you to examine: ${filepath}\n\n${prompt}`
-        : `I've uploaded a screenshot/image for you to examine: ${filepath}\nPlease examine this image file and describe what you see or act on it as appropriate.`;
-      await agentService.sendMessage(agentId, content);
+      const attachment = await storeChatImageBytes(agentId, `image-${Date.now()}`, mimeType, buffer);
+      await agentService.sendUploadedImages(agentId, [attachment], prompt);
     } catch (e) {
       console.error(`Failed to save image for agent ${agentId}:`, e);
-      const errMsg = addMessage(agentId, 'system', 'Failed to process uploaded image.');
+      const errMsg = addMessage(agentId, 'system', `Failed to process uploaded image: ${e instanceof Error ? e.message : String(e)}`);
       broadcast({ type: 'message', message: errMsg });
     }
   },
@@ -705,33 +699,37 @@ export const agentService = {
     if (!agent || images.length === 0) return;
 
     try {
-      const filePaths: string[] = [];
+      const attachments: ChatImageAttachment[] = [];
       for (let i = 0; i < images.length; i++) {
         const img = images[i];
         if (!img) continue;
-        const ext = img.mimeType === 'image/png' ? '.png' : img.mimeType === 'image/jpeg' ? '.jpg' : img.mimeType === 'image/gif' ? '.gif' : img.mimeType === 'image/webp' ? '.webp' : '.png';
-        const filename = `screenshot_${Date.now()}_${i}${ext}`;
-        const filepath = join(tmpdir(), filename);
         const buffer = Buffer.from(img.imageData, 'base64');
-        await Bun.write(filepath, buffer);
-        filePaths.push(filepath);
+        attachments.push(await storeChatImageBytes(agentId, `image-${i + 1}`, img.mimeType, buffer));
       }
-
-      // Add chat message with first image data for preview
-      const first = images[0]!;
-      const label = `[${images.length} image${images.length > 1 ? 's' : ''} uploaded]` + (prompt ? '\n' + prompt : '');
-      const imgMsg = addMessage(agentId, 'user', label, first.imageData, first.mimeType);
-      broadcast({ type: 'message', message: imgMsg });
-
-      // Build combined prompt listing all file paths
-      const fileList = filePaths.map((fp, i) => `Image ${i + 1}: ${fp}`).join('\n');
-      const content = prompt
-        ? `I've uploaded ${images.length} screenshot(s)/image(s) for you to examine:\n${fileList}\n\n${prompt}`
-        : `I've uploaded ${images.length} screenshot(s)/image(s) for you to examine:\n${fileList}\nPlease examine these image files and describe what you see or act on them as appropriate.`;
-      await agentService.sendMessage(agentId, content);
+      await agentService.sendUploadedImages(agentId, attachments, prompt);
     } catch (e) {
       console.error(`Failed to save images for agent ${agentId}:`, e);
-      const errMsg = addMessage(agentId, 'system', 'Failed to process uploaded images.');
+      const errMsg = addMessage(agentId, 'system', `Failed to process uploaded images: ${e instanceof Error ? e.message : String(e)}`);
+      broadcast({ type: 'message', message: errMsg });
+    }
+  },
+
+  async sendUploadedImages(agentId: string, images: readonly ChatImageAttachment[], prompt?: string): Promise<void> {
+    const agent = agents.get(agentId);
+    if (!agent) return;
+    try {
+      const attachments = validateChatImageAttachments(images);
+      const content = buildExhaustiveImagePrompt(attachments, prompt);
+      const displayContent = `[${attachments.length} image${attachments.length === 1 ? '' : 's'} attached at original resolution]`
+        + (prompt?.trim() ? `\n${prompt.trim()}` : '');
+      await agentService.sendMessage(agentId, content, undefined, {
+        imagePaths: attachments.map(image => image.path),
+        imageAttachments: attachments,
+        displayContent,
+      });
+    } catch (e) {
+      console.error(`Failed to send uploaded images for agent ${agentId}:`, e);
+      const errMsg = addMessage(agentId, 'system', `Images were not sent: ${e instanceof Error ? e.message : String(e)}`);
       broadcast({ type: 'message', message: errMsg });
     }
   },

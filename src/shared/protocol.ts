@@ -251,9 +251,17 @@ export interface ChatMessage {
   timestamp: number;
   imageData?: string;         // Base64 encoded image data
   imageMimeType?: string;     // e.g. 'image/png', 'image/jpeg'
+  imageAttachments?: ChatImageAttachment[]; // Stable local files; avoids base64 payload/history bloat for multi-image turns
   source?: 'qa';              // QA-originated message (for visual styling)
   provider?: AgentProvider;   // Which provider produced this turn (assistant messages only). Stamped at turn-finalize. Legacy messages without this field display as 'Claude' for backward compat.
   model?: string;             // Which model actually produced this turn when the provider reports it.
+}
+
+export interface ChatImageAttachment {
+  path: string;
+  name: string;
+  mimeType: string;
+  size: number;
 }
 
 /**
@@ -491,6 +499,7 @@ export type ClientMessage =
   // Image
   | { type: 'send_image'; agentId: string; imageData: string; mimeType: string; prompt?: string }
   | { type: 'send_images'; agentId: string; images: { imageData: string; mimeType: string }[]; prompt?: string }
+  | { type: 'send_uploaded_images'; agentId: string; images: ChatImageAttachment[]; prompt?: string }
   // Workspaces
   | { type: 'get_workspaces' }
   | { type: 'create_workspace'; name: string }

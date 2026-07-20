@@ -12,6 +12,7 @@ import { qaService } from './services/qa.service';
 import { atlasService } from './services/atlas.service';
 import { usageService } from './services/usage.service';
 import { limitsService } from './services/limits.service';
+import { MAX_CHAT_IMAGE_TOTAL_BYTES } from './services/chat-image.service';
 
 import { websocketHandlers } from './ws';
 
@@ -24,6 +25,7 @@ import { handleVercelIntegration } from './routes/integrations.routes';
 import { handleHarnessInstructions } from './routes/harness.routes';
 import { handleAskAtlas } from './routes/atlas.routes';
 import { handleProjectFile } from './routes/project-file.routes';
+import { handleChatImage, handleChatImageUpload } from './routes/chat-image.routes';
 import { handleListSimulators, handleBootSimulator, handleShutdownSimulator, handleEraseSimulator, handleCleanDerivedData } from './routes/simulator.routes';
 import { handleBrowserNavigate, handleBrowserScreenshot, handleBrowserClick, handleBrowserType, handleBrowserWaitForReady, handleBrowserConsoleGet, handleBrowserConsoleClear, handleBrowserStatus, handleBrowserEvaluate, handleBrowserNetworkGet, handleBrowserNetworkClear, handleBrowserViewport, handleBrowserContextClose, handleQaScreenshot, handleAtlasFile } from './routes/browser.routes';
 
@@ -345,6 +347,7 @@ function startServer(preferredPort: number) {
       return Bun.serve({
         port,
         hostname: bindHostname,
+        maxRequestBodySize: MAX_CHAT_IMAGE_TOTAL_BYTES,
         routes: {
           '/': index,
         },
@@ -371,6 +374,8 @@ function startServer(preferredPort: number) {
           if (url.pathname === '/api/integrations/vercel' && (req.method === 'GET' || req.method === 'POST')) return handleVercelIntegration(req);
           if (url.pathname === '/api/harness/instructions' && req.method === 'GET') return handleHarnessInstructions();
           if (url.pathname === '/api/project-file' && req.method === 'GET') return handleProjectFile(req);
+          if (url.pathname === '/api/chat/image-upload' && req.method === 'POST') return handleChatImageUpload(req);
+          if (url.pathname === '/api/chat/image' && req.method === 'GET') return handleChatImage(req);
           if (url.pathname === '/api/simulators' && req.method === 'GET') return handleListSimulators(req);
           if (url.pathname === '/api/simulators/boot' && req.method === 'POST') return handleBootSimulator(req);
           if (url.pathname === '/api/simulators/shutdown' && req.method === 'POST') return handleShutdownSimulator(req);

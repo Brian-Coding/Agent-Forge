@@ -255,6 +255,11 @@ async function handleMessage(ws: ServerWebSocket<unknown>, message: ClientMessag
       break;
     }
 
+    case 'send_uploaded_images': {
+      await agentService.sendUploadedImages(message.agentId, message.images, message.prompt);
+      break;
+    }
+
     // --- Workspaces ---
     case 'get_workspaces': {
       sendTo(ws, { type: 'workspaces_list', workspaces: workspaceService.getAll() });
