@@ -12,6 +12,7 @@ import { qaService } from './services/qa.service';
 import { atlasService } from './services/atlas.service';
 import { usageService } from './services/usage.service';
 import { limitsService } from './services/limits.service';
+import { MAX_CHAT_IMAGE_TOTAL_BYTES } from './services/chat-image.service';
 
 import { websocketHandlers } from './ws';
 
@@ -22,8 +23,11 @@ import { handleGetModels } from './routes/models.routes';
 import { handleUsageExport } from './routes/usage.routes';
 import { handleVercelIntegration } from './routes/integrations.routes';
 import { handleHarnessInstructions } from './routes/harness.routes';
+import { handleAskAtlas } from './routes/atlas.routes';
+import { handleProjectFile } from './routes/project-file.routes';
+import { handleChatImage, handleChatImageUpload } from './routes/chat-image.routes';
 import { handleListSimulators, handleBootSimulator, handleShutdownSimulator, handleEraseSimulator, handleCleanDerivedData } from './routes/simulator.routes';
-import { handleBrowserNavigate, handleBrowserScreenshot, handleBrowserClick, handleBrowserType, handleBrowserWaitForReady, handleBrowserConsoleGet, handleBrowserConsoleClear, handleBrowserStatus, handleBrowserEvaluate, handleQaScreenshot, handleAtlasFile } from './routes/browser.routes';
+import { handleBrowserNavigate, handleBrowserScreenshot, handleBrowserClick, handleBrowserType, handleBrowserWaitForReady, handleBrowserConsoleGet, handleBrowserConsoleClear, handleBrowserStatus, handleBrowserEvaluate, handleBrowserNetworkGet, handleBrowserNetworkClear, handleBrowserViewport, handleBrowserContextClose, handleQaScreenshot, handleAtlasFile } from './routes/browser.routes';
 
 // Catch unhandled promise rejections to prevent silent crashes
 process.on('unhandledRejection', (reason, promise) => {
@@ -343,6 +347,7 @@ function startServer(preferredPort: number) {
       return Bun.serve({
         port,
         hostname: bindHostname,
+        maxRequestBodySize: MAX_CHAT_IMAGE_TOTAL_BYTES,
         routes: {
           '/': index,
         },
@@ -368,6 +373,9 @@ function startServer(preferredPort: number) {
           if (url.pathname === '/api/usage/export' && req.method === 'GET') return handleUsageExport(req);
           if (url.pathname === '/api/integrations/vercel' && (req.method === 'GET' || req.method === 'POST')) return handleVercelIntegration(req);
           if (url.pathname === '/api/harness/instructions' && req.method === 'GET') return handleHarnessInstructions();
+          if (url.pathname === '/api/project-file' && req.method === 'GET') return handleProjectFile(req);
+          if (url.pathname === '/api/chat/image-upload' && req.method === 'POST') return handleChatImageUpload(req);
+          if (url.pathname === '/api/chat/image' && req.method === 'GET') return handleChatImage(req);
           if (url.pathname === '/api/simulators' && req.method === 'GET') return handleListSimulators(req);
           if (url.pathname === '/api/simulators/boot' && req.method === 'POST') return handleBootSimulator(req);
           if (url.pathname === '/api/simulators/shutdown' && req.method === 'POST') return handleShutdownSimulator(req);
@@ -382,8 +390,13 @@ function startServer(preferredPort: number) {
           if (url.pathname === '/api/browser/console/clear' && req.method === 'POST') return handleBrowserConsoleClear(req);
           if (url.pathname === '/api/browser/status' && req.method === 'GET') return handleBrowserStatus(req);
           if (url.pathname === '/api/browser/evaluate' && req.method === 'POST') return handleBrowserEvaluate(req);
+          if (url.pathname === '/api/browser/network' && req.method === 'GET') return handleBrowserNetworkGet(req);
+          if (url.pathname === '/api/browser/network/clear' && req.method === 'POST') return handleBrowserNetworkClear(req);
+          if (url.pathname === '/api/browser/viewport' && req.method === 'POST') return handleBrowserViewport(req);
+          if (url.pathname === '/api/browser/context/close' && req.method === 'POST') return handleBrowserContextClose(req);
           if (url.pathname === '/api/qa/screenshot' && req.method === 'GET') return handleQaScreenshot(req);
           if (url.pathname === '/api/atlas/file' && req.method === 'GET') return handleAtlasFile(req);
+          if (url.pathname === '/api/atlas/ask' && req.method === 'POST') return handleAskAtlas(req);
 
           return new Response('Not Found', { status: 404 });
         },

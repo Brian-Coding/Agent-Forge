@@ -1,7 +1,8 @@
-import type { WorkspaceInfo, AppSettings } from '../../shared/protocol';
+import type { WorkspaceInfo, AppSettings, AtlasRunInfo, QaRunInfo } from '../../shared/protocol';
 import { generateId } from '../utils';
 import { persistenceService } from './persistence.service';
 import { settingsService } from './settings.service';
+import { compactQaRunHistory } from './qa-run-history';
 
 // HMR-safe state
 const workspaces: Map<string, WorkspaceInfo> = (globalThis as any).__workspacesMap ??= new Map<string, WorkspaceInfo>();
@@ -58,7 +59,7 @@ export const workspaceService = {
     return ws;
   },
 
-  async update(id: string, updates: { name?: string; gridColumns?: number; gridRows?: number; selectedAgentIds?: string[]; lockedAgentIds?: string[]; testUrl?: string; qaAgentId?: string; atlasAgentId?: string; atlasProjectCwd?: string; atlasLastScanAt?: number; qaSurfaceVerifications?: Record<string, number> }): Promise<WorkspaceInfo | null> {
+  async update(id: string, updates: { name?: string; gridColumns?: number; gridRows?: number; selectedAgentIds?: string[]; lockedAgentIds?: string[]; testUrl?: string; qaAgentId?: string | null; qaRuns?: QaRunInfo[]; atlasAgentId?: string | null; atlasProjectCwd?: string; atlasLastScanAt?: number; atlasRun?: AtlasRunInfo | null; qaSurfaceVerifications?: Record<string, number> }): Promise<WorkspaceInfo | null> {
     const ws = workspaces.get(id);
     if (!ws) return null;
     if (updates.name !== undefined) ws.name = updates.name;
@@ -67,10 +68,21 @@ export const workspaceService = {
     if (updates.selectedAgentIds !== undefined) ws.selectedAgentIds = updates.selectedAgentIds;
     if (updates.lockedAgentIds !== undefined) ws.lockedAgentIds = updates.lockedAgentIds;
     if (updates.testUrl !== undefined) ws.testUrl = updates.testUrl;
-    if (updates.qaAgentId !== undefined) ws.qaAgentId = updates.qaAgentId;
-    if (updates.atlasAgentId !== undefined) ws.atlasAgentId = updates.atlasAgentId;
+    if (updates.qaAgentId !== undefined) {
+      if (updates.qaAgentId === null) delete ws.qaAgentId;
+      else ws.qaAgentId = updates.qaAgentId;
+    }
+    if (updates.qaRuns !== undefined) ws.qaRuns = updates.qaRuns;
+    if (updates.atlasAgentId !== undefined) {
+      if (updates.atlasAgentId === null) delete ws.atlasAgentId;
+      else ws.atlasAgentId = updates.atlasAgentId;
+    }
     if (updates.atlasProjectCwd !== undefined) ws.atlasProjectCwd = updates.atlasProjectCwd;
     if (updates.atlasLastScanAt !== undefined) ws.atlasLastScanAt = updates.atlasLastScanAt;
+    if (updates.atlasRun !== undefined) {
+      if (updates.atlasRun === null) delete ws.atlasRun;
+      else ws.atlasRun = updates.atlasRun;
+    }
     if (updates.qaSurfaceVerifications !== undefined) ws.qaSurfaceVerifications = updates.qaSurfaceVerifications;
     await persistenceService.saveNow();
     return ws;
@@ -175,20 +187,49 @@ export const workspaceService = {
       for (const [index, ws] of workspacesList.entries()) {
         if (!Number.isFinite(ws.sortOrder)) ws.sortOrder = index;
         ws.lockedAgentIds = ws.lockedAgentIds || [];
-        // Reconcile atlasLastScanAt against atlas.md mtime. Stamps when unset
-        // (user manually deleted the agent before we shipped the timestamp
-        // tracking) and also bumps a stale stamp forward when the file is
-        // newer (run errored / timed out after writing the atlas, leaving
-        // the in-memory stamp behind on-disk reality).
+        ws.qaRuns = Array.isArray(ws.qaRuns) ? ws.qaRuns : [];
+        ws.qaRuns = compactQaRunHistory(ws.qaRuns.map(run => {
+          const interruptedHandoff = !!run.handoffStartedAt && !run.handedOffAt;
+          if (run.status !== 'queued' && run.status !== 'running') {
+            return interruptedHandoff
+              ? { ...run, handoffStartedAt: undefined, handoffError: 'Agent Forge restarted before the QA handoff completed. Try sending it again.' }
+              : run;
+          }
+          return {
+            ...run,
+            status: 'failed',
+            verdict: 'inconclusive',
+            summary: 'Agent Forge restarted before this QA run completed.',
+            report: '⚪ INCONCLUSIVE — Agent Forge restarted before this QA run completed.',
+            validationErrors: ['Interrupted by server restart'],
+            finishedAt: Date.now(),
+            error: 'Interrupted by server restart; run it again to obtain a trustworthy result.',
+            handoffStartedAt: undefined,
+            handoffError: interruptedHandoff ? 'Agent Forge restarted before the QA handoff completed. Try sending it again.' : run.handoffError,
+          };
+        }), 30);
+        // An in-flight process cannot survive a server restart. Keep its
+        // candidate and surface a resumable state instead of pretending the
+        // scan completed or silently starting it over.
+        if (ws.atlasRun?.status === 'running' || ws.atlasRun?.status === 'validating') {
+          ws.atlasRun = {
+            ...ws.atlasRun,
+            status: 'paused',
+            finishedAt: Date.now(),
+            error: 'Agent Forge restarted before this Atlas run completed. Resume to continue from its candidate checkpoint.',
+          };
+        }
+
+        // One-time compatibility import for Atlases created before manifests
+        // existed. Never advance an existing timestamp from file mtime: only a
+        // validated candidate promotion may mark a new scan complete.
         if (ws.atlasProjectCwd) {
           const atlasMd = join(ws.atlasProjectCwd, 'docs', 'ui-atlas', 'atlas.md');
-          if (existsSync(atlasMd)) {
+          if (existsSync(atlasMd) && !ws.atlasLastScanAt) {
             try {
               const mtime = statSync(atlasMd).mtimeMs;
-              if ((ws.atlasLastScanAt ?? 0) < mtime) {
-                ws.atlasLastScanAt = mtime;
-                console.log(`[workspace] reconciled atlasLastScanAt for ${ws.name} from atlas.md mtime`);
-              }
+              ws.atlasLastScanAt = mtime;
+              console.log(`[workspace] imported legacy atlas timestamp for ${ws.name}`);
             } catch {}
           }
         }

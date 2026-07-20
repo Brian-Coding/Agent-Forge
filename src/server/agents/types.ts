@@ -19,6 +19,7 @@ export interface AgentRunContext {
   readonly systemPrompt?: string;     // Already-built appended system prompt (provider-agnostic)
   readonly model?: string;
   readonly reasoningLevel?: string;   // Codex-only
+  readonly imagePaths?: readonly string[]; // Native image attachments for the current turn
   getSessionId(): string | null;
   updateSessionId(nextSessionId: string): void;
   emitChatEvent(event: unknown): void;        // Raw provider event (for buffers / debugging)
