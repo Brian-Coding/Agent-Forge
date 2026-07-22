@@ -476,6 +476,8 @@
     /* Retry button (Feature 9) */
     .retry-btn { background: none; border: 1px solid var(--border); color: var(--text-secondary); cursor: pointer; padding: 2px 8px; border-radius: 4px; font-size: 11px; margin-top: 4px; }
     .retry-btn:hover { background: var(--bg-tertiary); color: var(--text-primary); border-color: var(--accent); }
+    .retry-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+    .retry-btn:disabled:hover { background: none; color: var(--text-secondary); border-color: var(--border); }
 
     /* Focused panel (Feature 2 - Escape safety) */
     .terminal-panel.focused { box-shadow: inset 0 0 0 1px var(--accent); }
@@ -1950,7 +1952,7 @@
       return { verdict: { kind, summary, raw: m[1].trim() }, body };
     }
 
-    const ChatTurn = React.memo(function ChatTurn({ role, content, isStreaming, imageData, imageMimeType, imageAttachments, showToolMessages, searchQuery, showRetry, onRetry, source, provider, model, agentId }) {
+    const ChatTurn = React.memo(function ChatTurn({ role, content, isStreaming, imageData, imageMimeType, imageAttachments, showToolMessages, searchQuery, showRetry, retryDisabled, onRetry, source, provider, model, agentId }) {
       const [copied, setCopied] = useState(false);
       const isQa = source === 'qa';
       // Per-message provider stamp (newer messages); fall back to 'Claude' for
@@ -2020,10 +2022,17 @@
           })
         ),
         renderBody(),
-        showRetry && onRetry && e('button', { className: 'retry-btn', onClick: onRetry }, '\u21BB Retry')
+        showRetry && onRetry && e('button', {
+          className: 'retry-btn',
+          onClick: onRetry,
+          disabled: retryDisabled,
+          title: retryDisabled
+            ? 'Wait for the current turn to finish before retrying this message'
+            : 'Resend this message as a new turn at the end of the conversation',
+        }, '\u21BB Retry')
       );
     }, (prev, next) => {
-      return prev.content === next.content && prev.role === next.role && prev.isStreaming === next.isStreaming && prev.searchQuery === next.searchQuery && prev.showToolMessages === next.showToolMessages && prev.showRetry === next.showRetry && prev.imageData === next.imageData && prev.imageAttachments === next.imageAttachments && prev.source === next.source && prev.provider === next.provider && prev.model === next.model;
+      return prev.content === next.content && prev.role === next.role && prev.isStreaming === next.isStreaming && prev.searchQuery === next.searchQuery && prev.showToolMessages === next.showToolMessages && prev.showRetry === next.showRetry && prev.retryDisabled === next.retryDisabled && prev.imageData === next.imageData && prev.imageAttachments === next.imageAttachments && prev.source === next.source && prev.provider === next.provider && prev.model === next.model;
     });
 
     // Terminal Panel
@@ -2448,15 +2457,6 @@
         return matches;
       }, [messages, searchQuery]);
 
-      // Compute last user message index for retry (Feature 9)
-      const lastUserMsgIndex = useMemo(() => {
-        const msgs = messages || [];
-        for (let i = msgs.length - 1; i >= 0; i--) {
-          if (msgs[i].role === 'user') return i;
-        }
-        return -1;
-      }, [messages]);
-
       // Click in content area focuses input (Feature 8)
       const handleContentClick = useCallback((ev) => {
         if (window.getSelection()?.toString()) return; // Don't steal focus during text selection
@@ -2644,8 +2644,9 @@
                         agentId: agent.id,
                         showToolMessages,
                         searchQuery: searchVisible ? searchQuery : '',
-                        showRetry: realIdx === lastUserMsgIndex && m.role === 'user' && !isWorking,
-                        onRetry: realIdx === lastUserMsgIndex
+                        showRetry: m.role === 'user',
+                        retryDisabled: isWorking || !!agent.modelMismatch,
+                        onRetry: m.role === 'user'
                           ? (m.imageAttachments?.length
                             ? () => onSendImages(
                                 agent.id,

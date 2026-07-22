@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { unlink } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
-import { isAbsolute, join, relative, resolve } from 'node:path';
+import { extname, isAbsolute, join, relative, resolve, win32 as win32Path } from 'node:path';
 import { ArgvTooLongError, createCliEnv, killProcessTree, resolveCliBinary, safeSpawn } from '../../utils';
 import { persistenceService } from '../../services/persistence.service';
 import { summarizeToolInput, type AgentEvent } from '../events';
@@ -203,19 +203,43 @@ export function codexImageArgs(imagePaths?: readonly string[]): string[] {
   return (imagePaths ?? []).flatMap(path => ['--image', path]);
 }
 
-export function buildCodexExecArgs(
+export function resolveCodexLaunchCommand(
   codexBin: string,
+  platform: NodeJS.Platform = process.platform,
+  pathExists: (path: string) => boolean = existsSync,
+  nodeBin?: string,
+): string[] {
+  if (platform !== 'win32' || extname(codexBin).toLowerCase() !== '.cmd') return [codexBin];
+
+  // npm's Windows shim runs through cmd.exe, whose command line limit is much
+  // smaller than CreateProcess's native limit. A 100-image turn can therefore
+  // fail even though the same argv is safe for node.exe. Launch the package's
+  // JS entry point directly and let it hand off to the native Codex binary.
+  const entrypoint = win32Path.resolve(
+    win32Path.dirname(codexBin),
+    'node_modules',
+    '@openai',
+    'codex',
+    'bin',
+    'codex.js',
+  );
+  return pathExists(entrypoint) ? [nodeBin || resolveCliBinary('node'), entrypoint] : [codexBin];
+}
+
+export function buildCodexExecArgs(
+  codexCommand: string | readonly string[],
   baseArgs: readonly string[],
   sessionId: string | null,
   imagePaths?: readonly string[],
 ): string[] {
+  const command = typeof codexCommand === 'string' ? [codexCommand] : [...codexCommand];
   const imageArgs = codexImageArgs(imagePaths);
   // --image is variadic in `codex exec`. Keep the stdin prompt positional
   // before image flags, otherwise the final --image consumes `-` (and resume's
   // session positional) as another filename and Codex receives no prompt.
   return sessionId
-    ? [codexBin, 'exec', 'resume', ...baseArgs, sessionId, '-', ...imageArgs]
-    : [codexBin, 'exec', ...baseArgs, '-', ...imageArgs];
+    ? [...command, 'exec', 'resume', ...baseArgs, sessionId, '-', ...imageArgs]
+    : [...command, 'exec', ...baseArgs, '-', ...imageArgs];
 }
 
 function codexToolName(item: any): string {
@@ -605,11 +629,11 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
 
     // Resolve to absolute path so Bun.spawn doesn't have to probe PATHEXT
     // from the agent's cwd (which fails on Windows for npm shim files).
-    const codexBin = resolveCliBinary('codex');
+    const codexCommand = resolveCodexLaunchCommand(resolveCliBinary('codex'));
     const sessionId = ctx.getSessionId();
     // Native attachments put every image directly into the model input. The
     // installed CLI supports --image on both fresh and resumed exec turns.
-    const args = buildCodexExecArgs(codexBin, baseArgs, sessionId, ctx.imagePaths);
+    const args = buildCodexExecArgs(codexCommand, baseArgs, sessionId, ctx.imagePaths);
 
     // The Codex CLI doesn't have an --append-system-prompt flag. We
     // prepend the agent-forge system prompt (guardrails + persona + notes

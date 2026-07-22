@@ -29,3 +29,13 @@ test('chat image batches use the 100-image native upload path instead of base64 
   expect(clientSource).toContain('imageAttachments: m.imageAttachments');
   expect(clientSource).not.toContain('reader.readAsDataURL(file)');
 });
+
+test('every user message keeps a retry action bound to its own text or image attachments', () => {
+  expect(clientSource).toContain("showRetry: m.role === 'user'");
+  expect(clientSource).toContain('retryDisabled: isWorking || !!agent.modelMismatch');
+  expect(clientSource).toContain("onRetry: m.role === 'user'");
+  expect(clientSource).toContain('m.imageAttachments?.length');
+  expect(clientSource).toContain("m.content.replace(/^\\[\\d+ images? attached at original resolution\\]\\s*/i, '')");
+  expect(clientSource).toContain('Resend this message as a new turn at the end of the conversation');
+  expect(clientSource).not.toContain('realIdx === lastUserMsgIndex');
+});
