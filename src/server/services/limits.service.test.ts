@@ -1,8 +1,14 @@
 import { test, expect, beforeAll, afterAll } from 'bun:test';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, utimesSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { LIMITS_REFRESH_INTERVAL_MS, limitsService, mapClaudeUsageResponse, mapCodexRateLimitWindows } from './limits.service';
+import {
+  LIMITS_REFRESH_INTERVAL_MS,
+  limitsService,
+  mapClaudeUsageResponse,
+  mapCodexAppServerRateLimits,
+  mapCodexRateLimitWindows,
+} from './limits.service';
 
 // Parser regression net for the Limits tab: feeds a synthetic Claude bridge
 // file and a synthetic Codex rollout tree through refresh() via env overrides.
@@ -35,10 +41,11 @@ beforeAll(() => {
   // Codex rollout tree: sessions/YYYY/MM/DD/rollout-*.jsonl
   const dayDir = join(dir, 'sessions', '2026', '07', '09');
   mkdirSync(dayDir, { recursive: true });
+  const currentEventAt = new Date(Date.now() - 60_000).toISOString();
   const lines = [
-    JSON.stringify({ timestamp: new Date().toISOString(), type: 'event_msg', payload: { type: 'agent_message', text: 'hi' } }),
+    JSON.stringify({ timestamp: currentEventAt, type: 'event_msg', payload: { type: 'agent_message', text: 'hi' } }),
     JSON.stringify({
-      timestamp: new Date().toISOString(),
+      timestamp: currentEventAt,
       type: 'event_msg',
       payload: {
         type: 'token_count',
@@ -53,6 +60,26 @@ beforeAll(() => {
     }),
   ];
   writeFileSync(join(dayDir, 'rollout-2026-07-09T14-08-52-test.jsonl'), lines.join('\n') + '\n');
+
+  // A long-lived session can have a newer file mtime while its last rate-limit
+  // event is older. Event timestamps, not file mtimes, must win.
+  const stalePath = join(dayDir, 'rollout-2026-07-09T15-00-00-stale.jsonl');
+  writeFileSync(stalePath, JSON.stringify({
+    timestamp: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+    type: 'event_msg',
+    payload: {
+      type: 'token_count',
+      info: { last_token_usage: { total_tokens: 10 }, model_context_window: 100 },
+      rate_limits: {
+        limit_id: 'codex',
+        primary: { used_percent: 63, window_minutes: 10080, resets_at: Math.floor(Date.now() / 1000) + 86400 },
+        secondary: null,
+        plan_type: 'prolite',
+      },
+    },
+  }) + '\n');
+  const futureMtime = new Date(Date.now() + 60_000);
+  utimesSync(stalePath, futureMtime, futureMtime);
   process.env.AI_HARNESS_CODEX_SESSIONS_DIR = join(dir, 'sessions');
 });
 
@@ -102,6 +129,26 @@ test('Codex maps a primary-only weekly limit by duration instead of slot positio
   expect(windows.weekly.usedPercent).toBe(15);
   expect(windows.weekly.windowMinutes).toBe(10080);
   expect(windows.weekly.resetsAt).toBe(1784493552 * 1000);
+});
+
+test('Codex maps the live app-server camelCase rate-limit response', () => {
+  const snap = mapCodexAppServerRateLimits({
+    rateLimits: {
+      limitId: 'codex',
+      planType: 'prolite',
+      primary: { usedPercent: 4, windowDurationMins: 10080, resetsAt: 1785258177 },
+      secondary: null,
+    },
+    rateLimitsByLimitId: null,
+  });
+
+  expect(snap.status).toBe('available');
+  expect(snap.source).toContain('account/rateLimits/read');
+  expect(snap.planType).toBe('prolite');
+  expect(snap.fiveHour.usedPercent).toBeNull();
+  expect(snap.weekly.usedPercent).toBe(4);
+  expect(snap.weekly.windowMinutes).toBe(10080);
+  expect(snap.weekly.resetsAt).toBe(1785258177 * 1000);
 });
 
 test('limits refresh parses Claude bridge file and Codex rollout events', async () => {

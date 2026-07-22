@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { unlink } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
-import { isAbsolute, join, relative, resolve } from 'node:path';
+import { extname, isAbsolute, join, relative, resolve, win32 as win32Path } from 'node:path';
 import { ArgvTooLongError, createCliEnv, killProcessTree, resolveCliBinary, safeSpawn } from '../../utils';
 import { persistenceService } from '../../services/persistence.service';
 import { summarizeToolInput, type AgentEvent } from '../events';
@@ -13,6 +13,7 @@ import type { AgentAdapter, AgentHandle, AgentRunContext } from '../types';
  *   codex exec [--json] [--skip-git-repo-check]
  *              [--output-last-message <tmpfile>]
  *              [--dangerously-bypass-approvals-and-sandbox]
+ *              [--image <path>]...
  *              [-m <model>] [-c reasoning_effort=<level>] [-C <cwd>]
  *              [resume <session_id>] -
  *   (prompt piped via stdin since `-` is supplied)
@@ -198,6 +199,95 @@ function extractText(value: any): string {
   return '';
 }
 
+export function codexImageArgs(imagePaths?: readonly string[]): string[] {
+  return (imagePaths ?? []).flatMap(path => ['--image', path]);
+}
+
+export function resolveCodexLaunchCommand(
+  codexBin: string,
+  platform: NodeJS.Platform = process.platform,
+  pathExists: (path: string) => boolean = existsSync,
+  nodeBin?: string,
+): string[] {
+  if (platform !== 'win32' || extname(codexBin).toLowerCase() !== '.cmd') return [codexBin];
+
+  // npm's Windows shim runs through cmd.exe, whose command line limit is much
+  // smaller than CreateProcess's native limit. A 100-image turn can therefore
+  // fail even though the same argv is safe for node.exe. Launch the package's
+  // JS entry point directly and let it hand off to the native Codex binary.
+  const entrypoint = win32Path.resolve(
+    win32Path.dirname(codexBin),
+    'node_modules',
+    '@openai',
+    'codex',
+    'bin',
+    'codex.js',
+  );
+  return pathExists(entrypoint) ? [nodeBin || resolveCliBinary('node'), entrypoint] : [codexBin];
+}
+
+export function buildCodexExecArgs(
+  codexCommand: string | readonly string[],
+  baseArgs: readonly string[],
+  sessionId: string | null,
+  imagePaths?: readonly string[],
+): string[] {
+  const command = typeof codexCommand === 'string' ? [codexCommand] : [...codexCommand];
+  const imageArgs = codexImageArgs(imagePaths);
+  // --image is variadic in `codex exec`. Keep the stdin prompt positional
+  // before image flags, otherwise the final --image consumes `-` (and resume's
+  // session positional) as another filename and Codex receives no prompt.
+  return sessionId
+    ? [...command, 'exec', 'resume', ...baseArgs, sessionId, '-', ...imageArgs]
+    : [...command, 'exec', ...baseArgs, '-', ...imageArgs];
+}
+
+function codexToolName(item: any): string {
+  if (item?.type === 'web_search') return 'WebSearch';
+  if (item?.type === 'plan_update') return 'UpdatePlan';
+  const tool = item?.tool ?? item?.tool_name ?? item?.name ?? 'tool';
+  const server = item?.server ?? item?.server_name;
+  if (typeof server === 'string' && server && typeof tool === 'string' && tool && !tool.startsWith(server + '.')) {
+    return `${server}.${tool}`;
+  }
+  return typeof tool === 'string' && tool ? tool : 'tool';
+}
+
+function codexToolInput(item: any): unknown {
+  const raw = item?.arguments ?? item?.input ?? item?.params;
+  if (typeof raw !== 'string') return raw ?? {};
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return { input: raw };
+  }
+}
+
+function buildNoFinalFallback(lastProgress: string, model?: string): string {
+  const progress = lastProgress.trim();
+  const heading = 'Codex completed without emitting a final response.';
+  const retry = 'This is an incomplete result. Use Retry to rerun the turn if a complete answer is still needed.';
+  const modelLine = model ? `Model: Codex — ${model}` : 'Model: Codex — unavailable';
+  if (!progress) return `${heading}\n\n${retry}\n\n${modelLine}`;
+  return `${heading}\n\nLast progress update:\n\n${progress}\n\n${retry}\n\n${modelLine}`;
+}
+
+export function resolveCodexCompletion(
+  finalText: string,
+  lastAssistantMessage: string,
+  hasFinalAssistantMessage: boolean,
+  allowFallback: boolean,
+  model?: string,
+): string | null {
+  const canonical = finalText.trim();
+  if (canonical) {
+    if (hasFinalAssistantMessage && canonical === lastAssistantMessage.trim()) return null;
+    return canonical;
+  }
+  if (hasFinalAssistantMessage || !allowFallback) return null;
+  return buildNoFinalFallback(lastAssistantMessage, model);
+}
+
 function safePaneFileStem(paneId: string): string {
   return paneId.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80) || 'pane';
 }
@@ -244,7 +334,7 @@ function getFileChangePaths(cwd: string, item: any): string[] {
  * Codex's event vocabulary is richer than Claude's — see handler chain below
  * for the complete dispatch.
  */
-function handleCodexEvent(ctx: AgentRunContext, state: CodexRunState, event: any): void {
+export function handleCodexEvent(ctx: AgentRunContext, state: CodexRunState, event: any): void {
   if (!event || typeof event !== 'object') return;
 
   const startTool = (name: string, input: unknown = {}) => {
@@ -373,6 +463,26 @@ function handleCodexEvent(ctx: AgentRunContext, state: CodexRunState, event: any
         emitEditDiff(p, before, after);
       }
     }
+    return;
+  }
+
+  // --- Item: MCP/custom tools, web search, and plan updates ----------------
+  // Current Codex JSONL reports these through the generic item lifecycle.
+  // Older CLIs used the provider-specific *_begin / *_end events below.
+  const isCurrentToolItem = item
+    && (item.type === 'mcp_tool_call'
+      || item.type === 'custom_tool_call'
+      || item.type === 'web_search'
+      || item.type === 'plan_update');
+  if (event.type === 'item.started' && isCurrentToolItem) {
+    startTool(codexToolName(item), codexToolInput(item));
+    return;
+  }
+  if (event.type === 'item.completed' && isCurrentToolItem) {
+    // Some CLI builds omit item.started for very fast tools. Emit a start in
+    // that case so the UI still receives an activity update before closing it.
+    if (!state.toolOpen) startTool(codexToolName(item), codexToolInput(item));
+    closeTool();
     return;
   }
 
@@ -519,11 +629,11 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
 
     // Resolve to absolute path so Bun.spawn doesn't have to probe PATHEXT
     // from the agent's cwd (which fails on Windows for npm shim files).
-    const codexBin = resolveCliBinary('codex');
+    const codexCommand = resolveCodexLaunchCommand(resolveCliBinary('codex'));
     const sessionId = ctx.getSessionId();
-    const args: string[] = sessionId
-      ? [codexBin, 'exec', 'resume', ...baseArgs, sessionId, '-']
-      : [codexBin, 'exec', ...baseArgs, '-'];
+    // Native attachments put every image directly into the model input. The
+    // installed CLI supports --image on both fresh and resumed exec turns.
+    const args = buildCodexExecArgs(codexCommand, baseArgs, sessionId, ctx.imagePaths);
 
     // The Codex CLI doesn't have an --append-system-prompt flag. We
     // prepend the agent-forge system prompt (guardrails + persona + notes
@@ -716,18 +826,25 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
             const f = Bun.file(state.outputPath);
             if (await f.exists()) {
               finalText = (await f.text()).trim();
-              if (finalText) state.lastAssistantMessage = finalText;
             }
           } finally {
             await unlink(state.outputPath).catch(() => {});
           }
 
-          // Always emit the canonical final answer. The live stream can include
-          // progress/status narration; chat.service uses this result as the
-          // persisted Codex assistant message and keeps streamed deltas live-only.
-          if (finalText && (!state.hasFinalAssistantMessage || finalText !== state.lastAssistantMessage)) {
-            ctx.emitAgentEvent({ type: 'result', text: finalText });
+          // Always emit the canonical final answer. If a clean Codex turn ends
+          // without one, persist an explicitly incomplete fallback instead of
+          // silently leaving the user's message unanswered.
+          const completion = resolveCodexCompletion(
+            finalText,
+            state.lastAssistantMessage,
+            state.hasFinalAssistantMessage,
+            !killed && exitCode === 0,
+            ctx.model,
+          );
+          if (completion) {
+            ctx.emitAgentEvent({ type: 'result', text: completion });
             state.hasFinalAssistantMessage = true;
+            state.lastAssistantMessage = completion;
           }
 
           // Stale-session resume failure: clear + retry fresh via the bridge,

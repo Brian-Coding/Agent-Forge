@@ -7,17 +7,25 @@
 // Bun on Windows due to child_process/IPC compat. Node runs it cleanly.
 
 import { createServer } from 'node:http';
-import { mkdir, readdir, stat, unlink } from 'node:fs/promises';
+import { mkdir, readdir, rm, stat, unlink } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import { chromium } from 'playwright';
+import {
+  browserSessionKey,
+  compileEvaluationScript,
+  normalizeBrowserSessionId,
+} from './browser-worker-core.mjs';
 
 const CONSOLE_LIMIT = 100;
-const SCREENSHOT_TTL_MS = 60 * 60 * 1000;
+const NETWORK_LIMIT = 200;
+const SCREENSHOT_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const READY_TIMEOUT_MS = 5000;
 const READY_DOM_QUIET_MS = 500;
 const READY_POST_FILE_CHANGE_DELAY_MS = 500;
+const EVALUATE_TIMEOUT_MS = 15_000;
+const JSON_BODY_LIMIT_BYTES = 1024 * 1024;
 
 // Idle cleanup: contexts unused for longer than CONTEXT_IDLE_MS get closed
 // during the periodic sweep. Prevents BrowserContexts from accumulating
@@ -28,10 +36,30 @@ const MEMORY_WARN_RSS_MB = 2048;             // warn if worker RSS exceeds 2 GB
 const MEMORY_CHECK_INTERVAL_MS = 60 * 1000;
 
 let browser = null;
-const contexts = new Map(); // workspaceId -> { context, page, consoleEntries, lastFileChangeAt, lastUsedAt }
+// JSON([workspaceId, browserSessionId]) -> isolated Playwright state.
+const contexts = new Map();
 
-function screenshotsDir(workspaceId) {
-  return path.join(os.tmpdir(), 'agent-forge-qa', workspaceId, 'screenshots');
+const artifactRoot = path.resolve(
+  process.env.AGENT_FORGE_ARTIFACT_ROOT
+    || (process.platform === 'win32' && process.env.LOCALAPPDATA
+      ? path.join(process.env.LOCALAPPDATA, 'AgentForge', 'artifacts')
+      : path.join(os.homedir(), '.local', 'share', 'agent-forge', 'artifacts')),
+);
+
+function safePathSegment(value, fallback) {
+  const raw = typeof value === 'string' ? value.trim() : '';
+  const safe = raw.replace(/[^a-zA-Z0-9_-]/g, '-').replace(/^-+|-+$/g, '').slice(0, 96);
+  return safe || fallback;
+}
+
+function screenshotsDir(workspaceId, runId, browserSessionId) {
+  return path.join(
+    artifactRoot,
+    'qa',
+    safePathSegment(workspaceId, 'workspace'),
+    safePathSegment(runId, safePathSegment(browserSessionId, 'adhoc')),
+    'screenshots',
+  );
 }
 
 async function ensureDir(dir) {
@@ -60,6 +88,32 @@ function recordConsole(wsCtx, level, text) {
   }
 }
 
+async function pruneOldQaRunDirectories(workspaceRoot, currentRunRoot) {
+  if (!existsSync(workspaceRoot)) return;
+  const now = Date.now();
+  try {
+    const entries = await readdir(workspaceRoot, { withFileTypes: true });
+    await Promise.all(entries.map(async (entry) => {
+      if (!entry.isDirectory()) return;
+      const full = path.join(workspaceRoot, entry.name);
+      if (path.resolve(full) === path.resolve(currentRunRoot)) return;
+      try {
+        const info = await stat(full);
+        if (now - info.mtimeMs > SCREENSHOT_TTL_MS) {
+          await rm(full, { recursive: true, force: true });
+        }
+      } catch {}
+    }));
+  } catch {}
+}
+
+function recordNetwork(wsCtx, entry) {
+  wsCtx.networkEntries.push({ ...entry, timestamp: Date.now() });
+  if (wsCtx.networkEntries.length > NETWORK_LIMIT) {
+    wsCtx.networkEntries.splice(0, wsCtx.networkEntries.length - NETWORK_LIMIT);
+  }
+}
+
 async function ensureBrowser() {
   if (browser) return;
   // Headed by default so the user can watch the QA agent click around in
@@ -67,12 +121,21 @@ async function ensureBrowser() {
   // making tests painfully slow. Set BROWSER_HEADLESS=1 to suppress the
   // window (e.g. for CI or background runs).
   const headless = process.env.BROWSER_HEADLESS === '1';
-  const slowMo = process.env.BROWSER_SLOWMO != null ? parseInt(process.env.BROWSER_SLOWMO, 10) : 250;
+  const parsedSlowMo = process.env.BROWSER_SLOWMO != null ? parseInt(process.env.BROWSER_SLOWMO, 10) : 250;
+  const slowMo = Number.isFinite(parsedSlowMo) && parsedSlowMo >= 0 ? Math.min(parsedSlowMo, 10_000) : 250;
   browser = await chromium.launch({ headless, slowMo });
 }
 
-async function ensureContext(workspaceId) {
-  const existing = contexts.get(workspaceId);
+function getContext(workspaceId, browserSessionId) {
+  const wsCtx = contexts.get(browserSessionKey(workspaceId, browserSessionId));
+  if (wsCtx) wsCtx.lastUsedAt = Date.now();
+  return wsCtx;
+}
+
+async function ensureContext(workspaceId, browserSessionId) {
+  const normalizedSessionId = normalizeBrowserSessionId(browserSessionId);
+  const key = browserSessionKey(workspaceId, normalizedSessionId);
+  const existing = contexts.get(key);
   if (existing) {
     existing.lastUsedAt = Date.now();
     return existing;
@@ -80,10 +143,38 @@ async function ensureContext(workspaceId) {
   await ensureBrowser();
   const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
   const page = await context.newPage();
-  const wsCtx = { context, page, consoleEntries: [], lastFileChangeAt: 0, lastUsedAt: Date.now() };
+  const wsCtx = {
+    workspaceId,
+    browserSessionId: normalizedSessionId,
+    context,
+    page,
+    consoleEntries: [],
+    networkEntries: [],
+    lastFileChangeAt: 0,
+    lastUsedAt: Date.now(),
+  };
   page.on('console', (msg) => recordConsole(wsCtx, msg.type() || 'log', msg.text()));
   page.on('pageerror', (err) => recordConsole(wsCtx, 'error', err.message));
-  contexts.set(workspaceId, wsCtx);
+  page.on('response', (response) => {
+    recordNetwork(wsCtx, {
+      kind: 'response',
+      url: response.url(),
+      method: response.request().method(),
+      status: response.status(),
+      ok: response.ok(),
+    });
+  });
+  page.on('requestfailed', (request) => {
+    recordNetwork(wsCtx, {
+      kind: 'requestfailed',
+      url: request.url(),
+      method: request.method(),
+      status: null,
+      ok: false,
+      error: request.failure()?.errorText || 'request failed',
+    });
+  });
+  contexts.set(key, wsCtx);
   return wsCtx;
 }
 
@@ -92,11 +183,11 @@ async function ensureContext(workspaceId) {
 // back. Runs forever while the worker is alive.
 const idleSweepTimer = setInterval(async () => {
   const now = Date.now();
-  for (const [wsId, wsCtx] of contexts.entries()) {
+  for (const [key, wsCtx] of contexts.entries()) {
     if (now - wsCtx.lastUsedAt > CONTEXT_IDLE_MS) {
-      console.warn(`[browser-worker] closing idle context for workspace ${wsId} (idle ${Math.round((now - wsCtx.lastUsedAt) / 60000)}m)`);
+      console.warn(`[browser-worker] closing idle context for ${wsCtx.workspaceId}/${wsCtx.browserSessionId} (idle ${Math.round((now - wsCtx.lastUsedAt) / 60000)}m)`);
       try { await wsCtx.context.close(); } catch {}
-      contexts.delete(wsId);
+      contexts.delete(key);
     }
   }
 }, CONTEXT_SWEEP_INTERVAL_MS);
@@ -114,15 +205,28 @@ const memoryCheckTimer = setInterval(() => {
 }, MEMORY_CHECK_INTERVAL_MS);
 memoryCheckTimer.unref?.();
 
-async function closeContext(workspaceId) {
-  const wsCtx = contexts.get(workspaceId);
-  if (!wsCtx) return;
-  try { await wsCtx.context.close(); } catch {}
-  contexts.delete(workspaceId);
+async function closeContext(workspaceId, browserSessionId) {
+  if (browserSessionId != null && browserSessionId !== '') {
+    const key = browserSessionKey(workspaceId, browserSessionId);
+    const wsCtx = contexts.get(key);
+    if (!wsCtx) return;
+    try { await wsCtx.context.close(); } catch {}
+    contexts.delete(key);
+    return;
+  }
+
+  for (const [key, wsCtx] of [...contexts.entries()]) {
+    if (wsCtx.workspaceId !== workspaceId) continue;
+    try { await wsCtx.context.close(); } catch {}
+    contexts.delete(key);
+  }
 }
 
 async function shutdown() {
-  for (const id of [...contexts.keys()]) await closeContext(id).catch(() => {});
+  for (const [key, wsCtx] of [...contexts.entries()]) {
+    try { await wsCtx.context.close(); } catch {}
+    contexts.delete(key);
+  }
   if (browser) {
     try { await browser.close(); } catch {}
     browser = null;
@@ -134,8 +238,21 @@ async function shutdown() {
 async function readJson(req) {
   return new Promise((resolve, reject) => {
     const chunks = [];
-    req.on('data', (c) => chunks.push(c));
+    let totalBytes = 0;
+    let rejected = false;
+    req.on('data', (c) => {
+      totalBytes += c.length;
+      if (totalBytes > JSON_BODY_LIMIT_BYTES) {
+        if (!rejected) {
+          rejected = true;
+          reject(new Error(`JSON body exceeds ${JSON_BODY_LIMIT_BYTES} bytes`));
+        }
+        return;
+      }
+      chunks.push(c);
+    });
     req.on('end', () => {
+      if (rejected) return;
       try {
         const raw = Buffer.concat(chunks).toString('utf8') || '{}';
         resolve(JSON.parse(raw));
@@ -143,6 +260,22 @@ async function readJson(req) {
     });
     req.on('error', reject);
   });
+}
+
+async function withOperationTimeout(promise, timeoutMs, label, onTimeout) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      Promise.resolve(onTimeout?.())
+        .catch(() => {})
+        .finally(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)));
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function send(res, status, obj) {
@@ -153,39 +286,45 @@ function send(res, status, obj) {
 const handlers = {
   'GET /status': async (_req, _body, query) => {
     const id = query.workspaceId;
-    const wsCtx = id ? contexts.get(id) : null;
+    const wsCtx = id ? getContext(id, query.browserSessionId) : null;
     if (!wsCtx) return { running: false };
-    return { running: true, url: wsCtx.page.url() };
+    return {
+      running: true,
+      url: wsCtx.page.url(),
+      title: await wsCtx.page.title().catch(() => ''),
+      browserSessionId: wsCtx.browserSessionId,
+    };
   },
 
   'POST /navigate': async (_req, body) => {
-    const wsCtx = await ensureContext(body.workspaceId);
+    const wsCtx = await ensureContext(body.workspaceId, body.browserSessionId);
     await wsCtx.page.goto(body.url, { waitUntil: 'domcontentloaded', timeout: 15000 });
     return { ok: true, url: wsCtx.page.url(), title: await wsCtx.page.title() };
   },
 
   'POST /screenshot': async (_req, body) => {
-    const wsCtx = await ensureContext(body.workspaceId);
+    const wsCtx = await ensureContext(body.workspaceId, body.browserSessionId);
     // Two destination modes:
     //   - body.outDir (absolute path): write directly to this directory.
     //     Used by the Atlas Agent so screenshots land in
     //     <projectCwd>/docs/ui-atlas/shots/ with no tmpdir round-trip.
     //     The Bun server validates this path before forwarding.
-    //   - default: tmpdir under <os.tmpdir()>/agent-forge-qa/<wsId>/screenshots/.
-    //     Used by the QA Tester (transient).
+    //   - default: stable Agent Forge artifacts under qa/<workspace>/<run>/screenshots/.
+    //     Used by the QA Tester so evidence survives a server restart.
     let dir;
     if (typeof body.outDir === 'string' && body.outDir.trim()) {
       dir = body.outDir.trim();
       await ensureDir(dir);
     } else {
-      dir = screenshotsDir(body.workspaceId);
+      dir = screenshotsDir(body.workspaceId, body.runId, wsCtx.browserSessionId);
       await ensureDir(dir);
       pruneOldScreenshots(dir).catch(() => {});
+      pruneOldQaRunDirectories(path.dirname(path.dirname(dir)), path.dirname(dir)).catch(() => {});
     }
     let filename;
     if (typeof body.name === 'string' && body.name.trim()) {
-      const safe = body.name.trim().replace(/[\\/:*?"<>|]/g, '-').replace(/\.png$/i, '');
-      filename = safe + '.png';
+      const safe = body.name.trim().replace(/[\\/:*?"<>|]/g, '-').replace(/\.png$/i, '').slice(0, 120);
+      filename = (safe || `screenshot-${Date.now()}`) + '.png';
     } else {
       filename = `screenshot-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.png`;
     }
@@ -201,19 +340,19 @@ const handlers = {
   },
 
   'POST /click': async (_req, body) => {
-    const wsCtx = await ensureContext(body.workspaceId);
+    const wsCtx = await ensureContext(body.workspaceId, body.browserSessionId);
     await wsCtx.page.click(body.selector, { timeout: 10000 });
     return { ok: true };
   },
 
   'POST /type': async (_req, body) => {
-    const wsCtx = await ensureContext(body.workspaceId);
+    const wsCtx = await ensureContext(body.workspaceId, body.browserSessionId);
     await wsCtx.page.fill(body.selector, body.text, { timeout: 10000 });
     return { ok: true };
   },
 
   'POST /wait-for-ready': async (_req, body) => {
-    const wsCtx = await ensureContext(body.workspaceId);
+    const wsCtx = await ensureContext(body.workspaceId, body.browserSessionId);
     const start = Date.now();
     if (Date.now() - wsCtx.lastFileChangeAt < 2000) {
       await new Promise(r => setTimeout(r, READY_POST_FILE_CHANGE_DELAY_MS));
@@ -236,35 +375,64 @@ const handlers = {
 
   'GET /console': async (_req, _body, query) => {
     const id = query.workspaceId;
-    const wsCtx = id ? contexts.get(id) : null;
+    const wsCtx = id ? getContext(id, query.browserSessionId) : null;
     return { entries: wsCtx ? [...wsCtx.consoleEntries] : [] };
   },
 
   'POST /console/clear': async (_req, body) => {
-    const wsCtx = contexts.get(body.workspaceId);
+    const wsCtx = getContext(body.workspaceId, body.browserSessionId);
     if (wsCtx) wsCtx.consoleEntries = [];
     return { ok: true };
   },
 
+  'GET /network': async (_req, _body, query) => {
+    const id = query.workspaceId;
+    const wsCtx = id ? getContext(id, query.browserSessionId) : null;
+    return { entries: wsCtx ? [...wsCtx.networkEntries] : [] };
+  },
+
+  'POST /network/clear': async (_req, body) => {
+    const wsCtx = getContext(body.workspaceId, body.browserSessionId);
+    if (wsCtx) wsCtx.networkEntries = [];
+    return { ok: true };
+  },
+
+  'POST /viewport': async (_req, body) => {
+    const width = Number(body.width);
+    const height = Number(body.height);
+    if (!Number.isInteger(width) || width < 320 || width > 7680) {
+      throw new Error('viewport width must be an integer from 320 to 7680');
+    }
+    if (!Number.isInteger(height) || height < 240 || height > 4320) {
+      throw new Error('viewport height must be an integer from 240 to 4320');
+    }
+    const wsCtx = await ensureContext(body.workspaceId, body.browserSessionId);
+    await wsCtx.page.setViewportSize({ width, height });
+    return { ok: true, width, height };
+  },
+
   'POST /context/close': async (_req, body) => {
-    await closeContext(body.workspaceId);
+    await closeContext(body.workspaceId, body.browserSessionId);
     return { ok: true };
   },
 
   'POST /file-changed': async (_req, body) => {
-    const wsCtx = contexts.get(body.workspaceId);
-    if (wsCtx) wsCtx.lastFileChangeAt = Date.now();
+    for (const wsCtx of contexts.values()) {
+      if (wsCtx.workspaceId === body.workspaceId) wsCtx.lastFileChangeAt = Date.now();
+    }
     return { ok: true };
   },
 
   'POST /evaluate': async (_req, body) => {
-    const wsCtx = await ensureContext(body.workspaceId);
+    const wsCtx = await ensureContext(body.workspaceId, body.browserSessionId);
     if (typeof body.script !== 'string') throw new Error('script (string) required');
-    // page.evaluate runs the function in the page's window context. We wrap the
-    // user-supplied script in a function so it can use `return` if desired, and
-    // also handle bare expressions / statements transparently.
-    const wrapped = `(async () => { try { return (${body.script}); } catch (e) { try { ${body.script}; return undefined; } catch (e2) { throw e2; } } })()`;
-    const raw = await wsCtx.page.evaluate(wrapped);
+    const wrapped = compileEvaluationScript(body.script);
+    const raw = await withOperationTimeout(
+      wsCtx.page.evaluate(wrapped),
+      EVALUATE_TIMEOUT_MS,
+      'Browser evaluation',
+      () => closeContext(body.workspaceId, wsCtx.browserSessionId),
+    );
     // Make sure result is JSON-serializable. Stringify-then-parse to coerce.
     let result;
     try { result = JSON.parse(JSON.stringify(raw === undefined ? null : raw)); }
