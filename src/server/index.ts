@@ -401,10 +401,11 @@ function startServer(preferredPort: number) {
           return new Response('Not Found', { status: 404 });
         },
         websocket: websocketHandlers,
-        development: {
-          hmr: true,
-          console: true,
-        },
+        // Bun 1.3.14's injected HMR observer throws when a browser extension
+        // briefly inserts a stylesheet link without a valid href. Agent Forge
+        // is a restart-driven local harness, so serve the stable bundled page
+        // without the dev overlay/HMR client.
+        development: false,
         error(err) {
           console.error('Server error:', err);
           return new Response('Internal error', { status: 500 });

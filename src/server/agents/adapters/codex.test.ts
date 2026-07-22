@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import type { AgentEvent } from '../events';
 import type { AgentRunContext } from '../types';
-import { buildCodexExecArgs, codexImageArgs, codexReasoningConfigArg, handleCodexEvent, resolveCodexCompletion } from './codex';
+import { buildCodexExecArgs, codexImageArgs, codexReasoningConfigArg, handleCodexEvent, resolveCodexCompletion, resolveCodexLaunchCommand } from './codex';
 
 function makeContext(events: AgentEvent[]): AgentRunContext {
   return {
@@ -39,6 +39,24 @@ test('Codex attaches every image natively, including a 100-image batch', () => {
   const resumed = buildCodexExecArgs('codex', ['--json'], 'session-123', paths);
   expect(resumed.slice(0, 6)).toEqual(['codex', 'exec', 'resume', '--json', 'session-123', '-']);
   expect(resumed.slice(6)).toEqual(args);
+});
+
+test('Codex bypasses the Windows cmd shim for a 100-image command line', () => {
+  const shim = 'C:\\Users\\tester\\AppData\\Roaming\\npm\\codex.cmd';
+  const node = 'C:\\Program Files\\nodejs\\node.exe';
+  const entrypoint = 'C:\\Users\\tester\\AppData\\Roaming\\npm\\node_modules\\@openai\\codex\\bin\\codex.js';
+  const command = resolveCodexLaunchCommand(shim, 'win32', path => path === entrypoint, node);
+  const paths = Array.from(
+    { length: 100 },
+    (_, index) => `C:\\Users\\tester\\AppData\\Local\\AgentForge\\artifacts\\chat-images\\agent-id\\1784568160143-${String(index).padStart(8, '0')}.png`,
+  );
+  const args = buildCodexExecArgs(command, ['--json'], null, paths);
+
+  expect(command).toEqual([node, entrypoint]);
+  expect(args[0]).toBe(node);
+  expect(args[1]).toBe(entrypoint);
+  expect(args).not.toContain(shim);
+  expect(args.filter(arg => arg === '--image')).toHaveLength(100);
 });
 
 test('Codex clean completion without a final answer becomes a visible incomplete result', () => {
