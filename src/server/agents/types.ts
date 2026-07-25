@@ -31,8 +31,8 @@ export interface AgentRunContext {
 
 export interface AgentHandle {
   run(): Promise<AgentRunResult | undefined>;
-  stop(): void;
-  kill(): void;
+  stop(): void | Promise<void>;
+  kill(): void | Promise<void>;
 }
 
 export interface AgentRunResult {

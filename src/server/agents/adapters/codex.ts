@@ -2,7 +2,17 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import { unlink } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { extname, isAbsolute, join, relative, resolve, win32 as win32Path } from 'node:path';
-import { ArgvTooLongError, createCliEnv, killProcessTree, resolveCliBinary, safeSpawn } from '../../utils';
+import {
+  ArgvTooLongError,
+  createCliEnv,
+  createProcessUnwindSignal,
+  killProcessTree,
+  resolveCliBinary,
+  safeSpawn,
+  type ProcessTerminationResult,
+  waitForProcessExit,
+  waitForOperationOrUnwind,
+} from '../../utils';
 import { persistenceService } from '../../services/persistence.service';
 import { summarizeToolInput, type AgentEvent } from '../events';
 import { drainStreamToString, parseNdjsonLines, flushNdjsonLeftover } from '../stream-utils';
@@ -38,6 +48,13 @@ interface CodexRunState {
   toolOpen: boolean;
   hasFinalAssistantMessage: boolean;
   lastAssistantMessage: string;
+  // Codex 0.145 can complete multiple turns inside one long-lived process
+  // while a persisted /goal automatically continues. Keep the last assistant
+  // item for the current turn so turn.completed can become a durable chat
+  // checkpoint without waiting for process exit.
+  pendingTurnAssistantMessage: string;
+  lastCheckpointedMessage: string;
+  currentTurnCheckpointed: boolean;
   currentToolId: string | null;
   // file_change events don't include diffs — capture before/after snapshots
   // so we can synthesize Edit tool events.
@@ -245,6 +262,7 @@ export function buildCodexExecArgs(
 function codexToolName(item: any): string {
   if (item?.type === 'web_search') return 'WebSearch';
   if (item?.type === 'plan_update') return 'UpdatePlan';
+  if (item?.type === 'todo_list') return 'UpdateGoal';
   const tool = item?.tool ?? item?.tool_name ?? item?.name ?? 'tool';
   const server = item?.server ?? item?.server_name;
   if (typeof server === 'string' && server && typeof tool === 'string' && tool && !tool.startsWith(server + '.')) {
@@ -275,16 +293,17 @@ function buildNoFinalFallback(lastProgress: string, model?: string): string {
 export function resolveCodexCompletion(
   finalText: string,
   lastAssistantMessage: string,
-  hasFinalAssistantMessage: boolean,
+  hasCheckpointedMessage: boolean,
   allowFallback: boolean,
   model?: string,
+  lastCheckpointedMessage = lastAssistantMessage,
 ): string | null {
   const canonical = finalText.trim();
   if (canonical) {
-    if (hasFinalAssistantMessage && canonical === lastAssistantMessage.trim()) return null;
+    if (hasCheckpointedMessage && canonical === lastCheckpointedMessage.trim()) return null;
     return canonical;
   }
-  if (hasFinalAssistantMessage || !allowFallback) return null;
+  if (hasCheckpointedMessage || !allowFallback) return null;
   return buildNoFinalFallback(lastAssistantMessage, model);
 }
 
@@ -395,6 +414,17 @@ export function handleCodexEvent(ctx: AgentRunContext, state: CodexRunState, eve
   }
 
   if (event.type === 'turn.started') {
+    state.pendingTurnAssistantMessage = '';
+    state.currentTurnCheckpointed = false;
+    ctx.emitAgentEvent({ type: 'status', status: 'thinking' });
+    return;
+  }
+
+  // Goal-mode rollout compatibility. Current public JSON uses turn.started,
+  // while older/internal streams can expose task_started instead.
+  if (event.type === 'task_started') {
+    state.pendingTurnAssistantMessage = '';
+    state.currentTurnCheckpointed = false;
     ctx.emitAgentEvent({ type: 'status', status: 'thinking' });
     return;
   }
@@ -407,6 +437,15 @@ export function handleCodexEvent(ctx: AgentRunContext, state: CodexRunState, eve
   // Context fullness comes from the session rollout file after the turn
   // (see emitContextFromRollout); here we only accumulate per-turn spend.
   if (event.type === 'turn.completed') {
+    const completedMessage = state.pendingTurnAssistantMessage.trim();
+    if (completedMessage && !state.currentTurnCheckpointed) {
+      ctx.emitAgentEvent({ type: 'result', text: completedMessage, checkpoint: true });
+      state.hasFinalAssistantMessage = true;
+      state.lastCheckpointedMessage = completedMessage;
+      state.currentTurnCheckpointed = true;
+    }
+    state.pendingTurnAssistantMessage = '';
+
     const usage = event.usage;
     if (usage && typeof usage === 'object') {
       const inputTokens = typeof usage.input_tokens === 'number' ? usage.input_tokens : 0;
@@ -419,6 +458,15 @@ export function handleCodexEvent(ctx: AgentRunContext, state: CodexRunState, eve
         turnsDelta: 1,
       });
     }
+    return;
+  }
+
+  if (event.type === 'turn.failed') {
+    const message = extractText(event.error ?? event.message ?? event)
+      || 'Codex turn failed without an error message';
+    ctx.emitAgentEvent({ type: 'error', message });
+    state.pendingTurnAssistantMessage = '';
+    state.currentTurnCheckpointed = true;
     return;
   }
 
@@ -473,7 +521,8 @@ export function handleCodexEvent(ctx: AgentRunContext, state: CodexRunState, eve
     && (item.type === 'mcp_tool_call'
       || item.type === 'custom_tool_call'
       || item.type === 'web_search'
-      || item.type === 'plan_update');
+      || item.type === 'plan_update'
+      || item.type === 'todo_list');
   if (event.type === 'item.started' && isCurrentToolItem) {
     startTool(codexToolName(item), codexToolInput(item));
     return;
@@ -490,11 +539,22 @@ export function handleCodexEvent(ctx: AgentRunContext, state: CodexRunState, eve
   if (event.type === 'item.completed' && item?.type === 'agent_message') {
     const text = typeof item.text === 'string' ? item.text : extractText(item);
     if (text) {
+      // Some goal-continuation streams begin the next provider turn with an
+      // agent_message before (or without) a distinct turn.started event.
+      // A new assistant item after a checkpoint therefore opens a fresh
+      // checkpoint slot. Repeated turn.completed events remain harmless
+      // because pendingTurnAssistantMessage is cleared at the boundary.
+      if (state.currentTurnCheckpointed && !state.pendingTurnAssistantMessage) {
+        state.currentTurnCheckpointed = false;
+      }
       // codex exec --json does not expose the internal commentary/final phase
-      // on agent_message items. Treat streamed messages as concise progress;
-      // --output-last-message remains the canonical final response below.
+      // on agent_message items. Treat the item as progress until the matching
+      // turn.completed boundary makes it a durable checkpoint. The output file
+      // remains the process-level completion fallback below.
       ctx.emitAgentEvent({ type: 'thinking-delta', text });
+      ctx.emitAgentEvent({ type: 'assistant-snapshot', text });
       state.lastAssistantMessage = text;
+      state.pendingTurnAssistantMessage = text;
     }
     return;
   }
@@ -576,9 +636,18 @@ export function handleCodexEvent(ctx: AgentRunContext, state: CodexRunState, eve
 
   // --- Task complete: final assistant text fallback -------------------------
   if (event.type === 'task_complete' && typeof event.last_agent_message === 'string' && event.last_agent_message) {
-    ctx.emitAgentEvent({ type: 'result', text: event.last_agent_message });
+    const completedMessage = event.last_agent_message.trim();
+    if (
+      completedMessage
+      && (!state.currentTurnCheckpointed || completedMessage !== state.lastCheckpointedMessage.trim())
+    ) {
+      ctx.emitAgentEvent({ type: 'result', text: event.last_agent_message, checkpoint: true });
+      state.lastCheckpointedMessage = event.last_agent_message;
+      state.currentTurnCheckpointed = true;
+    }
     state.hasFinalAssistantMessage = true;
     state.lastAssistantMessage = event.last_agent_message;
+    state.pendingTurnAssistantMessage = '';
     return;
   }
 }
@@ -596,6 +665,9 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
       toolOpen: false,
       hasFinalAssistantMessage: false,
       lastAssistantMessage: '',
+      pendingTurnAssistantMessage: '',
+      lastCheckpointedMessage: '',
+      currentTurnCheckpointed: false,
       currentToolId: null,
       fileSnapshots: new Map(),
       commandOutputs: new Map(),
@@ -605,6 +677,53 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
   createHandle(prompt: string, ctx: AgentRunContext, state: CodexRunState): AgentHandle {
     let proc: ReturnType<typeof safeSpawn> | null = null;
     let killed = false;
+    let terminationPromise: Promise<void> | null = null;
+    let terminationResult: ProcessTerminationResult | null = null;
+    let terminationWarningEmitted = false;
+    const unwind = createProcessUnwindSignal();
+
+    const warnAndUnwind = (detail: string): void => {
+      if (!terminationWarningEmitted) {
+        terminationWarningEmitted = true;
+        ctx.emitSystemMessage(
+          `Codex process termination could not be confirmed (${detail}). ` +
+          'Agent Forge stopped waiting for it and finalized this turn so the chat queue would not hang. ' +
+          'Restart Agent Forge or use Kill All before starting more work in this project.',
+        );
+      }
+      unwind.trigger();
+    };
+
+    const requestTermination = (): Promise<void> => {
+      if (!proc) return Promise.resolve();
+      if (terminationPromise) return terminationPromise;
+      const target = proc;
+      terminationPromise = killProcessTree(target).then(
+        result => {
+          terminationResult = result;
+          if (!result.rootExited) warnAndUnwind('the process did not exit after bounded kill attempts');
+          else unwind.trigger();
+        },
+        error => {
+          try { target.unref(); } catch {}
+          warnAndUnwind(error instanceof Error ? error.message : String(error));
+        },
+      );
+      return terminationPromise;
+    };
+
+    const requestGracefulStop = async (): Promise<void> => {
+      if (!proc) return;
+      if (process.platform === 'win32') return requestTermination();
+      const target = proc;
+      try {
+        target.kill('SIGINT');
+      } catch {
+        return requestTermination();
+      }
+      const gracefulExit = await waitForProcessExit(target, 1_000);
+      if (gracefulExit.status !== 'exited' && proc === target) await requestTermination();
+    };
 
     // Build args. The actual prompt is fed via stdin (`-`), so the system
     // prompt + user prompt content never hits argv (no 28K cap pressure).
@@ -681,7 +800,7 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
           // A stop/kill may have landed between handle registration and the
           // spawn above — honor it now instead of running a full orphan turn.
           if (killed) {
-            void killProcessTree(proc);
+            void requestTermination();
           }
 
           // Pipe the (system + user) prompt via stdin.
@@ -692,7 +811,7 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
             // Codex with `-` blocks reading stdin forever if the write failed —
             // kill it so the turn unwinds instead of wedging the agent.
             console.warn('[codex] stdin write failed; killing process:', e);
-            void killProcessTree(proc);
+            void requestTermination();
           }
 
           // Drain stderr and filter known harmless noise. The chat bridge keeps
@@ -708,7 +827,9 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
             let suppressedSkillsLoaderLines = 0;
             try {
               while (true) {
-                const { done, value } = await reader.read();
+                const next = await waitForOperationOrUnwind(reader.read(), unwind);
+                if (next.status === 'unwound') break;
+                const { done, value } = next.value;
                 if (done) break;
                 const chunk = decoder.decode(value, { stream: true });
                 if (!chunk) continue;
@@ -769,6 +890,7 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
             } catch {
               // stream closed
             } finally {
+              if (unwind.isTriggered()) void reader.cancel().catch(() => {});
               try { reader.releaseLock(); } catch {}
             }
             return acc + decoder.decode();
@@ -790,7 +912,9 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
 
           try {
             while (true) {
-              const { done, value } = await reader.read();
+              const next = await waitForOperationOrUnwind(reader.read(), unwind);
+              if (next.status === 'unwound') break;
+              const { done, value } = next.value;
               if (done) break;
               leftover += decoder.decode(value, { stream: true });
               leftover = parseNdjsonLines(leftover, onEvent);
@@ -803,11 +927,17 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
             }
             flushNdjsonLeftover(leftover, onEvent);
           } finally {
+            if (unwind.isTriggered()) void reader.cancel().catch(() => {});
             try { reader.releaseLock(); } catch {}
           }
 
-          const exitCode = await proc.exited;
-          if (proc.pid) persistenceService.untrackPid(proc.pid);
+          const exitOutcome = await waitForOperationOrUnwind(proc.exited, unwind);
+          const rootExitConfirmed = exitOutcome.status === 'completed'
+            || terminationResult?.rootExited === true;
+          const exitCode = exitOutcome.status === 'completed'
+            ? exitOutcome.value
+            : terminationResult?.exitCode ?? -1;
+          if (rootExitConfirmed && proc.pid) persistenceService.untrackPid(proc.pid);
           proc = null;
 
           const stderrText = (await stderrPromise).trim();
@@ -840,6 +970,7 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
             state.hasFinalAssistantMessage,
             !killed && exitCode === 0,
             ctx.model,
+            state.lastCheckpointedMessage,
           );
           if (completion) {
             ctx.emitAgentEvent({ type: 'result', text: completion });
@@ -861,10 +992,10 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
             await emitSnapshotFromRollout(ctx, threadId).catch(() => {});
           }
 
-          if (!killed && exitCode !== 0 && !state.hasFinalAssistantMessage) {
-            // Stderr noise was filtered live; anything still here is real. With
-            // nothing at all, the user must still see that the turn failed —
-            // otherwise a crash looks like "Codex said nothing".
+          if (!killed && exitCode !== 0) {
+            // Stderr noise was filtered live; anything still here is real. A
+            // long-lived goal process can fail after earlier turn checkpoints,
+            // so a prior answer must not suppress the later failure.
             ctx.emitAgentEvent({
               type: 'error',
               message: stderrText || `Codex CLI exited with code ${exitCode} and no output`,
@@ -878,7 +1009,13 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
 
           return state.lastAssistantMessage ? { lastAssistantMessage: state.lastAssistantMessage } : undefined;
         } catch (err: any) {
-          if (proc?.pid) persistenceService.untrackPid(proc.pid);
+          const failedProc = proc;
+          if (failedProc) {
+            await requestTermination();
+            if (terminationResult?.rootExited && failedProc.pid) {
+              persistenceService.untrackPid(failedProc.pid);
+            }
+          }
           proc = null;
           const msg = err?.message || 'Codex encountered an unexpected error';
           ctx.emitAgentEvent({ type: 'error', message: msg });
@@ -887,31 +1024,27 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
         }
       },
 
-      stop() {
+      async stop() {
         // Set killed even before proc exists — run() checks it post-spawn so a
         // stop landing in the spawn window doesn't produce an orphan turn.
         killed = true;
         if (!proc) return;
         try {
-          if (process.platform === 'win32') {
-            // SIGINT isn't deliverable on Windows; Bun's kill() only terminates
-            // the npm .cmd shim, leaving the real CLI running. Kill the tree.
-            void killProcessTree(proc);
-          } else {
-            proc.kill('SIGINT');
-          }
+          await requestGracefulStop();
         } catch (e) {
           console.warn('[codex] stop() failed:', e);
+          warnAndUnwind(e instanceof Error ? e.message : String(e));
         }
       },
 
-      kill() {
+      async kill() {
         killed = true;
         if (!proc) return;
         try {
-          void killProcessTree(proc);
+          await requestTermination();
         } catch (e) {
           console.warn('[codex] kill() failed:', e);
+          warnAndUnwind(e instanceof Error ? e.message : String(e));
         }
       },
     };

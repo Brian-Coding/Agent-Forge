@@ -16,6 +16,15 @@ export type AgentEvent =
   | { type: 'text-delta'; text: string; messageId?: string }
   | { type: 'thinking-delta'; text: string; messageId?: string }
   | {
+      /**
+       * A complete provider-authored assistant message that is not durable
+       * until the matching turn boundary arrives. Unlike thinking-delta this
+       * is safe to retain as partial output if the process is interrupted.
+       */
+      type: 'assistant-snapshot';
+      text: string;
+    }
+  | {
       type: 'tool-call-start';
       toolCallId: string;
       toolName: string;
@@ -29,7 +38,16 @@ export type AgentEvent =
       output?: unknown;
       error?: string;
     }
-  | { type: 'result'; text: string }
+  | {
+      type: 'result';
+      text: string;
+      /**
+       * A durable provider turn boundary reached before the long-lived CLI
+       * process exits. Codex goal mode can complete many such turns inside one
+       * process, so the chat bridge persists checkpoints immediately.
+       */
+      checkpoint?: boolean;
+    }
   | { type: 'error'; message: string }
   | { type: 'finish'; reason?: string }
   | { type: 'stderr'; text: string }

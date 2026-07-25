@@ -10,6 +10,14 @@ import { persistenceService } from './persistence.service';
 import { promptBuilderService } from './prompt-builder.service';
 import { usageService } from './usage.service';
 import { compactThinkingText, sanitizeCliText } from '../agents/stream-utils';
+import {
+  createInactivityWatchdog,
+  observeTurnOutputEvent,
+  parseOptionalInactivityTimeout,
+  resolveTurnFinalization,
+  type InactivityWatchdog,
+  type TurnAbortReason,
+} from './chat-turn-lifecycle';
 
 // --- HMR-safe state ---------------------------------------------------------
 
@@ -21,12 +29,19 @@ const sendLocks: Map<string, Promise<void>> = (globalThis as any).__chatSendLock
 // cleared when its run() resolves. stop() / kill() route through here.
 const currentHandles: Map<string, AgentHandle> = (globalThis as any).__chatCurrentHandles ??= new Map();
 
-// Per-agent turn buffer: accumulated text-delta content so we can flush a
-// single 'assistant' message at the end (with an abort marker if stopped).
+// Per-agent process buffer. Traditional providers flush once at process exit;
+// long-lived goal providers may also persist completed turn checkpoints while
+// retaining the same buffer until the underlying CLI process exits.
 interface TurnBuffer {
   accumulatedText: string;
   lastResultEmitted: string | null;
-  abortReason?: 'user' | 'timeout' | 'system';
+  lastAssistantSnapshot: string | null;
+  lastPersistedResult: string | null;
+  lastErrorMessage: string | null;
+  persistedSystemMessages: Set<string>;
+  provider: ChatAgentKind;
+  resolvedModel?: string;
+  abortReason?: TurnAbortReason;
   // Per-turn usage accumulator. Each adapter `usage` event sums its deltas
   // here; at turn-finalize the rolled-up totals get one entry in the usage
   // log via usageService.record() — so the log grows at most one row per
@@ -50,14 +65,12 @@ const turnBuffers: Map<string, TurnBuffer> = (globalThis as any).__chatTurnBuffe
 // turn's teardown (clobbering turnBuffers/currentHandles).
 const turnEpochs: Map<string, number> = (globalThis as any).__chatTurnEpochs ??= new Map();
 
-// Inactivity watchdog: if an adapter subprocess emits nothing for this long,
-// kill it and finalize the turn — a hung CLI (network stall, auth prompt,
-// stdin deadlock) must not wedge the agent forever, since every subsequent
-// message queues behind the dead turn.
-const TURN_INACTIVITY_TIMEOUT_MS = (() => {
-  const fromEnv = parseInt(process.env.AGENT_TURN_INACTIVITY_MS || '', 10);
-  return Number.isFinite(fromEnv) && fromEnv > 0 ? fromEnv : 15 * 60_000;
-})();
+// Long-running work (especially Codex /goal automatic continuation) has no
+// output-silence deadline by default. Operators can explicitly opt into one
+// for unattended environments; manual Stop/Kill remains available regardless.
+const TURN_INACTIVITY_TIMEOUT_MS = parseOptionalInactivityTimeout(
+  process.env.AGENT_TURN_INACTIVITY_MS,
+);
 
 // --- Cross-provider history prepend ---------------------------------------
 // When the user swaps provider mid-conversation, the new provider has no
@@ -135,6 +148,31 @@ export function sanitizeStderrForChat(text: string): string {
   return sanitizeCliText(text);
 }
 
+function persistAssistantResult(
+  agentId: string,
+  text: string,
+  turn: TurnBuffer,
+  allowRepeatedCheckpoint = false,
+): boolean {
+  const content = text.trim();
+  if (!content || (!allowRepeatedCheckpoint && content === turn.lastPersistedResult)) return false;
+
+  const assistantMsg = agentService.appendMessage(
+    agentId,
+    'assistant',
+    content,
+    undefined,
+    undefined,
+    undefined,
+    turn.provider,
+    turn.modelRan || turn.resolvedModel,
+  );
+  turn.lastPersistedResult = content;
+  turn.lastAssistantSnapshot = null;
+  broadcast({ type: 'message', message: assistantMsg });
+  return true;
+}
+
 function handleEvent(agentId: string, event: AgentEvent): void {
   switch (event.type) {
     case 'text-delta': {
@@ -147,6 +185,12 @@ function handleEvent(agentId: string, event: AgentEvent): void {
     case 'thinking-delta': {
       const compact = compactThinkingText(event.text);
       if (compact) broadcast({ type: 'thinking_output', agentId, content: compact + '\n' });
+      return;
+    }
+
+    case 'assistant-snapshot': {
+      const turn = turnBuffers.get(agentId);
+      if (turn) observeTurnOutputEvent(turn, event);
       return;
     }
 
@@ -227,15 +271,22 @@ function handleEvent(agentId: string, event: AgentEvent): void {
     }
 
     case 'result': {
-      // Some providers (and Claude's `result` event itself) emit a final
-      // non-streamed result. We keep it as a fallback in case nothing streamed
-      // via text-delta — the finally block flushes whichever ended up longer.
+      // Process-level results remain finalization fallbacks. Provider turn
+      // checkpoints are persisted immediately because a /goal process can
+      // continue working for hours after one completed assistant response.
       const turn = turnBuffers.get(agentId);
-      if (turn) turn.lastResultEmitted = event.text;
+      if (turn) {
+        const observation = observeTurnOutputEvent(turn, event);
+        if (observation.checkpointText) {
+          persistAssistantResult(agentId, observation.checkpointText, turn, true);
+        }
+      }
       return;
     }
 
     case 'error': {
+      const turn = turnBuffers.get(agentId);
+      if (turn) observeTurnOutputEvent(turn, event);
       broadcast({ type: 'error', message: event.message, agentId });
       return;
     }
@@ -365,12 +416,18 @@ async function runChatTurn(agentId: string, content: string, source?: 'qa', opti
   const turn: TurnBuffer = {
     accumulatedText: '',
     lastResultEmitted: null,
+    lastAssistantSnapshot: null,
+    lastPersistedResult: null,
+    lastErrorMessage: null,
+    persistedSystemMessages: new Set(),
+    provider,
+    resolvedModel: requestedResolvedModel,
     turnUsage: { inputTokens: 0, outputTokens: 0, costUsd: 0, turns: 0 },
   };
   turnBuffers.set(agentId, turn);
 
   // Watchdog activity clock — any adapter event counts as liveness.
-  let lastActivity = Date.now();
+  let activeWatchdog: InactivityWatchdog | null = null;
 
   // Never swap a requested model silently: if the resolver rejects the agent's
   // configured model (not in the provider catalog), tell the user which model
@@ -411,11 +468,14 @@ async function runChatTurn(agentId: string, content: string, source?: 'qa', opti
       agentService.setCurrentSession(agentId, provider, resolvedModel, nextSessionId);
     },
     emitChatEvent(_event: unknown): void {
+      // Every valid provider event proves the process is alive, including new
+      // event kinds that the normalized adapter has not learned yet.
+      activeWatchdog?.touch();
       // Raw provider events currently have no UI surface. Hook target for
       // future plugins (e.g. transcript logging, debug dumps).
     },
     emitAgentEvent(event: AgentEvent): void {
-      lastActivity = Date.now();
+      activeWatchdog?.touch();
       handleEvent(agentId, event);
     },
     emitStatus(status: string): void {
@@ -427,6 +487,7 @@ async function runChatTurn(agentId: string, content: string, source?: 'qa', opti
     },
     emitSystemMessage(message: string): void {
       const sysMsg = agentService.addSystemMessage(agentId, message);
+      turn.persistedSystemMessages.add(message.trim());
       broadcast({ type: 'message', message: sysMsg });
     },
   };
@@ -434,28 +495,39 @@ async function runChatTurn(agentId: string, content: string, source?: 'qa', opti
   try {
     let didStaleSessionRetry = false;
     while (true) {
-      // 7) Create handle, register, run — under an inactivity watchdog so a
-      //    hung CLI can't wedge the agent (and its send queue) forever.
+      // 7) Create handle, register, and run. Long-lived goal processes are
+      //    unlimited unless the operator explicitly configured an inactivity
+      //    timeout for this server.
       const state = adapter.createState(ctx);
       const handle = adapter.createHandle(promptBody, ctx, state);
       currentHandles.set(agentId, handle);
-      lastActivity = Date.now();
-      const watchdog = setInterval(() => {
-        if (Date.now() - lastActivity > TURN_INACTIVITY_TIMEOUT_MS) {
-          console.warn(`[chat] ${provider} turn for ${agentId} silent for ${Math.round(TURN_INACTIVITY_TIMEOUT_MS / 60000)}min — killing hung process`);
+      const watchdog = createInactivityWatchdog({
+        timeoutMs: TURN_INACTIVITY_TIMEOUT_MS,
+        onTimeout: () => {
+          const inactivityTimeoutMs = TURN_INACTIVITY_TIMEOUT_MS;
+          console.warn(
+            `[chat] ${provider} turn for ${agentId} reached the configured ` +
+            `${Math.round((inactivityTimeoutMs ?? 0) / 60000)}min inactivity limit`,
+          );
           if (!turn.abortReason) turn.abortReason = 'timeout';
-          try { handle.kill(); } catch (e) { console.error(`[chat] watchdog kill(${agentId}) failed:`, e); }
-          // Re-arm so a process that survives the kill gets re-killed next
-          // window instead of being hammered every 30s tick.
-          lastActivity = Date.now();
-        }
-      }, 30_000);
+          try {
+            void Promise.resolve(handle.kill()).catch((e) => {
+              console.error(`[chat] watchdog kill(${agentId}) failed:`, e);
+            });
+          } catch (e) {
+            console.error(`[chat] watchdog kill(${agentId}) failed:`, e);
+          }
+        },
+      });
+      activeWatchdog = watchdog;
+      watchdog.start();
 
       let result;
       try {
         result = await handle.run();
       } finally {
-        clearInterval(watchdog);
+        watchdog.stop();
+        if (activeWatchdog === watchdog) activeWatchdog = null;
         // Identity-guarded: never clobber a newer turn's handle.
         if (currentHandles.get(agentId) === handle) currentHandles.delete(agentId);
       }
@@ -470,48 +542,56 @@ async function runChatTurn(agentId: string, content: string, source?: 'qa', opti
         // retried turn's output isn't duplicated in the flushed message.
         turn.accumulatedText = '';
         turn.lastResultEmitted = null;
+        turn.lastAssistantSnapshot = null;
+        turn.lastErrorMessage = null;
         continue;
       }
       if (result?.recoverableError === 'stale-session') {
+        const recoveryError = result.errorMessage || 'session was not found';
+        const recoveryMessage = `${provider === 'codex' ? 'Codex' : 'Claude'} session recovery failed: ${recoveryError}`;
         const sysMsg = agentService.addSystemMessage(
           agentId,
-          `${provider === 'codex' ? 'Codex' : 'Claude'} session recovery failed: ${result.errorMessage || 'session was not found'}`,
+          recoveryMessage,
         );
+        turn.lastErrorMessage = recoveryError;
+        turn.persistedSystemMessages.add(recoveryMessage);
         broadcast({ type: 'message', message: sysMsg });
       }
       break;
     }
   } catch (e: any) {
     console.error(`[chat] adapter run failed for ${agentId}:`, e);
-    const sysMsg = agentService.addSystemMessage(agentId, `Agent run failed: ${e?.message || String(e)}`);
+    const errorMessage = e?.message || String(e);
+    const systemMessage = `Agent run failed: ${errorMessage}`;
+    turn.lastErrorMessage = errorMessage;
+    turn.persistedSystemMessages.add(systemMessage);
+    const sysMsg = agentService.addSystemMessage(agentId, systemMessage);
     broadcast({ type: 'message', message: sysMsg });
   } finally {
-    // Flush the final assistant message. Claude streams the final response, so
-    // prefer accumulated deltas there. Codex also streams progress/status text;
-    // its --output-last-message result is the canonical persisted answer.
+    // Flush any process-level result that was not already persisted at a
+    // provider turn boundary. Stopped, failed, and empty exits also receive a
+    // durable outcome so an accepted user message can never disappear silently.
     // Use the local `turn` (not the map) so this turn always flushes its own
     // buffer even if a newer turn has since replaced the map entry.
     const turnState = turn;
-    const streamed = (turnState?.accumulatedText ?? '').trim();
-    const resultText = (turnState?.lastResultEmitted ?? '').trim();
-    let finalText = provider === 'codex' && resultText
-      ? resultText
-      : (streamed.length >= resultText.length ? streamed : resultText);
+    const finalization = resolveTurnFinalization({
+      provider,
+      accumulatedText: turnState.accumulatedText,
+      lastResultEmitted: turnState.lastResultEmitted,
+      lastAssistantSnapshot: turnState.lastAssistantSnapshot,
+      lastPersistedResult: turnState.lastPersistedResult,
+      abortReason: turnState.abortReason,
+      errorMessage: turnState.lastErrorMessage,
+      persistedSystemMessages: [...turnState.persistedSystemMessages],
+    });
 
-    if (finalText) {
-      if (turnState?.abortReason) {
-        const marker = turnState.abortReason === 'timeout'
-          ? '[Stopped: time limit reached]'
-          : turnState.abortReason === 'system'
-            ? '[Stopped by system]'
-            : '[Stopped by user]';
-        finalText = finalText + '\n\n' + marker;
-      }
-      // Stamp the provider that produced this turn so the chat UI can render
-      // the correct role label ('Claude' vs 'Codex') per-message — historic
-      // messages without this field display 'Claude' for backward compat.
-      const assistantMsg = agentService.appendMessage(agentId, 'assistant', finalText, undefined, undefined, undefined, provider, turnState?.modelRan || resolvedModel);
-      broadcast({ type: 'message', message: assistantMsg });
+    if (finalization.assistantText) {
+      persistAssistantResult(agentId, finalization.assistantText, turnState);
+    }
+    if (finalization.systemText) {
+      const sysMsg = agentService.addSystemMessage(agentId, finalization.systemText);
+      turnState.persistedSystemMessages.add(finalization.systemText);
+      broadcast({ type: 'message', message: sysMsg });
     }
 
     // Ground-truth model check: if the CLI reported serving this turn with a
@@ -582,7 +662,13 @@ export const chatService = {
     if (turn) turn.abortReason = reason;
     const handle = currentHandles.get(agentId);
     if (!handle) return;
-    try { handle.stop(); } catch (e) { console.error(`[chat] stop(${agentId}) failed:`, e); }
+    try {
+      void Promise.resolve(handle.stop()).catch((e) => {
+        console.error(`[chat] stop(${agentId}) failed:`, e);
+      });
+    } catch (e) {
+      console.error(`[chat] stop(${agentId}) failed:`, e);
+    }
   },
 
   /** Force-kill the adapter's subprocess immediately. */
@@ -591,7 +677,13 @@ export const chatService = {
     if (turn) turn.abortReason = 'user';
     const handle = currentHandles.get(agentId);
     if (!handle) return;
-    try { handle.kill(); } catch (e) { console.error(`[chat] kill(${agentId}) failed:`, e); }
+    try {
+      void Promise.resolve(handle.kill()).catch((e) => {
+        console.error(`[chat] kill(${agentId}) failed:`, e);
+      });
+    } catch (e) {
+      console.error(`[chat] kill(${agentId}) failed:`, e);
+    }
   },
 
   /**
