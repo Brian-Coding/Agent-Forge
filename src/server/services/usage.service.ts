@@ -32,6 +32,7 @@ const shardPath = join(syncDirectory, `${machineId}.json`);
 let localShardEvents: UsageEvent[] = [];
 let syncEnabled = false;
 let machineCount = 1;
+let knownMachineIds = new Set<string>([machineId]);
 
 function sanitizeMachineId(value: string): string {
   return value.trim().toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'local';
@@ -116,8 +117,9 @@ function refreshFromShards(): void {
   if (!syncEnabled) return;
   try {
     const files = readdirSync(syncDirectory).filter(name => name.endsWith('.json'));
-    const machineCountChanged = machineCount !== Math.max(1, files.length);
-    machineCount = Math.max(1, files.length);
+    knownMachineIds = new Set([machineId, ...files.map(name => sanitizeMachineId(name.slice(0, -'.json'.length)))]);
+    const machineCountChanged = machineCount !== knownMachineIds.size;
+    machineCount = knownMachineIds.size;
     const changed = files.reduce((didChange, name) => mergeEvents(readShard(join(syncDirectory, name))) || didChange, false);
     if (changed) persistenceService.save();
     if (changed || machineCountChanged) broadcastReport();
@@ -277,8 +279,7 @@ function agentLabelFor(ev: UsageEvent): string {
   return live || ev.agentName || ev.agentId;
 }
 
-function computeReport(): UsageReport {
-  const now = Date.now();
+function computeScopedReport(scopedEvents: readonly UsageEvent[], now: number): Pick<UsageReport, 'windows' | 'daily' | 'trackingStartedAt'> {
   const boundaries: Record<WindowKey, number> = {
     today: startOfTodayMs(),
     days7: now - 7 * 24 * 60 * 60 * 1000,
@@ -301,7 +302,7 @@ function computeReport(): UsageReport {
     dailyMap.set(key, { date: key, claude: emptyBucket(), codex: emptyBucket(), total: emptyBucket() });
   }
 
-  for (const ev of events) {
+  for (const ev of scopedEvents) {
     const agentLabel = agentLabelFor(ev);
     const modelKey = ev.model || UNRECORDED_MODEL;
     const turnTokens = ev.inputTokens + ev.outputTokens;
@@ -343,7 +344,49 @@ function computeReport(): UsageReport {
       allTime: finalizeWindow(accs.allTime),
     },
     daily: Array.from(dailyMap.values()),
-    trackingStartedAt: events.reduce<number | null>((earliest, ev) => earliest === null ? ev.timestamp : Math.min(earliest, ev.timestamp), null),
+    trackingStartedAt: scopedEvents.reduce<number | null>((earliest, ev) => earliest === null ? ev.timestamp : Math.min(earliest, ev.timestamp), null),
+  };
+}
+
+function effectiveMachineId(ev: UsageEvent): string {
+  // Events recorded before machine shards existed are local legacy history.
+  return !ev.machineId || ev.machineId === 'legacy' ? machineId : sanitizeMachineId(ev.machineId);
+}
+
+function computeReport(): UsageReport {
+  const now = Date.now();
+  const combined = computeScopedReport(events, now);
+  const currentEvents = events.filter(ev => effectiveMachineId(ev) === machineId);
+  const currentMachine = computeScopedReport(currentEvents, now);
+  const representedMachineIds = new Set([...knownMachineIds, ...events.map(effectiveMachineId)]);
+  const machines = Array.from(representedMachineIds).map(id => {
+    const machineEvents = events.filter(ev => effectiveMachineId(ev) === id);
+    const scoped = computeScopedReport(machineEvents, now);
+    return {
+      machineId: id,
+      isCurrent: id === machineId,
+      eventCount: machineEvents.length,
+      trackingStartedAt: scoped.trackingStartedAt,
+      lastTimestamp: machineEvents.reduce<number | null>((latest, ev) => latest === null ? ev.timestamp : Math.max(latest, ev.timestamp), null),
+      windows: {
+        today: scoped.windows.today.summary,
+        days7: scoped.windows.days7.summary,
+        days30: scoped.windows.days30.summary,
+        month: scoped.windows.month.summary,
+        allTime: scoped.windows.allTime.summary,
+      },
+    };
+  }).sort((a, b) => {
+    if (a.isCurrent !== b.isCurrent) return a.isCurrent ? -1 : 1;
+    const aTokens = a.windows.allTime.total.inputTokens + a.windows.allTime.total.outputTokens;
+    const bTokens = b.windows.allTime.total.inputTokens + b.windows.allTime.total.outputTokens;
+    return bTokens - aTokens || a.machineId.localeCompare(b.machineId);
+  });
+
+  return {
+    ...combined,
+    currentMachine,
+    machines,
     sync: {
       enabled: syncEnabled,
       machineId,
@@ -369,6 +412,7 @@ export const usageService = {
     localShardEvents = [];
     syncEnabled = false;
     machineCount = 1;
+    knownMachineIds = new Set([machineId]);
     if (Array.isArray(persisted)) {
       const seen = new Set<string>();
       for (const ev of persisted) {

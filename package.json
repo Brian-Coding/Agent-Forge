@@ -5,7 +5,9 @@
   "private": true,
   "scripts": {
     "dev": "bun src/server/index.ts",
-    "start": "bun src/server/index.ts"
+    "start": "bun src/server/index.ts",
+    "usage:sync": "bun scripts/sync-usage.ts",
+    "usage:sync:dry-run": "bun scripts/sync-usage.ts --dry-run"
   },
   "devDependencies": {
     "@types/bun": "latest",

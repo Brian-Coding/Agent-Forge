@@ -39,7 +39,12 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 data.json
 pids.json
 agent-forge.lock
-/.agent-forge-sync/
+# Usage history is intentionally Git-backed one shard per machine. Ignore any
+# other runtime sync data and atomic-write temporary files.
+/.agent-forge-sync/*
+!/.agent-forge-sync/usage/
+!/.agent-forge-sync/usage/*.json
+/.agent-forge-sync/usage/*.tmp
 /.agent-forge-backups/
 
 # Editor configs
