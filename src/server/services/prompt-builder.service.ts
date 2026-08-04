@@ -1,7 +1,8 @@
 import { existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
-import type { AgentInfo } from '../../shared/protocol';
+import type { AgentInfo, WorkspaceInfo } from '../../shared/protocol';
 import { documentService } from './document.service';
+import { googleDocsService } from './google-docs.service';
 import { settingsService } from './settings.service';
 import { workspaceService } from './workspace.service';
 
@@ -38,6 +39,13 @@ Vercel Integration:
 export function normalizeSharedProjectContext(content: string | undefined): string {
   const normalized = String(content || '').trim().replace(/\r\n/g, '\n');
   return normalized === LEGACY_SHARED_PROJECT_CONTEXT ? '' : String(content || '').trim();
+}
+
+export function shouldInjectGoogleDocsTracker(
+  agentInfo: Pick<AgentInfo, 'hideFromGrid'>,
+  workspace: Pick<WorkspaceInfo, 'googleDocsTrackerEnabled'> | undefined,
+): boolean {
+  return !agentInfo.hideFromGrid && workspace?.googleDocsTrackerEnabled === true;
 }
 
 const PLAN_MANAGEMENT_INSTRUCTIONS = `Plan Management:
@@ -154,6 +162,7 @@ export interface PromptBuildResult {
 export const promptBuilderService = {
   build(agentInfo: AgentInfo, sharedContext: string): PromptBuildResult {
     const parts: string[] = [DEFAULT_GUARDRAILS, BUILT_IN_HARNESS_STANDARDS];
+    const workspace = workspaceService.get(agentInfo.workspaceId);
 
     if (agentInfo.systemPrompt) {
       parts.push(`Agent Persona:\n${agentInfo.systemPrompt}`);
@@ -166,6 +175,8 @@ export const promptBuilderService = {
     if (docsContext) {
       parts.push(docsContext);
     }
+    const googleDocsContext = googleDocsService.getAgentInstructions();
+    if (googleDocsContext && shouldInjectGoogleDocsTracker(agentInfo, workspace)) parts.push(googleDocsContext);
     parts.push(REPORT_DELIVERY_INSTRUCTIONS);
     parts.push(PLAN_MANAGEMENT_INSTRUCTIONS);
     parts.push(CONVERSATION_SCOPE_INSTRUCTIONS);
@@ -201,9 +212,8 @@ export const promptBuilderService = {
 
     // Atlas citation for non-special agents in workspaces that have a built atlas.
     if (!agentInfo.hideFromGrid) {
-      const ws = workspaceService.get(agentInfo.workspaceId);
-      if (ws?.atlasProjectCwd) {
-        const atlasMd = join(ws.atlasProjectCwd, 'docs', 'ui-atlas', 'atlas.md');
+      if (workspace?.atlasProjectCwd) {
+        const atlasMd = join(workspace.atlasProjectCwd, 'docs', 'ui-atlas', 'atlas.md');
         if (existsSync(atlasMd)) {
           parts.push(buildAtlasCitationBlock(atlasMd));
         }

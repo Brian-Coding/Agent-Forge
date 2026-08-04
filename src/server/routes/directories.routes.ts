@@ -54,6 +54,11 @@ function getDocumentsPath(): string {
   return home;
 }
 
+function getDefaultPath(): string {
+  const developmentPath = join(homedir(), 'dev');
+  return existsSync(developmentPath) ? developmentPath : getDocumentsPath();
+}
+
 function knownDirectoryFallbacks(path: string): { name: string; path: string; isDirectory: boolean }[] {
   const normalizedPath = normalizePath(path);
   const documentsPath = normalizePath(getDocumentsPath());
@@ -123,5 +128,6 @@ export async function handleDirectories(req: Request): Promise<Response> {
     home: homedir(),
     shortcuts: getShortcuts(),
     documentsPath: getDocumentsPath(),
+    defaultPath: getDefaultPath(),
   });
 }

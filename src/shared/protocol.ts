@@ -94,6 +94,7 @@ export interface WorkspaceInfo {
   lockedAgentIds: string[];    // Agents locked to their current grid slot
   createdAt: number;
   testUrl?: string;            // URL the QA agent navigates to (e.g. http://localhost:5173)
+  googleDocsTrackerEnabled?: boolean; // Opt-in: expose the configured Google Docs tracker to agents in this workspace.
   qaAgentId?: string;          // ID of the QA testing agent provisioned for this workspace (set lazily on first QA chat send)
   qaRuns?: QaRunInfo[];        // Persisted structured QA history, capped per workspace.
   atlasAgentId?: string;       // ID of the UI Atlas agent provisioned for this workspace (explicit user action via the "Create UI Atlas Agent" button)
@@ -503,7 +504,7 @@ export type ClientMessage =
   // Workspaces
   | { type: 'get_workspaces' }
   | { type: 'create_workspace'; name: string }
-  | { type: 'update_workspace'; id: string; name?: string; gridColumns?: number; gridRows?: number; selectedAgentIds?: string[]; lockedAgentIds?: string[]; testUrl?: string }
+  | { type: 'update_workspace'; id: string; name?: string; gridColumns?: number; gridRows?: number; selectedAgentIds?: string[]; lockedAgentIds?: string[]; testUrl?: string; googleDocsTrackerEnabled?: boolean }
   | { type: 'reorder_workspaces'; orderedIds: string[] }
   | { type: 'delete_workspace'; id: string }
   | { type: 'set_active_workspace'; id: string }

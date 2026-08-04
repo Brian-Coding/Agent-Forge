@@ -3,6 +3,7 @@ import {
   getBuiltInHarnessInstructionManifest,
   LEGACY_SHARED_PROJECT_CONTEXT,
   normalizeSharedProjectContext,
+  shouldInjectGoogleDocsTracker,
 } from './prompt-builder.service';
 
 test('legacy shared standards migrate into the built-in harness policy without duplication', () => {
@@ -21,4 +22,12 @@ test('Harness Settings exposes the exact built-in instruction sections', () => {
   expect(manifest.sections.find(section => section.id === 'reports')?.content).toContain('directly in the final chat response');
   expect(manifest.sections.find(section => section.id === 'reports')?.content).toContain('Never make a bare local filesystem link the only delivery');
   expect(manifest.assemblyOrder.length).toBe(7);
+});
+
+test('Google Docs tracker context is workspace opt-in', () => {
+  expect(shouldInjectGoogleDocsTracker({}, undefined)).toBe(false);
+  expect(shouldInjectGoogleDocsTracker({}, {})).toBe(false);
+  expect(shouldInjectGoogleDocsTracker({}, { googleDocsTrackerEnabled: false })).toBe(false);
+  expect(shouldInjectGoogleDocsTracker({}, { googleDocsTrackerEnabled: true })).toBe(true);
+  expect(shouldInjectGoogleDocsTracker({ hideFromGrid: true }, { googleDocsTrackerEnabled: true })).toBe(false);
 });

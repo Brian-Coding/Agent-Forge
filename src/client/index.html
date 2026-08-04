@@ -190,6 +190,12 @@
     .shared-context-textarea:focus { outline: none; border-color: var(--accent); }
     .settings-card { border: 1px solid var(--border); background: var(--bg-primary); border-radius: 8px; padding: 12px; margin-bottom: 12px; }
     .settings-card-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 4px; }
+    .settings-card-collapsible { padding: 0; }
+    .settings-card-collapsible > summary { cursor: pointer; list-style: none; padding: 12px; margin: 0; }
+    .settings-card-collapsible > summary::-webkit-details-marker { display: none; }
+    .settings-card-collapsible > summary::before { content: '\25B8'; color: var(--text-muted); margin-right: 7px; transition: transform 0.15s; }
+    .settings-card-collapsible[open] > summary::before { transform: rotate(90deg); }
+    .settings-card-collapsible-body { padding: 0 12px 12px; }
     .settings-card-title { font-size: 13px; font-weight: 700; color: var(--text-primary); }
     .settings-badge { flex-shrink: 0; padding: 2px 7px; border: 1px solid var(--border); border-radius: 999px; color: var(--text-secondary); background: var(--bg-tertiary); font-size: 9px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
     .settings-assembly-list { display: grid; gap: 5px; margin: 10px 0 0; padding: 0; list-style: none; counter-reset: assembly-step; }
@@ -514,11 +520,14 @@
     .workspace-agent-chip:hover { background: var(--bg-tertiary); }
 
     /* Workspace testing config */
-    .workspace-testing { padding: 2px 12px 4px; display: flex; align-items: center; gap: 6px; }
+    .workspace-testing { padding: 2px 12px 4px; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 4px 6px; }
     .workspace-testing-label { font-size: 10px; color: var(--text-muted); flex-shrink: 0; }
     .workspace-test-url-input { flex: 1; min-width: 0; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 3px; color: var(--text-secondary); padding: 2px 6px; font-size: 10px; outline: none; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; box-sizing: border-box; }
     .workspace-test-url-input::placeholder { color: var(--text-muted); }
     .workspace-test-url-input:focus { border-color: var(--accent); color: var(--text-primary); }
+    .workspace-tracker-toggle { grid-column: 1 / -1; display: inline-flex; align-items: center; gap: 5px; width: fit-content; color: var(--text-muted); font-size: 10px; cursor: pointer; user-select: none; }
+    .workspace-tracker-toggle input { margin: 0; accent-color: var(--accent); }
+    .workspace-tracker-toggle:hover { color: var(--text-secondary); }
     .workspace-atlas { padding: 2px 12px 6px; }
     .workspace-atlas-btn { width: 100%; background: var(--bg-tertiary); border: 1px solid var(--border); color: var(--text-secondary); padding: 4px 8px; border-radius: 4px; font-size: 11px; cursor: pointer; transition: all 0.15s; }
     .workspace-atlas-btn:hover:not(:disabled) { background: rgba(86, 211, 100, 0.1); border-color: var(--qa-accent); color: var(--text-primary); }
@@ -1658,10 +1667,10 @@
           if (data.shortcuts) setShortcuts(data.shortcuts);
           setHomePath(data.home);
 
-          // On initial load with no defaultPath, redirect to Documents
-          if (!initialLoadDone.current && !defaultPath && data.documentsPath && data.path !== data.documentsPath) {
+          // On initial load with no explicit path, open the user's development root.
+          if (!initialLoadDone.current && !defaultPath && data.defaultPath && data.path !== data.defaultPath) {
             initialLoadDone.current = true;
-            load(data.documentsPath);
+            load(data.defaultPath);
             return;
           }
           initialLoadDone.current = true;
@@ -1787,6 +1796,11 @@
       const [vercelStatus, setVercelStatus] = useState(null);
       const [vercelLoading, setVercelLoading] = useState(false);
       const [vercelError, setVercelError] = useState('');
+      const [googleDocsStatus, setGoogleDocsStatus] = useState(null);
+      const [googleDocsLoading, setGoogleDocsLoading] = useState(false);
+      const [googleDocsError, setGoogleDocsError] = useState('');
+      const [googleDocsUrl, setGoogleDocsUrl] = useState('');
+      const [googleDocsCredentialPath, setGoogleDocsCredentialPath] = useState('');
       const [instructionManifest, setInstructionManifest] = useState(null);
       const [instructionError, setInstructionError] = useState('');
       useEffect(() => { setText(content); }, [content]);
@@ -1794,13 +1808,25 @@
         if (!isOpen) return;
         let active = true;
         setVercelLoading(true);
+        setGoogleDocsLoading(true);
         setVercelError('');
+        setGoogleDocsError('');
         setInstructionError('');
         fetch('/api/integrations/vercel')
           .then(r => r.ok ? r.json() : Promise.reject(new Error('Status check failed')))
           .then(data => { if (active) setVercelStatus(data); })
           .catch(err => { if (active) setVercelError(err.message || 'Status check failed'); })
           .finally(() => { if (active) setVercelLoading(false); });
+        fetch('/api/integrations/google-docs')
+          .then(r => r.ok ? r.json() : Promise.reject(new Error('Google Docs status check failed')))
+          .then(data => {
+            if (!active) return;
+            setGoogleDocsStatus(data);
+            setGoogleDocsUrl(data.documentUrl || '');
+            setGoogleDocsCredentialPath(data.credentialPath || '');
+          })
+          .catch(err => { if (active) setGoogleDocsError(err.message || 'Google Docs status check failed'); })
+          .finally(() => { if (active) setGoogleDocsLoading(false); });
         fetch('/api/harness/instructions')
           .then(r => r.ok ? r.json() : Promise.reject(new Error('Instruction manifest failed to load')))
           .then(data => { if (active) setInstructionManifest(data); })
@@ -1817,6 +1843,27 @@
           .catch(err => setVercelError(err.message || 'Configuration failed'))
           .finally(() => setVercelLoading(false));
       };
+      const configureGoogleDocs = () => {
+        setGoogleDocsLoading(true);
+        setGoogleDocsError('');
+        fetch('/api/integrations/google-docs', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ documentUrl: googleDocsUrl, credentialPath: googleDocsCredentialPath }),
+        })
+          .then(async r => {
+            const data = await r.json().catch(() => ({}));
+            if (!r.ok) throw new Error(data.error || 'Google Docs configuration failed');
+            return data;
+          })
+          .then(data => {
+            setGoogleDocsStatus(data);
+            setGoogleDocsUrl(data.documentUrl || googleDocsUrl);
+            setGoogleDocsCredentialPath(data.credentialPath || googleDocsCredentialPath);
+          })
+          .catch(err => setGoogleDocsError(err.message || 'Google Docs configuration failed'))
+          .finally(() => setGoogleDocsLoading(false));
+      };
       return e('div', { className: 'modal-overlay', onClick: (ev) => ev.target === ev.currentTarget && onClose() },
         e('div', { className: 'modal harness-settings-modal' },
           e('h2', { className: 'modal-title' }, 'Harness Settings'),
@@ -1828,6 +1875,37 @@
             e('div', { className: 'form-hint' }, 'Agent Forge builds one context package for every turn. Inherent safety rules come first and cannot be edited here; project- and task-specific information is layered on afterward.'),
             instructionManifest?.assemblyOrder && e('ol', { className: 'settings-assembly-list' },
               instructionManifest.assemblyOrder.map((step, index) => e('li', { key: index }, step))
+            )
+          ),
+          e('details', { className: 'settings-card settings-card-collapsible' },
+            e('summary', { className: 'settings-card-header' },
+              e('div', { className: 'settings-card-title' }, 'Google Docs project tracker'),
+              e('span', { className: 'settings-badge' }, googleDocsStatus?.connected ? 'Connected' : 'Not configured')
+            ),
+            e('div', { className: 'settings-card-collapsible-body' },
+              e('div', { className: 'form-hint' }, 'Connects agents to one explicitly shared Google Doc. Enable it only in the workspace that needs the tracker. The credential remains on the server and is never sent to agents or stored in this repository.'),
+              e('div', { className: 'form-group', style: { marginTop: 10 } },
+                e('label', { className: 'form-label' }, 'Google Doc URL'),
+                e('input', { className: 'form-input', value: googleDocsUrl, onChange: ev => setGoogleDocsUrl(ev.target.value), placeholder: 'https://docs.google.com/document/d/.../edit' })
+              ),
+              e('div', { className: 'form-group' },
+                e('label', { className: 'form-label' }, 'Service-account credential path'),
+                e('input', { className: 'form-input', value: googleDocsCredentialPath, onChange: ev => setGoogleDocsCredentialPath(ev.target.value), placeholder: 'Defaults to the secure .agent-forge credentials directory' })
+              ),
+              googleDocsStatus && e('div', { className: 'settings-status-row' },
+                e('div', { className: 'settings-status-item' },
+                  e('strong', null, 'Credential'),
+                  e('span', { className: googleDocsStatus.credentialFound ? 'settings-status-ok' : 'settings-status-pending' }, googleDocsStatus.credentialFound ? 'Found' : 'Missing')
+                ),
+                e('div', { className: 'settings-status-item' },
+                  e('strong', null, 'Document'),
+                  e('span', { className: googleDocsStatus.connected ? 'settings-status-ok' : 'settings-status-pending' }, googleDocsStatus.connected ? (googleDocsStatus.title || 'Connected') : 'Not connected')
+                )
+              ),
+              googleDocsStatus?.tabTitle && e('div', { className: 'form-hint', style: { marginTop: 8 } }, 'Selected tab: ' + googleDocsStatus.tabTitle),
+              googleDocsError && e('div', { className: 'form-hint', style: { color: 'var(--error)' } }, googleDocsError),
+              googleDocsStatus?.error && !googleDocsError && e('div', { className: 'form-hint', style: { color: 'var(--error)' } }, googleDocsStatus.error),
+              e('button', { type: 'button', className: 'btn btn-secondary', disabled: googleDocsLoading || !googleDocsUrl.trim(), onClick: configureGoogleDocs, style: { marginTop: 8 } }, googleDocsLoading ? 'Testing connection...' : googleDocsStatus?.connected ? 'Re-test and save' : 'Test and save')
             )
           ),
           e('div', { className: 'settings-card' },
@@ -3343,7 +3421,15 @@
                         if (val !== (ws.testUrl || '')) onUpdateWorkspaceTesting(ws.id, { testUrl: val });
                       },
                       onKeyDown: (ev) => { if (ev.key === 'Enter') ev.target.blur(); },
-                    })
+                    }),
+                    e('label', { className: 'workspace-tracker-toggle', title: 'Give normal agents in this workspace access to the configured Google Docs project tracker' },
+                      e('input', {
+                        type: 'checkbox',
+                        checked: !!ws.googleDocsTrackerEnabled,
+                        onChange: (ev) => onUpdateWorkspaceTesting(ws.id, { googleDocsTrackerEnabled: ev.target.checked }),
+                      }),
+                      e('span', null, 'Use Google Docs tracker')
+                    )
                   ),
                   isActive && (() => {
                     const atlasAgent = ws.atlasAgentId ? agents.find(a => a.id === ws.atlasAgentId) : null;

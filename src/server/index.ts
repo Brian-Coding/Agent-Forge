@@ -22,6 +22,13 @@ import { handleGitBranch } from './routes/git.routes';
 import { handleGetModels } from './routes/models.routes';
 import { handleUsageExport } from './routes/usage.routes';
 import { handleVercelIntegration } from './routes/integrations.routes';
+import {
+  handleGoogleDocsAppend,
+  handleGoogleDocsDocument,
+  handleGoogleDocsIntegration,
+  handleGoogleDocsReplace,
+} from './routes/google-docs.routes';
+import { googleDocsService } from './services/google-docs.service';
 import { handleHarnessInstructions } from './routes/harness.routes';
 import { handleAskAtlas } from './routes/atlas.routes';
 import { handleProjectFile } from './routes/project-file.routes';
@@ -372,6 +379,11 @@ function startServer(preferredPort: number) {
           if (url.pathname === '/api/models' && req.method === 'GET') return handleGetModels(req);
           if (url.pathname === '/api/usage/export' && req.method === 'GET') return handleUsageExport(req);
           if (url.pathname === '/api/integrations/vercel' && (req.method === 'GET' || req.method === 'POST')) return handleVercelIntegration(req);
+          if (url.pathname === '/api/integrations/google-docs' && (req.method === 'GET' || req.method === 'POST')) return handleGoogleDocsIntegration(req);
+          if (url.pathname === '/api/google-docs/document' && req.method === 'GET') return handleGoogleDocsDocument();
+          if (url.pathname === '/api/google-docs/append' && req.method === 'POST') return handleGoogleDocsAppend(req, false);
+          if (url.pathname === '/api/google-docs/append-if-absent' && req.method === 'POST') return handleGoogleDocsAppend(req, true);
+          if (url.pathname === '/api/google-docs/replace' && req.method === 'POST') return handleGoogleDocsReplace(req);
           if (url.pathname === '/api/harness/instructions' && req.method === 'GET') return handleHarnessInstructions();
           if (url.pathname === '/api/project-file' && req.method === 'GET') return handleProjectFile(req);
           if (url.pathname === '/api/chat/image-upload' && req.method === 'POST') return handleChatImageUpload(req);
@@ -432,6 +444,7 @@ if (server.port !== preferredPort) {
 // at provision time so the spawned agents call back to the same Bun.serve we just bound.
 qaService.setGuiPort(server.port ?? 0);
 atlasService.setGuiPort(server.port ?? 0);
+googleDocsService.setGuiPort(server.port ?? 0);
 // Provider limits: initial read now, then every minute.
 limitsService.start();
 console.log(`Server running at http://localhost:${server.port}`);

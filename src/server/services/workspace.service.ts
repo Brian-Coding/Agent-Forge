@@ -48,6 +48,7 @@ export const workspaceService = {
       gridRows: 2,
       selectedAgentIds: [],
       lockedAgentIds: [],
+      googleDocsTrackerEnabled: false,
       createdAt: Date.now(),
     };
     workspaces.set(ws.id, ws);
@@ -59,7 +60,7 @@ export const workspaceService = {
     return ws;
   },
 
-  async update(id: string, updates: { name?: string; gridColumns?: number; gridRows?: number; selectedAgentIds?: string[]; lockedAgentIds?: string[]; testUrl?: string; qaAgentId?: string | null; qaRuns?: QaRunInfo[]; atlasAgentId?: string | null; atlasProjectCwd?: string; atlasLastScanAt?: number; atlasRun?: AtlasRunInfo | null; qaSurfaceVerifications?: Record<string, number> }): Promise<WorkspaceInfo | null> {
+  async update(id: string, updates: { name?: string; gridColumns?: number; gridRows?: number; selectedAgentIds?: string[]; lockedAgentIds?: string[]; testUrl?: string; googleDocsTrackerEnabled?: boolean; qaAgentId?: string | null; qaRuns?: QaRunInfo[]; atlasAgentId?: string | null; atlasProjectCwd?: string; atlasLastScanAt?: number; atlasRun?: AtlasRunInfo | null; qaSurfaceVerifications?: Record<string, number> }): Promise<WorkspaceInfo | null> {
     const ws = workspaces.get(id);
     if (!ws) return null;
     if (updates.name !== undefined) ws.name = updates.name;
@@ -68,6 +69,7 @@ export const workspaceService = {
     if (updates.selectedAgentIds !== undefined) ws.selectedAgentIds = updates.selectedAgentIds;
     if (updates.lockedAgentIds !== undefined) ws.lockedAgentIds = updates.lockedAgentIds;
     if (updates.testUrl !== undefined) ws.testUrl = updates.testUrl;
+    if (updates.googleDocsTrackerEnabled !== undefined) ws.googleDocsTrackerEnabled = updates.googleDocsTrackerEnabled;
     if (updates.qaAgentId !== undefined) {
       if (updates.qaAgentId === null) delete ws.qaAgentId;
       else ws.qaAgentId = updates.qaAgentId;
