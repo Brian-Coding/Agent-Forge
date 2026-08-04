@@ -1,5 +1,5 @@
 import { test, expect } from 'bun:test';
-import { usageService } from './usage.service';
+import { selectEventsForMachineShard, usageService } from './usage.service';
 import type { UsageEvent } from '../../shared/protocol';
 
 // Report-compute regression net for the 2026-07-09 Token Usage redesign.
@@ -117,5 +117,33 @@ test('usage report separates the current machine and summarizes remote machines'
   expect(remote.windows.today.total.outputTokens).toBe(500);
   expect(report.machines[0]!.machineId).toBe(currentMachineId);
 
+  usageService.load([]);
+});
+
+test('a new runtime shard is seeded only with events belonging to the current machine', () => {
+  const duplicate = ev({ machineId: 'local-pc', inputTokens: 10 });
+  const seeded = selectEventsForMachineShard([
+    duplicate,
+    duplicate,
+    ev({ machineId: 'legacy', inputTokens: 20 }),
+    ev({ inputTokens: 30 }),
+    ev({ machineId: 'remote-pc', inputTokens: 40 }),
+  ], 'local-pc');
+
+  expect(seeded.map(event => event.inputTokens)).toEqual([10, 20, 30]);
+});
+
+test('usage exports honor current-machine scope', () => {
+  usageService.load([]);
+  const currentMachineId = usageService.getReportForConnect().sync.machineId;
+  usageService.load([
+    ev({ machineId: currentMachineId, inputTokens: 10 }),
+    ev({ machineId: 'legacy', inputTokens: 20 }),
+    ev({ machineId: 'remote-pc', inputTokens: 30 }),
+  ]);
+
+  expect(usageService.buildExportRows('current').map(row => row.inputTokens)).toEqual([10, 20]);
+  expect(usageService.buildExportRows('all').map(row => row.inputTokens)).toEqual([10, 20, 30]);
+  expect(usageService.buildExportRows('current').every(row => row.machineId === currentMachineId)).toBe(true);
   usageService.load([]);
 });

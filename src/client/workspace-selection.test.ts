@@ -30,6 +30,12 @@ test('chat image batches use the 100-image native upload path instead of base64 
   expect(clientSource).not.toContain('reader.readAsDataURL(file)');
 });
 
+test('token usage exports follow the selected machine scope', () => {
+  expect(clientSource).toContain("'&scope=' + encodeURIComponent(scope)");
+  expect(clientSource).toContain('Download the selected machine scope as CSV');
+  expect(clientSource).toContain('Download the selected machine scope as JSON');
+});
+
 test('every user message keeps a retry action bound to its own text or image attachments', () => {
   expect(clientSource).toContain("showRetry: m.role === 'user'");
   expect(clientSource).toContain('retryDisabled: isWorking || !!agent.modelMismatch');

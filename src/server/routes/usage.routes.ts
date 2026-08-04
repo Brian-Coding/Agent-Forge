@@ -1,14 +1,15 @@
 import { usageService } from '../services/usage.service';
 
 /**
- * GET /api/usage/export?format=csv|json
- * Full raw usage-event export for the Tokens tab's export buttons.
+ * GET /api/usage/export?format=csv|json&scope=current|all
+ * Raw usage-event export matching the Tokens tab's selected machine scope.
  * Localhost-only like every other route (enforced by the server's request guard).
  */
 export function handleUsageExport(req: Request): Response {
   const url = new URL(req.url);
   const format = (url.searchParams.get('format') || 'json').toLowerCase();
-  const rows = usageService.buildExportRows();
+  const scope = url.searchParams.get('scope') === 'current' ? 'current' : 'all';
+  const rows = usageService.buildExportRows(scope);
   const stamp = new Date().toISOString().slice(0, 10);
 
   if (format === 'csv') {
@@ -25,7 +26,7 @@ export function handleUsageExport(req: Request): Response {
     return new Response(header + '\n' + body + '\n', {
       headers: {
         'Content-Type': 'text/csv; charset=utf-8',
-        'Content-Disposition': `attachment; filename="agent-forge-usage-${stamp}.csv"`,
+        'Content-Disposition': `attachment; filename="agent-forge-usage-${scope}-${stamp}.csv"`,
       },
     });
   }
@@ -33,7 +34,7 @@ export function handleUsageExport(req: Request): Response {
   return new Response(JSON.stringify(rows, null, 2), {
     headers: {
       'Content-Type': 'application/json',
-      'Content-Disposition': `attachment; filename="agent-forge-usage-${stamp}.json"`,
+      'Content-Disposition': `attachment; filename="agent-forge-usage-${scope}-${stamp}.json"`,
     },
   });
 }

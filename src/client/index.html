@@ -4893,7 +4893,7 @@
         : null;
       const exportUsage = (format) => {
         const a = document.createElement('a');
-        a.href = '/api/usage/export?format=' + format;
+        a.href = '/api/usage/export?format=' + format + '&scope=' + encodeURIComponent(scope);
         a.download = '';
         document.body.appendChild(a);
         a.click();
@@ -5105,8 +5105,8 @@
         e('div', { className: 'tokens-header' },
           e('span', null, 'Token usage'),
           e('div', { className: 'tokens-export' },
-            e('button', { onClick: () => exportUsage('csv'), title: 'Download the full usage log as CSV' }, 'CSV'),
-            e('button', { onClick: () => exportUsage('json'), title: 'Download the full usage log as JSON' }, 'JSON')
+            e('button', { onClick: () => exportUsage('csv'), title: 'Download the selected machine scope as CSV' }, 'CSV'),
+            e('button', { onClick: () => exportUsage('json'), title: 'Download the selected machine scope as JSON' }, 'JSON')
           )
         ),
         e('div', { className: 'tokens-chips' },

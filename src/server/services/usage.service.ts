@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs';
-import { hostname } from 'node:os';
+import { homedir, hostname } from 'node:os';
 import { join } from 'node:path';
 import type {
   AgentProvider,
@@ -26,9 +26,13 @@ const events: UsageEvent[] = (globalThis as any).__usageEvents ??= [];
 const SYNC_REFRESH_INTERVAL_MS = 60_000;
 const PROJECT_TURNS_CAP = 100;
 const machineId = sanitizeMachineId(process.env.AGENT_FORGE_MACHINE_ID || hostname() || 'local');
-const syncDirectory = process.env.AGENT_FORGE_USAGE_SYNC_DIR
-  || join(process.cwd(), '.agent-forge-sync', 'usage');
-const shardPath = join(syncDirectory, `${machineId}.json`);
+// Live usage is runtime state, so it must not dirty Agent Forge's source tree
+// after every completed turn. The Git-backed directory contains snapshots only;
+// scripts/sync-usage.ts copies the current runtime shard there when requested.
+const runtimeSyncDirectory = process.env.AGENT_FORGE_USAGE_SYNC_DIR
+  || join(homedir(), '.agent-forge', 'usage-sync', 'usage');
+const repositorySnapshotDirectory = join(process.cwd(), '.agent-forge-sync', 'usage');
+const shardPath = join(runtimeSyncDirectory, `${machineId}.json`);
 let localShardEvents: UsageEvent[] = [];
 let syncEnabled = false;
 let machineCount = 1;
@@ -90,6 +94,22 @@ function mergeEvents(incoming: readonly UsageEvent[]): boolean {
   return changed;
 }
 
+export function selectEventsForMachineShard(incoming: readonly UsageEvent[], currentMachineId: string): UsageEvent[] {
+  const normalizedMachineId = sanitizeMachineId(currentMachineId);
+  const byId = new Map<string, UsageEvent>();
+  for (const raw of incoming) {
+    const event = normalizeEvent(raw);
+    if (!event) continue;
+    const eventMachineId = !event.machineId || event.machineId === 'legacy'
+      ? normalizedMachineId
+      : sanitizeMachineId(event.machineId);
+    if (eventMachineId === normalizedMachineId && !byId.has(event.id!)) {
+      byId.set(event.id!, event);
+    }
+  }
+  return Array.from(byId.values()).sort((a, b) => a.timestamp - b.timestamp);
+}
+
 function readShard(path: string): UsageEvent[] {
   try {
     const parsed = JSON.parse(readFileSync(path, 'utf8'));
@@ -104,7 +124,7 @@ function readShard(path: string): UsageEvent[] {
 function writeLocalShard(): void {
   if (!syncEnabled) return;
   try {
-    mkdirSync(syncDirectory, { recursive: true });
+    mkdirSync(runtimeSyncDirectory, { recursive: true });
     const tempPath = `${shardPath}.${process.pid}.tmp`;
     writeFileSync(tempPath, JSON.stringify(localShardEvents, null, 2), 'utf8');
     renameSync(tempPath, shardPath);
@@ -116,11 +136,17 @@ function writeLocalShard(): void {
 function refreshFromShards(): void {
   if (!syncEnabled) return;
   try {
-    const files = readdirSync(syncDirectory).filter(name => name.endsWith('.json'));
-    knownMachineIds = new Set([machineId, ...files.map(name => sanitizeMachineId(name.slice(0, -'.json'.length)))]);
+    const directories = [...new Set([runtimeSyncDirectory, repositorySnapshotDirectory])];
+    const shardFiles = directories.flatMap(directory => {
+      if (!existsSync(directory)) return [];
+      return readdirSync(directory)
+        .filter(name => name.endsWith('.json'))
+        .map(name => ({ directory, name }));
+    });
+    knownMachineIds = new Set([machineId, ...shardFiles.map(({ name }) => sanitizeMachineId(name.slice(0, -'.json'.length)))]);
     const machineCountChanged = machineCount !== knownMachineIds.size;
     machineCount = knownMachineIds.size;
-    const changed = files.reduce((didChange, name) => mergeEvents(readShard(join(syncDirectory, name))) || didChange, false);
+    const changed = shardFiles.reduce((didChange, { directory, name }) => mergeEvents(readShard(join(directory, name))) || didChange, false);
     if (changed) persistenceService.save();
     if (changed || machineCountChanged) broadcastReport();
   } catch (error) {
@@ -391,7 +417,7 @@ function computeReport(): UsageReport {
       enabled: syncEnabled,
       machineId,
       machineCount,
-      directory: syncEnabled ? syncDirectory : null,
+      directory: syncEnabled ? runtimeSyncDirectory : null,
     },
     generatedAt: now,
   };
@@ -426,19 +452,26 @@ export const usageService = {
   },
 
   /**
-   * Merge one append-only shard per machine from a cloud-synced directory.
-   * The default lives beside the project so OneDrive can sync it; deployments
-   * can point AGENT_FORGE_USAGE_SYNC_DIR at any shared folder instead.
+   * Merge one append-only runtime shard per machine plus Git-backed snapshots.
+   * The live shard defaults to the user's .agent-forge directory so ordinary
+   * turns never modify the source repository. AGENT_FORGE_USAGE_SYNC_DIR can
+   * point at another runtime/shared directory when explicitly desired.
    */
   startSync(): void {
     const globals = globalThis as any;
     if (globals.__usageSyncTimer) clearInterval(globals.__usageSyncTimer);
     syncEnabled = true;
     try {
-      mkdirSync(syncDirectory, { recursive: true });
-      localShardEvents = existsSync(shardPath) ? readShard(shardPath) : events.slice();
-      writeLocalShard();
+      mkdirSync(runtimeSyncDirectory, { recursive: true });
+      localShardEvents = existsSync(shardPath)
+        ? readShard(shardPath)
+        : [];
       refreshFromShards();
+      // The runtime file may be new while persistence or the repository still
+      // contains older local history. Absorb and deduplicate that history before
+      // writing so a later Git snapshot never truncates the machine's timeline.
+      localShardEvents = selectEventsForMachineShard([...localShardEvents, ...events], machineId);
+      writeLocalShard();
       globals.__usageSyncTimer = setInterval(refreshFromShards, SYNC_REFRESH_INTERVAL_MS);
       globals.__usageSyncTimer.unref?.();
     } catch (error) {
@@ -518,7 +551,7 @@ export const usageService = {
    * Raw event export for the Tokens tab's CSV/JSON buttons. Rows are
    * label-enriched so the export is useful outside the app.
    */
-  buildExportRows(): Array<{
+  buildExportRows(scope: 'current' | 'all' = 'all'): Array<{
     id: string;
     machineId: string;
     timestamp: number;
@@ -535,9 +568,12 @@ export const usageService = {
     turns: number;
     costUsd: number;
   }> {
-    return events.map(ev => ({
+    const exportEvents = scope === 'current'
+      ? events.filter(ev => effectiveMachineId(ev) === machineId)
+      : events;
+    return exportEvents.map(ev => ({
       id: ev.id || legacyEventId(ev),
-      machineId: ev.machineId || 'legacy',
+      machineId: effectiveMachineId(ev),
       timestamp: ev.timestamp,
       iso: new Date(ev.timestamp).toISOString(),
       agentId: ev.agentId,
