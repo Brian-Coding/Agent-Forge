@@ -415,14 +415,7 @@ export interface UsageDailyRow {
   total: ProviderTokenBucket;
 }
 
-/**
- * Full usage report rendered by the Tokens sidebar tab. Windows are
- * calendar-aligned to the server's local time (which is the user's local
- * time, since the server runs on the user's machine). `days7`/`days30`
- * are rolling windows (now minus N days); `today`/`month` are calendar
- * windows; `allTime` covers the whole log.
- */
-export interface UsageReport {
+export interface UsageScopedReport {
   windows: {
     today: UsageWindowReport;
     days7: UsageWindowReport;
@@ -432,8 +425,38 @@ export interface UsageReport {
   };
   /** Last 30 calendar days, oldest first, zero-filled so charts have no gaps. */
   daily: UsageDailyRow[];
-  /** Earliest tracked event and cross-machine shard status. */
   trackingStartedAt: number | null;
+}
+
+/** Compact per-machine totals used by the Tokens > Machines view. */
+export interface UsageMachineSummary {
+  machineId: string;
+  isCurrent: boolean;
+  eventCount: number;
+  trackingStartedAt: number | null;
+  lastTimestamp: number | null;
+  windows: {
+    today: WindowTokenSummary;
+    days7: WindowTokenSummary;
+    days30: WindowTokenSummary;
+    month: WindowTokenSummary;
+    allTime: WindowTokenSummary;
+  };
+}
+
+/**
+ * Full usage report rendered by the Tokens sidebar tab. Windows are
+ * calendar-aligned to the server's local time (which is the user's local
+ * time, since the server runs on the user's machine). `days7`/`days30`
+ * are rolling windows (now minus N days); `today`/`month` are calendar
+ * windows; `allTime` covers the whole log.
+ */
+export interface UsageReport extends UsageScopedReport {
+  /** Detailed report filtered to the machine rendering this UI. */
+  currentMachine: UsageScopedReport;
+  /** High-level totals for every machine represented by a shard or event. */
+  machines: UsageMachineSummary[];
+  /** Cross-machine shard status. */
   sync: {
     enabled: boolean;
     machineId: string;

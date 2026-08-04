@@ -1,5 +1,15 @@
 import { existsSync } from 'fs';
-import { ArgvTooLongError, createCliEnv, killProcessTree, resolveCliBinary, safeSpawn } from '../../utils';
+import {
+  ArgvTooLongError,
+  createCliEnv,
+  createProcessUnwindSignal,
+  killProcessTree,
+  resolveCliBinary,
+  safeSpawn,
+  type ProcessTerminationResult,
+  waitForProcessExit,
+  waitForOperationOrUnwind,
+} from '../../utils';
 import { stripModelTier } from '../agent-kinds';
 import { persistenceService } from '../../services/persistence.service';
 import { summarizeToolInput, type AgentEvent } from '../events';
@@ -41,6 +51,53 @@ export const claudeAdapter: AgentAdapter<undefined> = {
   createHandle(prompt: string, ctx: AgentRunContext): AgentHandle {
     let proc: ReturnType<typeof safeSpawn> | null = null;
     let killed = false;
+    let terminationPromise: Promise<void> | null = null;
+    let terminationResult: ProcessTerminationResult | null = null;
+    let terminationWarningEmitted = false;
+    const unwind = createProcessUnwindSignal();
+
+    const warnAndUnwind = (detail: string): void => {
+      if (!terminationWarningEmitted) {
+        terminationWarningEmitted = true;
+        ctx.emitSystemMessage(
+          `Claude process termination could not be confirmed (${detail}). ` +
+          'Agent Forge stopped waiting for it and finalized this turn so the chat queue would not hang. ' +
+          'Restart Agent Forge or use Kill All before starting more work in this project.',
+        );
+      }
+      unwind.trigger();
+    };
+
+    const requestTermination = (): Promise<void> => {
+      if (!proc) return Promise.resolve();
+      if (terminationPromise) return terminationPromise;
+      const target = proc;
+      terminationPromise = killProcessTree(target).then(
+        result => {
+          terminationResult = result;
+          if (!result.rootExited) warnAndUnwind('the process did not exit after bounded kill attempts');
+          else unwind.trigger();
+        },
+        error => {
+          try { target.unref(); } catch {}
+          warnAndUnwind(error instanceof Error ? error.message : String(error));
+        },
+      );
+      return terminationPromise;
+    };
+
+    const requestGracefulStop = async (): Promise<void> => {
+      if (!proc) return;
+      if (process.platform === 'win32') return requestTermination();
+      const target = proc;
+      try {
+        target.kill('SIGINT');
+      } catch {
+        return requestTermination();
+      }
+      const gracefulExit = await waitForProcessExit(target, 1_000);
+      if (gracefulExit.status !== 'exited' && proc === target) await requestTermination();
+    };
 
     // Resolve to absolute path so Bun.spawn doesn't have to probe PATHEXT
     // from the agent's cwd (which fails on Windows for npm shim files).
@@ -110,7 +167,7 @@ export const claudeAdapter: AgentAdapter<undefined> = {
           // A stop/kill may have landed between handle registration and the
           // spawn above — honor it now instead of running a full orphan turn.
           if (killed) {
-            void killProcessTree(proc);
+            void requestTermination();
           }
 
           // Feed the prompt via stdin then close, so the CLI processes a single turn
@@ -123,7 +180,7 @@ export const claudeAdapter: AgentAdapter<undefined> = {
             // If stdin is broken the CLI would sit waiting for input forever —
             // kill it so the turn unwinds instead of wedging the agent.
             console.warn('[claude] stdin write failed; killing process:', e);
-            void killProcessTree(proc);
+            void requestTermination();
           }
 
           // Capture stderr for the post-exit error surface. The chat bridge
@@ -134,7 +191,9 @@ export const claudeAdapter: AgentAdapter<undefined> = {
             let acc = '';
             try {
               while (true) {
-                const { done, value } = await reader.read();
+                const next = await waitForOperationOrUnwind(reader.read(), unwind);
+                if (next.status === 'unwound') break;
+                const { done, value } = next.value;
                 if (done) break;
                 const text = decoder.decode(value, { stream: true });
                 if (text) {
@@ -148,6 +207,7 @@ export const claudeAdapter: AgentAdapter<undefined> = {
             } catch {
               // stream closed
             } finally {
+              if (unwind.isTriggered()) void reader.cancel().catch(() => {});
               try { reader.releaseLock(); } catch {}
             }
             return acc + decoder.decode();
@@ -170,7 +230,9 @@ export const claudeAdapter: AgentAdapter<undefined> = {
 
           try {
             while (true) {
-              const { done, value } = await reader.read();
+              const next = await waitForOperationOrUnwind(reader.read(), unwind);
+              if (next.status === 'unwound') break;
+              const { done, value } = next.value;
               if (done) break;
               leftover += decoder.decode(value, { stream: true });
               leftover = parseNdjsonLines(leftover, handleEvent);
@@ -183,11 +245,17 @@ export const claudeAdapter: AgentAdapter<undefined> = {
             }
             flushNdjsonLeftover(leftover, handleEvent);
           } finally {
+            if (unwind.isTriggered()) void reader.cancel().catch(() => {});
             try { reader.releaseLock(); } catch {}
           }
 
-          const exitCode = await proc.exited;
-          if (proc.pid) persistenceService.untrackPid(proc.pid);
+          const exitOutcome = await waitForOperationOrUnwind(proc.exited, unwind);
+          const rootExitConfirmed = exitOutcome.status === 'completed'
+            || terminationResult?.rootExited === true;
+          const exitCode = exitOutcome.status === 'completed'
+            ? exitOutcome.value
+            : terminationResult?.exitCode ?? -1;
+          if (rootExitConfirmed && proc.pid) persistenceService.untrackPid(proc.pid);
           proc = null;
 
           const stderrText = (await stderrPromise).trim();
@@ -217,7 +285,13 @@ export const claudeAdapter: AgentAdapter<undefined> = {
 
           return lastResultText ? { lastAssistantMessage: lastResultText } : undefined;
         } catch (err: any) {
-          if (proc?.pid) persistenceService.untrackPid(proc.pid);
+          const failedProc = proc;
+          if (failedProc) {
+            await requestTermination();
+            if (terminationResult?.rootExited && failedProc.pid) {
+              persistenceService.untrackPid(failedProc.pid);
+            }
+          }
           proc = null;
           const msg = err?.message || 'Claude encountered an unexpected error';
           ctx.emitAgentEvent({ type: 'error', message: msg });
@@ -226,32 +300,27 @@ export const claudeAdapter: AgentAdapter<undefined> = {
         }
       },
 
-      stop() {
+      async stop() {
         // Set killed even before proc exists — run() checks it post-spawn so a
         // stop landing in the spawn window doesn't produce an orphan turn.
         killed = true;
         if (!proc) return;
         try {
-          if (process.platform === 'win32') {
-            // SIGINT isn't deliverable on Windows; Bun's kill() only terminates
-            // the npm .cmd shim, leaving the real CLI running. Kill the tree.
-            void killProcessTree(proc);
-          } else {
-            // SIGINT lets the CLI flush + exit gracefully on POSIX.
-            proc.kill('SIGINT');
-          }
+          await requestGracefulStop();
         } catch (e) {
           console.warn('[claude] stop() failed:', e);
+          warnAndUnwind(e instanceof Error ? e.message : String(e));
         }
       },
 
-      kill() {
+      async kill() {
         killed = true;
         if (!proc) return;
         try {
-          void killProcessTree(proc);
+          await requestTermination();
         } catch (e) {
           console.warn('[claude] kill() failed:', e);
+          warnAndUnwind(e instanceof Error ? e.message : String(e));
         }
       },
     };

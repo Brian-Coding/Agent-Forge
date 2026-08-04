@@ -299,6 +299,8 @@
     .tokens-chip { background: var(--bg-primary); border: 1px solid var(--border); color: var(--text-muted); border-radius: 10px; padding: 2px 9px; font-size: 10px; cursor: pointer; }
     .tokens-chip:hover { color: var(--text-primary); border-color: var(--text-muted); }
     .tokens-chip.active { background: rgba(47, 129, 247, 0.15); color: var(--accent); border-color: var(--accent); }
+    .tokens-scope { display: flex; gap: 4px; }
+    .tokens-scope .tokens-chip { flex: 1; border-radius: 5px; padding: 4px 8px; }
     .tokens-tabs { display: flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
     .tokens-tab { flex: 1; background: var(--bg-primary); border: none; color: var(--text-muted); padding: 4px 0; font-size: 10px; font-weight: 600; cursor: pointer; border-right: 1px solid var(--border); }
     .tokens-tab:last-child { border-right: none; }
@@ -349,6 +351,13 @@
     .tokens-project-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; color: var(--text-primary); }
     .tokens-project-meta { color: var(--text-muted); font-size: 9px; white-space: nowrap; }
     .tokens-project-turns { border-top: 1px solid var(--border); padding: 3px; }
+    .tokens-machine-list { display: flex; flex-direction: column; gap: 5px; }
+    .tokens-machine { padding: 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-primary); }
+    .tokens-machine-head { display: flex; align-items: center; gap: 6px; }
+    .tokens-machine-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary); font-size: 11px; font-weight: 700; }
+    .tokens-machine-total { color: var(--text-primary); font: 600 12px 'SF Mono', Monaco, Consolas, monospace; white-space: nowrap; }
+    .tokens-machine-meta { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 5px; color: var(--text-muted); font-size: 9px; }
+    .tokens-machine-current { padding: 1px 5px; border: 1px solid var(--accent); border-radius: 8px; color: var(--accent); font-size: 8px; font-weight: 700; text-transform: uppercase; }
     .tokens-tracking { color: var(--text-muted); font-size: 10px; padding: 0 2px; }
     .tokens-empty { padding: 14px 8px; color: var(--text-muted); font-size: 11px; text-align: center; }
 
@@ -4843,6 +4852,7 @@
       { key: 'agents',   label: 'Agents' },
       { key: 'models',   label: 'Models' },
       { key: 'daily',    label: 'Daily' },
+      { key: 'machines', label: 'Machines' },
     ];
     const PROVIDER_META = {
       claude: { name: 'Claude', icon: '✦', color: 'var(--chart-claude)' },
@@ -4862,6 +4872,7 @@
     function TokensPanel({ report }) {
       const [windowKey, setWindowKey] = useState('today');
       const [view, setView] = useState('overview');
+      const [scope, setScope] = useState('current');
       const [expandedProjects, setExpandedProjects] = useState(new Set());
 
       if (!report || !report.windows) {
@@ -4871,13 +4882,14 @@
         );
       }
 
-      const win = report.windows[windowKey] || report.windows.today;
+      const scopedReport = scope === 'current' ? (report.currentMachine || report) : report;
+      const win = scopedReport.windows[windowKey] || scopedReport.windows.today;
       const sum = win.summary;
       const stats = win.stats;
       const fmt = (n) => formatTokens(n || 0);
       const bucketTotal = (b) => (b.inputTokens || 0) + (b.outputTokens || 0);
-      const trackingDate = report.trackingStartedAt
-        ? new Date(report.trackingStartedAt).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+      const trackingDate = scopedReport.trackingStartedAt
+        ? new Date(scopedReport.trackingStartedAt).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
         : null;
       const exportUsage = (format) => {
         const a = document.createElement('a');
@@ -4951,7 +4963,7 @@
           );
 
       const dailyView = () => {
-        const days = report.daily || [];
+        const days = scopedReport.daily || [];
         const chartDays = days.slice(-14);
         const maxTok = Math.max(1, ...chartDays.map(d => bucketTotal(d.total)));
         const maxIdx = chartDays.reduce((best, d, i) => bucketTotal(d.total) > bucketTotal(chartDays[best].total) ? i : best, 0);
@@ -5055,6 +5067,40 @@
         )
       );
 
+      const machinesView = () => {
+        const rows = report.machines || [];
+        const windowLabel = (TOKEN_WINDOWS.find(w => w.key === windowKey) || {}).label;
+        const combined = report.windows[windowKey] || report.windows.today;
+        return e('div', { style: { display: 'flex', flexDirection: 'column', gap: 8 } },
+          e('div', { className: 'tokens-hero' },
+            e('div', { className: 'tokens-hero-value' }, fmt(combined.stats.totalTokens)),
+            e('div', { className: 'tokens-hero-label' }, 'all machines / ' + combined.stats.turns + ' turns / ' + windowLabel)
+          ),
+          e('div', { className: 'tokens-section-title' }, 'Usage by machine'),
+          rows.length === 0
+            ? e('div', { className: 'tokens-empty' }, 'No machine usage has been recorded yet.')
+            : e('div', { className: 'tokens-machine-list' }, rows.map(machine => {
+                const machineWindow = machine.windows[windowKey] || machine.windows.today;
+                const total = bucketTotal(machineWindow.total);
+                const combinedTotal = combined.stats.totalTokens;
+                return e('div', { key: machine.machineId, className: 'tokens-machine' },
+                  e('div', { className: 'tokens-machine-head' },
+                    e('span', { className: 'tokens-machine-name' }, machine.machineId),
+                    machine.isCurrent && e('span', { className: 'tokens-machine-current' }, 'current'),
+                    e('span', { className: 'tokens-machine-total' }, fmt(total))
+                  ),
+                  e('div', { className: 'tokens-machine-meta' },
+                    e('span', null, fmt(machineWindow.total.inputTokens) + ' input'),
+                    e('span', null, fmt(machineWindow.total.outputTokens) + ' output'),
+                    e('span', null, machineWindow.total.turns + ' turns'),
+                    combinedTotal > 0 && e('span', null, Math.round((total / combinedTotal) * 100) + '% of total'),
+                    e('span', null, 'last ' + tokensRelTime(machine.lastTimestamp))
+                  )
+                );
+              }))
+        );
+      };
+
       return e('div', { className: 'tokens-panel' },
         e('div', { className: 'tokens-header' },
           e('span', null, 'Token usage'),
@@ -5070,6 +5116,10 @@
         ),
         windowKey === 'allTime' && e('div', { className: 'tokens-tracking' }, trackingDate ? 'Tracking since ' + trackingDate : 'Tracking begins with the first recorded turn.'),
         report.sync?.enabled && e('div', { className: 'tokens-tracking', title: report.sync.directory || '' }, 'Usage sync: ' + report.sync.machineCount + ' machine' + (report.sync.machineCount === 1 ? '' : 's') + ' · ' + report.sync.machineId),
+        view !== 'machines' && e('div', { className: 'tokens-scope' },
+          e('button', { className: 'tokens-chip' + (scope === 'current' ? ' active' : ''), onClick: () => setScope('current') }, 'This machine'),
+          e('button', { className: 'tokens-chip' + (scope === 'all' ? ' active' : ''), onClick: () => setScope('all') }, 'All machines')
+        ),
         e('div', { className: 'tokens-tabs' },
           TOKEN_VIEWS.map(v =>
             e('button', { key: v.key, className: 'tokens-tab' + (view === v.key ? ' active' : ''), onClick: () => setView(v.key) }, v.label)
@@ -5078,7 +5128,8 @@
         view === 'overview' && overview(),
         view === 'agents' && breakdownTable(win.byAgent, 'Agent'),
         view === 'models' && breakdownTable(win.byModel, 'Model'),
-        view === 'daily' && dailyView()
+        view === 'daily' && dailyView(),
+        view === 'machines' && machinesView()
       );
     }
 

@@ -69,36 +69,292 @@ export function jsonResponse(data: any, status = 200): Response {
   });
 }
 
+// --- Bounded process-tree termination --------------------------------------
+
+const DEFAULT_TASKKILL_TIMEOUT_MS = 1_500;
+const DEFAULT_ROOT_EXIT_GRACE_MS = 500;
+const DEFAULT_FINAL_EXIT_GRACE_MS = 500;
+
+export interface ProcessTerminationOptions {
+  taskkillTimeoutMs?: number;
+  rootExitGraceMs?: number;
+  finalExitGraceMs?: number;
+}
+
+export interface ProcessExitWaitResult {
+  status: 'exited' | 'timed-out' | 'error';
+  exitCode?: number;
+  error?: unknown;
+}
+
+export interface WaitableKillProcess {
+  readonly exited: Promise<number>;
+  kill(signal?: number | NodeJS.Signals): void;
+  unref(): void;
+}
+
+export interface ProcessTerminationDependencies {
+  readonly platform: NodeJS.Platform;
+  spawnTaskkill(pid: number): WaitableKillProcess;
+  waitForExit(proc: Pick<WaitableKillProcess, 'exited'>, timeoutMs: number): Promise<ProcessExitWaitResult>;
+}
+
+export interface TreeKillResult {
+  attempted: boolean;
+  succeeded: boolean;
+  exitCode: number | null;
+  timedOut: boolean;
+  error?: string;
+}
+
+export interface ProcessTerminationResult {
+  rootExited: boolean;
+  exitCode: number | null;
+  treeKill: TreeKillResult;
+  directKillAttempted: boolean;
+  directKillError?: string;
+  detached: boolean;
+  unrefError?: string;
+}
+
+export interface ProcessUnwindSignal {
+  readonly promise: Promise<void>;
+  trigger(): void;
+  isTriggered(): boolean;
+}
+
+export type OperationOrUnwind<T> =
+  | { status: 'completed'; value: T }
+  | { status: 'unwound' };
+
+/**
+ * Lets an adapter stop awaiting subprocess streams when OS-level termination
+ * could not be confirmed. The process PID remains tracked for startup cleanup,
+ * but the chat turn can finish with an explicit warning instead of wedging its
+ * entire per-agent send queue forever.
+ */
+export function createProcessUnwindSignal(): ProcessUnwindSignal {
+  let triggered = false;
+  let resolve!: () => void;
+  const promise = new Promise<void>(next => { resolve = next; });
+  return {
+    promise,
+    trigger() {
+      if (triggered) return;
+      triggered = true;
+      resolve();
+    },
+    isTriggered() {
+      return triggered;
+    },
+  };
+}
+
+export async function waitForOperationOrUnwind<T>(
+  operation: Promise<T>,
+  signal: ProcessUnwindSignal,
+): Promise<OperationOrUnwind<T>> {
+  if (signal.isTriggered()) return { status: 'unwound' };
+  return Promise.race([
+    operation.then(value => ({ status: 'completed' as const, value })),
+    signal.promise.then(() => ({ status: 'unwound' as const })),
+  ]);
+}
+
+function boundedTimeout(value: number | undefined, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0
+    ? Math.floor(value)
+    : fallback;
+}
+
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+export async function waitForProcessExit(
+  proc: Pick<WaitableKillProcess, 'exited'>,
+  timeoutMs: number,
+): Promise<ProcessExitWaitResult> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const timeout = new Promise<ProcessExitWaitResult>(resolve => {
+    timer = setTimeout(() => resolve({ status: 'timed-out' }), timeoutMs);
+  });
+  try {
+    return await Promise.race([
+      proc.exited.then<ProcessExitWaitResult, ProcessExitWaitResult>(
+        exitCode => ({ status: 'exited', exitCode }),
+        error => ({ status: 'error', error }),
+      ),
+      timeout,
+    ]);
+  } finally {
+    if (timer !== null) clearTimeout(timer);
+  }
+}
+
+const defaultProcessTerminationDependencies: ProcessTerminationDependencies = {
+  platform: process.platform,
+  spawnTaskkill(pid) {
+    // Do not pipe taskkill output: an unread pipe can itself become another
+    // unbounded wait. The exit code is the authoritative success signal.
+    return Bun.spawn(['taskkill', '/T', '/F', '/PID', String(pid)], {
+      stdin: 'ignore',
+      stdout: 'ignore',
+      stderr: 'ignore',
+      windowsHide: true,
+    }) as WaitableKillProcess;
+  },
+  waitForExit: waitForProcessExit,
+};
+
+function skippedTreeKill(error?: string): TreeKillResult {
+  return {
+    attempted: false,
+    succeeded: false,
+    exitCode: null,
+    timedOut: false,
+    ...(error ? { error } : {}),
+  };
+}
+
 // Kill an entire process tree. Windows needs taskkill /T; POSIX gets a direct
 // process kill fallback because spawned CLIs are not always in their own group.
-export async function treeKill(pid: number): Promise<void> {
-  try {
-    if (process.platform === 'win32') {
-      const proc = Bun.spawn(['taskkill', '/T', '/F', '/PID', String(pid)], {
-        stdout: 'pipe',
-        stderr: 'pipe',
-      });
-      await proc.exited;
-      return;
+// The optional dependency argument keeps timeout/failure behavior deterministic
+// in unit tests while preserving the existing one-argument call surface.
+export async function treeKill(
+  pid: number,
+  options: ProcessTerminationOptions = {},
+  deps: ProcessTerminationDependencies = defaultProcessTerminationDependencies,
+): Promise<TreeKillResult> {
+  if (!Number.isInteger(pid) || pid <= 0) {
+    return skippedTreeKill(`Invalid process id: ${pid}`);
+  }
+
+  if (deps.platform === 'win32') {
+    let killer: WaitableKillProcess;
+    try {
+      killer = deps.spawnTaskkill(pid);
+    } catch (error) {
+      const message = errorText(error);
+      console.error(`treeKill(${pid}) could not start taskkill:`, error);
+      return { attempted: true, succeeded: false, exitCode: null, timedOut: false, error: message };
     }
 
+    const timeoutMs = boundedTimeout(options.taskkillTimeoutMs, DEFAULT_TASKKILL_TIMEOUT_MS);
+    const outcome = await deps.waitForExit(killer, timeoutMs);
+    if (outcome.status === 'exited') {
+      const exitCode = outcome.exitCode ?? -1;
+      return {
+        attempted: true,
+        succeeded: exitCode === 0,
+        exitCode,
+        timedOut: false,
+        ...(exitCode === 0 ? {} : { error: `taskkill exited with code ${exitCode}` }),
+      };
+    }
+
+    // taskkill itself is not allowed to wedge shutdown or an agent queue.
+    try { killer.kill('SIGKILL'); } catch {}
+    try { killer.unref(); } catch {}
+    const message = outcome.status === 'error'
+      ? `taskkill exit wait failed: ${errorText(outcome.error)}`
+      : `taskkill did not exit within ${timeoutMs}ms`;
+    console.error(`treeKill(${pid}) failed: ${message}`);
+    return {
+      attempted: true,
+      succeeded: false,
+      exitCode: null,
+      timedOut: outcome.status === 'timed-out',
+      error: message,
+    };
+  }
+
+  try {
     try {
       process.kill(-pid, 'SIGKILL');
     } catch {
       process.kill(pid, 'SIGKILL');
     }
-  } catch (e) {
-    console.error(`treeKill(${pid}) failed (process may already be dead):`, e);
+    return { attempted: true, succeeded: true, exitCode: null, timedOut: false };
+  } catch (error) {
+    const message = errorText(error);
+    console.error(`treeKill(${pid}) failed (process may already be dead):`, error);
+    return { attempted: true, succeeded: false, exitCode: null, timedOut: false, error: message };
   }
 }
 
-// Kill a Bun Subprocess's entire process tree, falling back to .kill() if no PID
-export async function killProcessTree(proc: Subprocess<any, any, any>): Promise<void> {
-  if (proc.pid) {
-    await treeKill(proc.pid);
-  } else {
-    try { proc.kill(); } catch {}
+// Kill a Bun Subprocess's tree, verify that its root exited, and fall back to
+// a direct kill when taskkill fails. Every wait is capped. If even the direct
+// kill cannot be confirmed, detach the handle so it cannot keep Bun alive.
+// Existing callers may continue to ignore the returned diagnostic result.
+export async function killProcessTree(
+  proc: Subprocess<any, any, any>,
+  options: ProcessTerminationOptions = {},
+  deps: ProcessTerminationDependencies = defaultProcessTerminationDependencies,
+): Promise<ProcessTerminationResult> {
+  const emptyTreeResult = skippedTreeKill();
+  if (proc.exitCode != null || proc.signalCode != null) {
+    return {
+      rootExited: true,
+      exitCode: proc.exitCode,
+      treeKill: emptyTreeResult,
+      directKillAttempted: false,
+      detached: false,
+    };
   }
+
+  const treeResult = proc.pid
+    ? await treeKill(proc.pid, options, deps)
+    : skippedTreeKill('Subprocess has no process id');
+  const rootExitGraceMs = treeResult.succeeded
+    ? boundedTimeout(options.rootExitGraceMs, DEFAULT_ROOT_EXIT_GRACE_MS)
+    : 0;
+  const afterTreeKill = await deps.waitForExit(proc, rootExitGraceMs);
+  if (afterTreeKill.status === 'exited') {
+    return {
+      rootExited: true,
+      exitCode: afterTreeKill.exitCode ?? null,
+      treeKill: treeResult,
+      directKillAttempted: false,
+      detached: false,
+    };
+  }
+
+  let directKillError: string | undefined;
+  try {
+    proc.kill('SIGKILL');
+  } catch (error) {
+    directKillError = errorText(error);
+  }
+
+  const finalExitGraceMs = boundedTimeout(options.finalExitGraceMs, DEFAULT_FINAL_EXIT_GRACE_MS);
+  const afterDirectKill = await deps.waitForExit(proc, finalExitGraceMs);
+  if (afterDirectKill.status === 'exited') {
+    return {
+      rootExited: true,
+      exitCode: afterDirectKill.exitCode ?? null,
+      treeKill: treeResult,
+      directKillAttempted: true,
+      ...(directKillError ? { directKillError } : {}),
+      detached: false,
+    };
+  }
+
+  let unrefError: string | undefined;
+  try {
+    proc.unref();
+  } catch (error) {
+    unrefError = errorText(error);
+  }
+  return {
+    rootExited: false,
+    exitCode: null,
+    treeKill: treeResult,
+    directKillAttempted: true,
+    ...(directKillError ? { directKillError } : {}),
+    detached: true,
+    ...(unrefError ? { unrefError } : {}),
+  };
 }
 
 // --- CLI binary resolution -------------------------------------------------

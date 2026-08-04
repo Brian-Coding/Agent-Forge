@@ -89,3 +89,33 @@ test('usage load tolerates malformed and legacy events', () => {
   expect(report.windows.allTime.byModel[0]!.key).toBe('(unrecorded)');
   usageService.load([]);
 });
+
+test('usage report separates the current machine and summarizes remote machines', () => {
+  usageService.load([]);
+  const currentMachineId = usageService.getReportForConnect().sync.machineId;
+  const now = Date.now();
+
+  usageService.load([
+    ev({ machineId: currentMachineId, timestamp: now - 30_000, inputTokens: 100, outputTokens: 50 }),
+    // Pre-shard history belongs to the machine rendering the report.
+    ev({ machineId: 'legacy', timestamp: now - 20_000, inputTokens: 20, outputTokens: 5 }),
+    ev({ machineId: 'machine-b', timestamp: now - 10_000, provider: 'codex', inputTokens: 1000, outputTokens: 500 }),
+  ]);
+
+  const report = usageService.getReportForConnect();
+  expect(report.windows.today.stats.totalTokens).toBe(1675);
+  expect(report.currentMachine.windows.today.stats.totalTokens).toBe(175);
+  expect(report.currentMachine.windows.today.summary.total.turns).toBe(2);
+
+  const current = report.machines.find(machine => machine.machineId === currentMachineId)!;
+  const remote = report.machines.find(machine => machine.machineId === 'machine-b')!;
+  expect(current.isCurrent).toBe(true);
+  expect(current.eventCount).toBe(2);
+  expect(current.windows.today.total.inputTokens).toBe(120);
+  expect(remote.isCurrent).toBe(false);
+  expect(remote.eventCount).toBe(1);
+  expect(remote.windows.today.total.outputTokens).toBe(500);
+  expect(report.machines[0]!.machineId).toBe(currentMachineId);
+
+  usageService.load([]);
+});
