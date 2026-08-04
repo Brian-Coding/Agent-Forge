@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "bun src/server/index.ts",
     "start": "bun src/server/index.ts",
+    "tracker:reconcile": "bun scripts/reconcile-google-docs-tracker.ts",
+    "tracker:install": "bun scripts/install-tracker-reconciliation-launchd.ts",
     "usage:sync": "bun scripts/sync-usage.ts",
     "usage:sync:dry-run": "bun scripts/sync-usage.ts --dry-run"
   },
