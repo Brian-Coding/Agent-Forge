@@ -55,6 +55,8 @@ interface CodexRunState {
   pendingTurnAssistantMessage: string;
   lastCheckpointedMessage: string;
   currentTurnCheckpointed: boolean;
+  transportRetryActive: boolean;
+  lastTerminalErrorMessage: string;
   currentToolId: string | null;
   // file_change events don't include diffs — capture before/after snapshots
   // so we can synthesize Edit tool events.
@@ -65,6 +67,39 @@ interface CodexRunState {
 }
 
 const MAX_INLINE_DIFF_CHARS = 80_000;
+
+export interface CodexTransportStatus {
+  status: 'retrying' | 'fallback';
+  message: string;
+  attempt?: number;
+  maxAttempts?: number;
+}
+
+/**
+ * Codex emits retry progress as JSON `error` events even though the turn is
+ * still alive. It emits a separate plain error and `turn.failed` only if all
+ * retry/fallback paths fail. Classify only the explicit progress shapes so a
+ * real terminal error can never be hidden by a broad text filter.
+ */
+export function parseCodexTransportStatus(message: string): CodexTransportStatus | null {
+  const normalized = message.trim();
+  const reconnect = normalized.match(
+    /^Reconnecting(?:\.{3}|…)?\s*(\d+)\s*\/\s*(\d+)(?:\s*\([\s\S]*\))?$/i,
+  );
+  if (reconnect) {
+    const attempt = Number(reconnect[1]);
+    const maxAttempts = Number(reconnect[2]);
+    if (Number.isSafeInteger(attempt) && Number.isSafeInteger(maxAttempts) && attempt > 0 && maxAttempts > 0) {
+      return { status: 'retrying', message: normalized, attempt, maxAttempts };
+    }
+  }
+
+  if (/^Falling back from WebSockets? to HTTPS transport\.(?:\s|$)/i.test(normalized)) {
+    return { status: 'fallback', message: normalized };
+  }
+
+  return null;
+}
 
 export function codexReasoningConfigArg(level?: string): string {
   const normalized = level === 'extra_high' ? 'xhigh' : (level || 'medium');
@@ -403,6 +438,35 @@ export function handleCodexEvent(ctx: AgentRunContext, state: CodexRunState, eve
   };
 
   const item = event.item;
+  const providerErrorMessage = event.type === 'error' && typeof event.message === 'string'
+    ? event.message
+    : event.type === 'item.completed' && item?.type === 'error' && typeof item.message === 'string'
+      ? item.message
+      : null;
+  const transportStatus = providerErrorMessage
+    ? parseCodexTransportStatus(providerErrorMessage)
+    : null;
+
+  if (transportStatus) {
+    state.transportRetryActive = true;
+    ctx.emitAgentEvent({ type: 'transport-status', ...transportStatus });
+    return;
+  }
+
+  const isTerminalErrorEvent = event.type === 'turn.failed'
+    || (event.type === 'error' && typeof event.message === 'string')
+    || (event.type === 'item.completed' && item?.type === 'error');
+  if (state.transportRetryActive && !isTerminalErrorEvent) {
+    state.transportRetryActive = false;
+    ctx.emitAgentEvent({ type: 'transport-status', status: 'recovered' });
+  }
+
+  const emitTerminalError = (message: string): void => {
+    const normalized = message.trim();
+    if (!normalized || normalized === state.lastTerminalErrorMessage) return;
+    state.lastTerminalErrorMessage = normalized;
+    ctx.emitAgentEvent({ type: 'error', message: normalized });
+  };
 
   // --- Session lifecycle -----------------------------------------------------
   if (event.type === 'thread.started' && typeof event.thread_id === 'string') {
@@ -414,6 +478,7 @@ export function handleCodexEvent(ctx: AgentRunContext, state: CodexRunState, eve
   }
 
   if (event.type === 'turn.started') {
+    state.lastTerminalErrorMessage = '';
     state.pendingTurnAssistantMessage = '';
     state.currentTurnCheckpointed = false;
     ctx.emitAgentEvent({ type: 'status', status: 'thinking' });
@@ -423,6 +488,7 @@ export function handleCodexEvent(ctx: AgentRunContext, state: CodexRunState, eve
   // Goal-mode rollout compatibility. Current public JSON uses turn.started,
   // while older/internal streams can expose task_started instead.
   if (event.type === 'task_started') {
+    state.lastTerminalErrorMessage = '';
     state.pendingTurnAssistantMessage = '';
     state.currentTurnCheckpointed = false;
     ctx.emitAgentEvent({ type: 'status', status: 'thinking' });
@@ -464,7 +530,7 @@ export function handleCodexEvent(ctx: AgentRunContext, state: CodexRunState, eve
   if (event.type === 'turn.failed') {
     const message = extractText(event.error ?? event.message ?? event)
       || 'Codex turn failed without an error message';
-    ctx.emitAgentEvent({ type: 'error', message });
+    emitTerminalError(message);
     state.pendingTurnAssistantMessage = '';
     state.currentTurnCheckpointed = true;
     return;
@@ -626,11 +692,11 @@ export function handleCodexEvent(ctx: AgentRunContext, state: CodexRunState, eve
 
   // --- Errors ---------------------------------------------------------------
   if (event.type === 'item.completed' && item?.type === 'error' && item.message) {
-    ctx.emitAgentEvent({ type: 'error', message: String(item.message) });
+    emitTerminalError(String(item.message));
     return;
   }
   if (event.type === 'error' && typeof event.message === 'string') {
-    ctx.emitAgentEvent({ type: 'error', message: event.message });
+    emitTerminalError(event.message);
     return;
   }
 
@@ -668,6 +734,8 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
       pendingTurnAssistantMessage: '',
       lastCheckpointedMessage: '',
       currentTurnCheckpointed: false,
+      transportRetryActive: false,
+      lastTerminalErrorMessage: '',
       currentToolId: null,
       fileSnapshots: new Map(),
       commandOutputs: new Map(),
@@ -996,10 +1064,14 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
             // Stderr noise was filtered live; anything still here is real. A
             // long-lived goal process can fail after earlier turn checkpoints,
             // so a prior answer must not suppress the later failure.
-            ctx.emitAgentEvent({
-              type: 'error',
-              message: stderrText || `Codex CLI exited with code ${exitCode} and no output`,
-            });
+            // The JSON stream normally emits both `error` and `turn.failed`
+            // before the non-zero exit. Preserve that specific provider error
+            // and avoid replacing it with a second generic exit-code toast.
+            if (!state.lastTerminalErrorMessage) {
+              const exitMessage = stderrText || `Codex CLI exited with code ${exitCode} and no output`;
+              state.lastTerminalErrorMessage = exitMessage.trim();
+              ctx.emitAgentEvent({ type: 'error', message: exitMessage });
+            }
           }
 
           ctx.emitAgentEvent({
@@ -1018,7 +1090,10 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
           }
           proc = null;
           const msg = err?.message || 'Codex encountered an unexpected error';
-          ctx.emitAgentEvent({ type: 'error', message: msg });
+          if (!state.lastTerminalErrorMessage) {
+            state.lastTerminalErrorMessage = String(msg).trim();
+            ctx.emitAgentEvent({ type: 'error', message: msg });
+          }
           ctx.emitAgentEvent({ type: 'finish', reason: 'error' });
           return undefined;
         }

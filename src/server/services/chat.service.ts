@@ -207,7 +207,7 @@ function handleEvent(agentId: string, event: AgentEvent): void {
       // live-document sync. Other tool calls stay hidden to keep chat readable.
       sniffPlanWrite(agentId, event.toolName, event.input);
       const label = event.summary ? `${event.toolName}: ${event.summary}` : `Using ${event.toolName}`;
-      broadcast({ type: 'agent_activity', agentId, label, timestamp: Date.now() });
+      broadcast({ type: 'agent_activity', agentId, label, timestamp: Date.now(), kind: 'tool' });
       return;
     }
 
@@ -281,6 +281,41 @@ function handleEvent(agentId: string, event: AgentEvent): void {
           persistAssistantResult(agentId, observation.checkpointText, turn, true);
         }
       }
+      return;
+    }
+
+    case 'transport-status': {
+      const agentName = agentService.getAgent(agentId)?.name ?? 'unknown';
+      if (event.status === 'recovered') {
+        console.info(`[chat] Codex transport recovered agent=${agentId} name=${JSON.stringify(agentName)}`);
+        broadcast({
+          type: 'agent_activity',
+          agentId,
+          label: '',
+          timestamp: Date.now(),
+          kind: 'transport',
+          clear: true,
+        });
+        return;
+      }
+
+      const attemptLabel = event.attempt && event.maxAttempts
+        ? ` ${event.attempt}/${event.maxAttempts}`
+        : '';
+      const label = event.status === 'fallback'
+        ? 'Codex switching to HTTPS transport…'
+        : `Codex reconnecting…${attemptLabel}`;
+      console.warn(
+        `[chat] ${label} agent=${agentId} name=${JSON.stringify(agentName)}: ${event.message ?? 'transport interrupted'}`,
+      );
+      broadcast({
+        type: 'agent_activity',
+        agentId,
+        label,
+        timestamp: Date.now(),
+        kind: 'transport',
+        detail: event.message,
+      });
       return;
     }
 

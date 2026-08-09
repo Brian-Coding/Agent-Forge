@@ -5,7 +5,15 @@ import {
   observeTurnOutputEvent,
   resolveTurnFinalization,
 } from '../../services/chat-turn-lifecycle';
-import { buildCodexExecArgs, codexImageArgs, codexReasoningConfigArg, handleCodexEvent, resolveCodexCompletion, resolveCodexLaunchCommand } from './codex';
+import {
+  buildCodexExecArgs,
+  codexImageArgs,
+  codexReasoningConfigArg,
+  handleCodexEvent,
+  parseCodexTransportStatus,
+  resolveCodexCompletion,
+  resolveCodexLaunchCommand,
+} from './codex';
 
 function makeContext(events: AgentEvent[], onEvent?: (event: AgentEvent) => void): AgentRunContext {
   return {
@@ -33,6 +41,8 @@ function makeState() {
     pendingTurnAssistantMessage: '',
     lastCheckpointedMessage: '',
     currentTurnCheckpointed: false,
+    transportRetryActive: false,
+    lastTerminalErrorMessage: '',
     currentToolId: null,
     fileSnapshots: new Map<string, string | null>(),
     commandOutputs: new Map<string, string>(),
@@ -278,6 +288,71 @@ test('Codex turn.failed becomes a normalized durable error candidate', () => {
     type: 'error',
     message: 'Goal continuation failed.',
   });
+});
+
+test('Codex reconnect progress is classified narrowly as recoverable transport status', () => {
+  const screenshotMessage = 'Reconnecting... 3/5 (stream disconnected before completion: websocket closed by server before response.completed)';
+
+  expect(parseCodexTransportStatus(screenshotMessage)).toEqual({
+    status: 'retrying',
+    message: screenshotMessage,
+    attempt: 3,
+    maxAttempts: 5,
+  });
+  expect(parseCodexTransportStatus(
+    'Falling back from WebSockets to HTTPS transport. stream disconnected before completion',
+  )).toEqual({
+    status: 'fallback',
+    message: 'Falling back from WebSockets to HTTPS transport. stream disconnected before completion',
+  });
+  expect(parseCodexTransportStatus(
+    'stream disconnected before completion: websocket closed by server before response.completed',
+  )).toBeNull();
+});
+
+test('a recovered Codex reconnect stays pane-local and never becomes a terminal error', () => {
+  const events: AgentEvent[] = [];
+  const ctx = makeContext(events);
+  const state = makeState();
+  const screenshotMessage = 'Reconnecting... 3/5 (stream disconnected before completion: websocket closed by server before response.completed)';
+
+  handleCodexEvent(ctx, state, { type: 'error', message: screenshotMessage });
+  handleCodexEvent(ctx, state, { type: 'turn.started' });
+
+  expect(events).toEqual([
+    {
+      type: 'transport-status',
+      status: 'retrying',
+      message: screenshotMessage,
+      attempt: 3,
+      maxAttempts: 5,
+    },
+    { type: 'transport-status', status: 'recovered' },
+    { type: 'status', status: 'thinking' },
+  ]);
+  expect(events.some(event => event.type === 'error')).toBe(false);
+});
+
+test('Codex WebSocket fallback remains recoverable but a final failure is emitted once', () => {
+  const events: AgentEvent[] = [];
+  const ctx = makeContext(events);
+  const state = makeState();
+  const fallbackMessage = 'Falling back from WebSockets to HTTPS transport. stream disconnected before completion: socket closed';
+  const terminalMessage = 'stream disconnected before completion: error sending request';
+
+  handleCodexEvent(ctx, state, {
+    type: 'item.completed',
+    item: { type: 'error', message: fallbackMessage },
+  });
+  handleCodexEvent(ctx, state, { type: 'error', message: terminalMessage });
+  handleCodexEvent(ctx, state, { type: 'turn.failed', error: { message: terminalMessage } });
+
+  expect(events.filter(event => event.type === 'transport-status')).toEqual([
+    { type: 'transport-status', status: 'fallback', message: fallbackMessage },
+  ]);
+  expect(events.filter(event => event.type === 'error')).toEqual([
+    { type: 'error', message: terminalMessage },
+  ]);
 });
 
 test('Codex goal events survive the adapter-to-chat lifecycle without duplicate finals', () => {

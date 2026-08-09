@@ -48,6 +48,18 @@ export type AgentEvent =
        */
       checkpoint?: boolean;
     }
+  | {
+      /**
+       * A provider transport is retrying or changing protocols, but the turn
+       * has not failed. Keeping this distinct from `error` prevents expected
+       * retry progress from becoming a global failure toast or durable error.
+       */
+      type: 'transport-status';
+      status: 'retrying' | 'fallback' | 'recovered';
+      message?: string;
+      attempt?: number;
+      maxAttempts?: number;
+    }
   | { type: 'error'; message: string }
   | { type: 'finish'; reason?: string }
   | { type: 'stderr'; text: string }

@@ -45,3 +45,11 @@ test('every user message keeps a retry action bound to its own text or image att
   expect(clientSource).toContain('Resend this message as a new turn at the end of the conversation');
   expect(clientSource).not.toContain('realIdx === lastUserMsgIndex');
 });
+
+test('transport retries stay in the originating pane and genuine errors identify their agent', () => {
+  expect(clientSource).toContain("activity.kind === 'transport' ? ' transport' : ''");
+  expect(clientSource).toContain('title: activity.detail || undefined');
+  expect(clientSource).toContain("current.kind !== msg.kind");
+  expect(clientSource).toContain("sourceAgent.name + ': ' + msg.message");
+  expect(clientSource).toContain("const toastKey = (msg.agentId || 'global')");
+});
