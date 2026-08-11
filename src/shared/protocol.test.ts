@@ -44,3 +44,15 @@ test('migrateAgentRecord collapses malformed modelMismatch to null so sends cann
   expect(migrateAgentRecord({ id: 'a1', modelMismatch: { requested: '', ran: 'x' } }).modelMismatch).toBeNull();
   expect(migrateAgentRecord({ id: 'a1', modelMismatch: { requested: 'x' } }).modelMismatch).toBeNull();
 });
+
+test('migrateAgentRecord preserves only well-formed terminal turn outcomes', () => {
+  expect(migrateAgentRecord({
+    id: 'agent-1',
+    lastTurnOutcome: { status: 'failed', at: 1234, detail: 'CLI exited' },
+  }).lastTurnOutcome).toEqual({ status: 'failed', at: 1234, detail: 'CLI exited' });
+
+  expect(migrateAgentRecord({
+    id: 'agent-2',
+    lastTurnOutcome: { status: 'still-retrying', at: 'yesterday' },
+  }).lastTurnOutcome).toBeNull();
+});

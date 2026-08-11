@@ -1,6 +1,6 @@
 ﻿import { watch, existsSync, type FSWatcher } from 'fs';
 import { join } from 'path';
-import type { AgentInfo, AgentProvider, AgentStatus, ChatImageAttachment, ChatMessage } from '../../shared/protocol';
+import type { AgentInfo, AgentProvider, AgentStatus, AgentTurnOutcome, ChatImageAttachment, ChatMessage } from '../../shared/protocol';
 import type { ChatTurnOptions } from './chat.service';
 import { stripModelTier } from '../agents/agent-kinds';
 import { resolveAgentModel, resolveAgentReasoningLevel } from '../agents/registry';
@@ -282,6 +282,25 @@ export const agentService = {
     broadcast({ type: 'agent_updated', agent: agent.info });
   },
 
+  /** Atomically enter a turn so clients never observe an idle agent with its
+   * prior outcome cleared (which could incorrectly drain a queued message). */
+  beginTurn(agentId: string): void {
+    const agent = agents.get(agentId);
+    if (!agent) return;
+    agent.info.lastTurnOutcome = null;
+    agent.info.status = 'working';
+    broadcast({ type: 'agent_updated', agent: agent.info });
+  },
+
+  /** Atomically publish the terminal outcome and idle runtime state. */
+  finishTurn(agentId: string, outcome: AgentTurnOutcome): void {
+    const agent = agents.get(agentId);
+    if (!agent) return;
+    agent.info.lastTurnOutcome = outcome;
+    agent.info.status = 'idle';
+    broadcast({ type: 'agent_updated', agent: agent.info });
+  },
+
   /** Internal: fire onIdle lifecycle hooks. Used by chat.service when an adapter run completes. */
   async notifyIdle(agentId: string): Promise<void> {
     await notifyLifecycle('onIdle', agentId);
@@ -539,7 +558,9 @@ export const agentService = {
     agent.currentSessionModel = null;
     // A fully reset agent has no session to be mismatched about.
     agent.info.modelMismatch = null;
+    agent.info.lastTurnOutcome = null;
     await persistenceService.saveNow();
+    broadcast({ type: 'agent_updated', agent: agent.info });
     return true;
   },
 

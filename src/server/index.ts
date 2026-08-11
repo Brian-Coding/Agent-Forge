@@ -18,7 +18,7 @@ import { websocketHandlers } from './ws';
 
 import { handleDirectories } from './routes/directories.routes';
 import { handleGetPorts, handleKillPort } from './routes/ports.routes';
-import { handleGitBranch } from './routes/git.routes';
+import { handleGitBranch, handleGitDiff } from './routes/git.routes';
 import { handleGetModels } from './routes/models.routes';
 import { handleUsageExport } from './routes/usage.routes';
 import { handleVercelIntegration } from './routes/integrations.routes';
@@ -376,6 +376,7 @@ function startServer(preferredPort: number) {
           if (url.pathname === '/api/ports' && req.method === 'GET') return handleGetPorts(req);
           if (url.pathname === '/api/ports/kill' && req.method === 'POST') return handleKillPort(req);
           if (url.pathname === '/api/git-branch' && req.method === 'GET') return handleGitBranch(req);
+          if (url.pathname === '/api/git-diff' && req.method === 'GET') return handleGitDiff(req);
           if (url.pathname === '/api/models' && req.method === 'GET') return handleGetModels(req);
           if (url.pathname === '/api/usage/export' && req.method === 'GET') return handleUsageExport(req);
           if (url.pathname === '/api/integrations/vercel' && (req.method === 'GET' || req.method === 'POST')) return handleVercelIntegration(req);

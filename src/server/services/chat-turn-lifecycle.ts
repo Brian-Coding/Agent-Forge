@@ -45,6 +45,8 @@ export interface TurnOutputObservation {
   checkpointText: string | null;
 }
 
+export type TurnOutcomeStatus = 'completed' | 'failed' | 'stopped';
+
 function normalized(text: string | null | undefined): string {
   return (text ?? '').trim();
 }
@@ -88,6 +90,20 @@ export function abortMarker(reason: TurnAbortReason): string {
   if (reason === 'timeout') return '[Stopped: configured inactivity limit reached]';
   if (reason === 'system') return '[Stopped by system]';
   return '[Stopped by user]';
+}
+
+/** Resolve one canonical user-facing outcome without changing the runtime
+ * `idle` state that queue draining and lifecycle hooks depend on. */
+export function resolveTurnOutcome(input: TurnFinalizationInput): TurnOutcomeStatus {
+  if (input.abortReason) return 'stopped';
+  if (normalized(input.errorMessage)) return 'failed';
+  if (
+    normalized(input.accumulatedText)
+    || normalized(input.lastResultEmitted)
+    || normalized(input.lastAssistantSnapshot)
+    || normalized(input.lastPersistedResult)
+  ) return 'completed';
+  return 'failed';
 }
 
 /**
@@ -160,11 +176,12 @@ export function resolveTurnFinalization(input: TurnFinalizationInput): TurnFinal
 
   if (input.abortReason) {
     const marker = abortMarker(input.abortReason);
+    const stopDetail = error && !errorAlreadyPersisted ? `Technical detail: ${error}` : null;
     return candidate
-      ? { assistantText: `${candidate}\n\n${marker}`, systemText: errorSystemText }
+      ? { assistantText: `${candidate}\n\n${marker}`, systemText: stopDetail }
       : {
           assistantText: null,
-          systemText: errorSystemText ? `${errorSystemText}\n\n${marker}` : marker,
+          systemText: stopDetail ? `${marker}\n\n${stopDetail}` : marker,
         };
   }
 

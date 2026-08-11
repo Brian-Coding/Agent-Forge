@@ -4,6 +4,7 @@ import {
   observeTurnOutputEvent,
   parseOptionalInactivityTimeout,
   resolveTurnFinalization,
+  resolveTurnOutcome,
 } from './chat-turn-lifecycle';
 
 test('long-running turns have no implicit inactivity limit', () => {
@@ -306,7 +307,7 @@ test('a complete assistant snapshot survives a missing provider turn boundary', 
   });
 });
 
-test('a stopped failed turn preserves both the failure and stop reason', () => {
+test('a stopped failed turn uses cancellation as the canonical outcome and preserves diagnostics', () => {
   expect(resolveTurnFinalization({
     provider: 'codex',
     accumulatedText: '',
@@ -317,6 +318,21 @@ test('a stopped failed turn preserves both the failure and stop reason', () => {
     errorMessage: 'termination transport failed',
   })).toEqual({
     assistantText: null,
-    systemText: 'Agent run failed: termination transport failed\n\n[Stopped by user]',
+    systemText: '[Stopped by user]\n\nTechnical detail: termination transport failed',
   });
+});
+
+test('turn outcome keeps runtime-idle presentation truthful', () => {
+  const base = {
+    provider: 'codex' as const,
+    accumulatedText: '',
+    lastResultEmitted: null,
+    lastAssistantSnapshot: null,
+    lastPersistedResult: null,
+  };
+
+  expect(resolveTurnOutcome({ ...base, lastResultEmitted: 'Done.' })).toBe('completed');
+  expect(resolveTurnOutcome({ ...base, errorMessage: 'CLI exited' })).toBe('failed');
+  expect(resolveTurnOutcome({ ...base, abortReason: 'user', errorMessage: 'socket closed while stopping' })).toBe('stopped');
+  expect(resolveTurnOutcome(base)).toBe('failed');
 });

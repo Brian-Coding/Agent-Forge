@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 import type { Subprocess } from 'bun';
 import {
+  defaultCliDirs,
   createProcessUnwindSignal,
   killProcessTree,
   waitForOperationOrUnwind,
@@ -8,6 +9,13 @@ import {
   type ProcessTerminationDependencies,
   type WaitableKillProcess,
 } from './utils';
+
+test('default Windows CLI directories include native user-local installers', () => {
+  expect(defaultCliDirs('win32', 'C:\\Users\\test-user')).toEqual([
+    'C:\\Users\\test-user\\.local\\bin',
+    'C:\\Users\\test-user\\.bun\\bin',
+  ]);
+});
 
 const neverExits = new Promise<number>(() => {});
 

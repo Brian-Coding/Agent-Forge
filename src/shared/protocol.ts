@@ -2,6 +2,12 @@
 
 export type AgentStatus = 'idle' | 'working' | 'thinking' | 'error' | 'stopped';
 
+export interface AgentTurnOutcome {
+  status: 'completed' | 'failed' | 'stopped';
+  at: number;
+  detail?: string;
+}
+
 /**
  * Provider identifier. Mirrors `ChatAgentKind` in `src/server/agents/agent-kinds.ts`,
  * duplicated here so the shared wire types don't need to import server-side code.
@@ -111,6 +117,10 @@ export interface AgentInfo {
   referencePaths: string[];   // Additional directories for cross-repo context
   systemPrompt: string;       // Per-agent system prompt / persona
   status: AgentStatus;
+  /** Durable outcome of the most recent finished turn. Runtime status can
+   * remain `idle` for queue/lifecycle behavior while the UI still distinguishes
+   * success, failure, and cancellation. Cleared when the next turn starts. */
+  lastTurnOutcome?: AgentTurnOutcome | null;
   createdAt: number;
   workspaceId: string;        // Workspace this agent belongs to
   hideFromGrid?: boolean;     // True for special-purpose agents (UI Atlas, QA Tester) that shouldn't take grid slots or appear in chip lists
@@ -228,6 +238,19 @@ export function migrateAgentRecord(raw: any): PersistedAgentRecord {
     record.modelMismatch = null;
   } else {
     record.modelMismatch = { requested: mm.requested, ran: mm.ran, at: typeof mm.at === 'number' ? mm.at : Date.now() };
+  }
+
+  const outcome = record.lastTurnOutcome;
+  if (!outcome || typeof outcome !== 'object'
+      || !['completed', 'failed', 'stopped'].includes(outcome.status)
+      || typeof outcome.at !== 'number' || !Number.isFinite(outcome.at)) {
+    record.lastTurnOutcome = null;
+  } else {
+    record.lastTurnOutcome = {
+      status: outcome.status,
+      at: outcome.at,
+      ...(typeof outcome.detail === 'string' && outcome.detail ? { detail: outcome.detail } : {}),
+    };
   }
 
   // Normalize empty session marker to null instead of undefined.

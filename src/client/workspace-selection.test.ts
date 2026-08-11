@@ -40,8 +40,8 @@ test('every user message keeps a retry action bound to its own text or image att
   expect(clientSource).toContain("showRetry: m.role === 'user'");
   expect(clientSource).toContain('retryDisabled: isWorking || !!agent.modelMismatch');
   expect(clientSource).toContain("onRetry: m.role === 'user'");
-  expect(clientSource).toContain('m.imageAttachments?.length');
-  expect(clientSource).toContain("m.content.replace(/^\\[\\d+ images? attached at original resolution\\]\\s*/i, '')");
+  expect(clientSource).toContain('message.imageAttachments?.length');
+  expect(clientSource).toContain('message.content.replace(');
   expect(clientSource).toContain('Resend this message as a new turn at the end of the conversation');
   expect(clientSource).not.toContain('realIdx === lastUserMsgIndex');
 });
@@ -52,4 +52,33 @@ test('transport retries stay in the originating pane and genuine errors identify
   expect(clientSource).toContain("current.kind !== msg.kind");
   expect(clientSource).toContain("sourceAgent.name + ': ' + msg.message");
   expect(clientSource).toContain("const toastKey = (msg.agentId || 'global')");
+});
+
+test('finished turns retain one canonical outcome without breaking idle queue semantics', () => {
+  expect(clientSource).toContain('function agentPresentationStatus(agent)');
+  expect(clientSource).toContain("agent.lastTurnOutcome?.status === 'failed'");
+  expect(clientSource).toContain("title: 'Transport retry recorded'");
+  expect(clientSource).toContain("? 'Turn stopped by you'");
+  expect(clientSource).toContain("'Retry last request'");
+  expect(clientSource).toContain("notification === 'failed'");
+  expect(clientSource).toContain('const notifiedOutcomeRef = useRef(');
+  expect(clientSource).toContain('setNotification(agent.lastTurnOutcome.status)');
+  expect(clientSource).not.toContain("agent.lastTurnOutcome?.status || 'completed'");
+});
+
+test('file changes are reviewable and composer controls are explicit', () => {
+  expect(clientSource).toContain("fetch('/api/git-diff?' + query.toString())");
+  expect(clientSource).toContain("showFileChanges ? 'Hide files' : 'Review files'");
+  expect(clientSource).toContain("copiedFilePath === file ? 'Copied' : 'Copy path'");
+  expect(clientSource).toContain("isWorking ? 'Queue' : 'Send'");
+  expect(clientSource).toContain("e('span', { className: 'agent-control-label' }, 'Reasoning')");
+  expect(clientSource).toContain("tokenUsage.numTurns === 1 ? 'turn' : 'turns'");
+});
+
+test('the browser application inline script remains syntactically valid', () => {
+  const start = clientSource.lastIndexOf('<script>');
+  const end = clientSource.lastIndexOf('</script>');
+  expect(start).toBeGreaterThan(-1);
+  expect(end).toBeGreaterThan(start);
+  expect(() => new Function(clientSource.slice(start + '<script>'.length, end))).not.toThrow();
 });

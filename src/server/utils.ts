@@ -382,10 +382,14 @@ function _pathDelimiter(isWin: boolean): string {
   return isWin ? ';' : ':';
 }
 
-function _defaultCliDirs(isWin: boolean): string[] {
-  if (isWin) return [];
+export function defaultCliDirs(platform = process.platform, home = _homedir()): string[] {
+  if (platform === 'win32') {
+    return [
+      _pathJoin(home, '.local', 'bin'),
+      _pathJoin(home, '.bun', 'bin'),
+    ];
+  }
 
-  const home = _homedir();
   return [
     _pathJoin(home, '.local', 'bin'),
     _pathJoin(home, '.bun', 'bin'),
@@ -405,7 +409,7 @@ function _cliSearchDirs(): string[] {
   const dirs = pathRaw.split(_pathDelimiter(isWin)).filter(Boolean);
   const seen = new Set<string>();
 
-  return dirs.concat(_defaultCliDirs(isWin)).filter((dir) => {
+  return dirs.concat(defaultCliDirs(process.platform)).filter((dir) => {
     if (seen.has(dir)) return false;
     seen.add(dir);
     return true;
@@ -415,10 +419,9 @@ function _cliSearchDirs(): string[] {
 /**
  * Build an environment for spawned agent CLIs.
  *
- * GUI-launched shells and editor tasks on macOS often start Bun with a minimal
- * PATH that omits Homebrew and ~/.local/bin. Resolve/spawn use the same
- * augmented PATH so absolute shim scripts can still find `node` and helper
- * binaries through `/usr/bin/env`.
+ * Long-running and GUI-launched processes can retain a minimal or stale PATH
+ * that omits user-local installers. Resolve/spawn use the same augmented PATH
+ * so newly installed CLIs and absolute shim scripts can find their helpers.
  */
 export function createCliEnv(extra: Record<string, string | undefined> = {}): Record<string, string> {
   const isWin = process.platform === 'win32';

@@ -15,6 +15,7 @@ import {
   observeTurnOutputEvent,
   parseOptionalInactivityTimeout,
   resolveTurnFinalization,
+  resolveTurnOutcome,
   type InactivityWatchdog,
   type TurnAbortReason,
 } from './chat-turn-lifecycle';
@@ -402,7 +403,7 @@ async function runChatTurn(agentId: string, content: string, source?: 'qa', opti
   broadcast({ type: 'message', message: userMsg });
 
   // 2) Status: working. Adapter status events will refine to thinking/responding.
-  agentService.setStatus(agentId, 'working');
+  agentService.beginTurn(agentId);
 
   // 3) Resolve provider + adapter.
   const provider: ChatAgentKind = (info.provider as ChatAgentKind | undefined) ?? 'claude';
@@ -413,7 +414,12 @@ async function runChatTurn(agentId: string, content: string, source?: 'qa', opti
       `No adapter registered for provider '${provider}'. Phase 2 wires Claude; Phase 3 adds Codex.`,
     );
     broadcast({ type: 'message', message: sysMsg });
-    agentService.setStatus(agentId, 'idle');
+    agentService.finishTurn(agentId, {
+      status: 'failed',
+      at: Date.now(),
+      detail: `No adapter registered for provider '${provider}'`,
+    });
+    await persistenceService.saveNow();
     await agentService.notifyIdle(agentId);
     return;
   }
@@ -597,11 +603,7 @@ async function runChatTurn(agentId: string, content: string, source?: 'qa', opti
   } catch (e: any) {
     console.error(`[chat] adapter run failed for ${agentId}:`, e);
     const errorMessage = e?.message || String(e);
-    const systemMessage = `Agent run failed: ${errorMessage}`;
     turn.lastErrorMessage = errorMessage;
-    turn.persistedSystemMessages.add(systemMessage);
-    const sysMsg = agentService.addSystemMessage(agentId, systemMessage);
-    broadcast({ type: 'message', message: sysMsg });
   } finally {
     // Flush any process-level result that was not already persisted at a
     // provider turn boundary. Stopped, failed, and empty exits also receive a
@@ -610,6 +612,16 @@ async function runChatTurn(agentId: string, content: string, source?: 'qa', opti
     // buffer even if a newer turn has since replaced the map entry.
     const turnState = turn;
     const finalization = resolveTurnFinalization({
+      provider,
+      accumulatedText: turnState.accumulatedText,
+      lastResultEmitted: turnState.lastResultEmitted,
+      lastAssistantSnapshot: turnState.lastAssistantSnapshot,
+      lastPersistedResult: turnState.lastPersistedResult,
+      abortReason: turnState.abortReason,
+      errorMessage: turnState.lastErrorMessage,
+      persistedSystemMessages: [...turnState.persistedSystemMessages],
+    });
+    const outcomeStatus = resolveTurnOutcome({
       provider,
       accumulatedText: turnState.accumulatedText,
       lastResultEmitted: turnState.lastResultEmitted,
@@ -655,7 +667,13 @@ async function runChatTurn(agentId: string, content: string, source?: 'qa', opti
     // don't clobber its status or fire idle hooks under it — it will run
     // its own finalization when it completes.
     const newerTurnRunning = currentHandles.has(agentId);
-    if (!newerTurnRunning) agentService.setStatus(agentId, 'idle');
+    if (!newerTurnRunning) {
+      agentService.finishTurn(agentId, {
+        status: outcomeStatus,
+        at: Date.now(),
+        detail: turnState.lastErrorMessage || undefined,
+      });
+    }
     await persistenceService.saveNow();
     if (!newerTurnRunning) await agentService.notifyIdle(agentId);
   }
