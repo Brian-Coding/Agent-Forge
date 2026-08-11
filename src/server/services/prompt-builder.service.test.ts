@@ -17,7 +17,11 @@ test('additional project-specific context remains editable and injectable', () =
 
 test('Harness Settings exposes the exact built-in instruction sections', () => {
   const manifest = getBuiltInHarnessInstructionManifest();
+  const guardrails = manifest.sections.find(section => section.id === 'guardrails')?.content;
   expect(manifest.sections.map(section => section.id)).toEqual(['guardrails', 'standards', 'reports', 'plans', 'scope']);
+  expect(guardrails).toContain('inspect the current branch and all local and remote-tracking branches');
+  expect(guardrails).toContain('NEVER commit or push directly to master');
+  expect(guardrails).toContain('only when no develop branch exists locally or remotely');
   expect(manifest.sections.find(section => section.id === 'standards')?.content).toContain(LEGACY_SHARED_PROJECT_CONTEXT);
   expect(manifest.sections.find(section => section.id === 'reports')?.content).toContain('directly in the final chat response');
   expect(manifest.sections.find(section => section.id === 'reports')?.content).toContain('Never make a bare local filesystem link the only delivery');

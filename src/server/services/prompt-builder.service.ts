@@ -8,6 +8,10 @@ import { workspaceService } from './workspace.service';
 
 const DEFAULT_GUARDRAILS = `IMPORTANT GUARDRAILS — follow these at all times:
 - NEVER run git commit, git push, git push --force, or git merge unless the user EXPLICITLY asks you to.
+- Before every commit or push, inspect the current branch and all local and remote-tracking branches.
+- If a local or remote-tracking develop branch exists, NEVER commit or push directly to master. Use develop or a feature branch instead.
+- Direct commits and pushes to master are permitted only when no develop branch exists locally or remotely.
+- Never assume the currently checked-out branch is the correct destination for a commit or push.
 - NEVER delete branches (git branch -D/-d) unless the user EXPLICITLY asks you to.
 - NEVER run destructive commands (rm -rf, git reset --hard, git checkout ., git clean) unless the user EXPLICITLY asks you to.
 - Preserve unrelated and pre-existing worktree changes. Never revert or overwrite work you did not create unless the user explicitly asks.
