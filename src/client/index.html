@@ -196,12 +196,13 @@
     .scroll-anchor { height: 1px; }
 
     /* Panel input */
-    .panel-input-container { padding: 9px 12px; background: var(--bg-secondary); border-top: 1px solid var(--border); flex-shrink: 0; }
-    .panel-input-wrapper { display: flex; align-items: flex-end; gap: 6px; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 6px; padding: 4px 6px 4px 8px; position: relative; }
-    .panel-input-wrapper:focus-within { border-color: var(--accent); }
-    .panel-textarea { flex: 1; background: transparent; border: none; color: var(--text-primary); font-family: 'SF Mono', Monaco, Consolas, monospace; font-size: 13px; padding: 7px 0; outline: none; resize: none; min-height: 22px; max-height: 120px; line-height: 1.4; }
+    .panel-input-container { padding: 6px 10px; background: var(--bg-secondary); border-top: 1px solid var(--border); flex-shrink: 0; }
+    .panel-input-wrapper { display: flex; align-items: flex-end; gap: 4px; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 5px; padding: 2px 4px 2px 5px; position: relative; }
+    .panel-input-wrapper:focus-within { border-color: var(--border); box-shadow: none; }
+    .panel-input-wrapper :focus-visible { outline: none; }
+    .panel-textarea { flex: 1; background: transparent; border: none; color: var(--text-primary); font-family: 'SF Mono', Monaco, Consolas, monospace; font-size: 12px; padding: 5px 0; outline: none; resize: none; min-height: 20px; max-height: 84px; line-height: 1.35; }
     .panel-textarea::placeholder { color: var(--text-muted); }
-    .panel-send-btn { min-width: 58px; min-height: 32px; border: 1px solid var(--accent); border-radius: 5px; background: var(--accent); color: white; padding: 5px 10px; cursor: pointer; font-size: 12px; font-weight: 650; }
+    .panel-send-btn { min-width: 52px; min-height: 28px; border: 1px solid var(--accent); border-radius: 4px; background: var(--accent); color: white; padding: 4px 8px; cursor: pointer; font-size: 11px; font-weight: 650; }
     .panel-send-btn:hover:not(:disabled) { background: #1f6feb; }
     .panel-send-btn:disabled { border-color: var(--border); background: var(--bg-secondary); color: var(--text-muted); cursor: not-allowed; }
 
@@ -497,23 +498,23 @@
     .chat-image-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); gap: 6px; max-height: 250px; overflow-y: auto; margin: 6px 0; padding: 6px; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 6px; }
     .chat-image-gallery img { width: 100%; height: 72px; object-fit: cover; border-radius: 4px; border: 1px solid var(--border); cursor: pointer; background: var(--bg-primary); }
     .chat-image-gallery img:hover { border-color: var(--accent); }
-    .pending-image-strip { max-height: 128px; overflow-y: auto; border-top: 1px solid var(--border); background: var(--bg-secondary); }
+    .pending-image-strip { max-height: 96px; overflow-y: auto; background: var(--bg-secondary); }
     .image-upload-error { width: 100%; color: var(--error); font-size: 11px; }
     .image-upload-progress { color: var(--accent); font-weight: 600; }
-    .image-upload-btn { min-width: 30px; min-height: 30px; background: none; border: none; color: var(--text-secondary); cursor: pointer; padding: 4px 6px; font-size: 16px; }
+    .image-upload-btn { min-width: 26px; min-height: 26px; background: none; border: none; color: var(--text-secondary); cursor: pointer; padding: 2px 4px; font-size: 14px; }
     .image-upload-btn:hover { color: var(--text-primary); }
     .image-upload-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 
     /* Inline provider + model dropdowns under each agent's chat input */
-    .agent-provider-row { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 7px; margin-top: 7px; font-size: 11px; }
-    .agent-control-field { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+    .agent-provider-row { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 5px; margin-top: 4px; font-size: 10px; }
+    .agent-control-field { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
     .agent-control-label { color: var(--text-muted); font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.35px; }
-    .agent-provider-select { min-height: 28px; background: var(--bg-tertiary); color: var(--text-secondary); border: 1px solid var(--border); border-radius: 4px; padding: 3px 7px; font-size: 11px; font-family: 'SF Mono', Monaco, Consolas, monospace; cursor: pointer; outline: none; }
+    .agent-provider-select { min-height: 24px; background: var(--bg-tertiary); color: var(--text-secondary); border: 1px solid var(--border); border-radius: 4px; padding: 2px 6px; font-size: 10px; font-family: 'SF Mono', Monaco, Consolas, monospace; cursor: pointer; outline: none; }
     .agent-provider-select:hover { color: var(--text-primary); border-color: var(--accent); }
     .agent-provider-select:focus { border-color: var(--accent); }
     .agent-provider-select-kind { font-weight: 500; color: var(--text-primary); }
-    .agent-model-controls { display: flex; flex-direction: column; gap: 3px; margin-top: 6px; }
-    .agent-model-description { color: var(--text-secondary); font-size: 11px; line-height: 1.35; padding-left: 2px; }
+    .agent-model-controls { display: flex; flex-direction: column; gap: 2px; margin-top: 3px; }
+    .agent-model-description { color: var(--text-muted); font-size: 10px; line-height: 1.25; padding-left: 1px; }
 
     /* Copy message button (Feature 7) */
     .chat-turn { position: relative; }
@@ -3104,10 +3105,10 @@
               }, 'Fresh session on ' + agent.modelMismatch.requested)
             )
           ),
-          pendingImages.length > 0 && e('div', { className: 'pending-image-strip', style: { display: 'flex', alignItems: 'center', gap: 8, padding: '4px 12px', fontSize: 11, color: 'var(--text-secondary)', flexWrap: 'wrap' } },
+          pendingImages.length > 0 && e('div', { className: 'pending-image-strip', style: { display: 'flex', alignItems: 'center', gap: 6, padding: '3px 2px 5px', fontSize: 10, color: 'var(--text-secondary)', flexWrap: 'wrap' } },
             pendingImages.map((img, idx) =>
               e('div', { key: idx, style: { position: 'relative', display: 'inline-block' } },
-                e('img', { src: img.previewUrl, title: 'Image ' + (idx + 1) + ': ' + img.name, style: { width: 32, height: 32, borderRadius: 4, objectFit: 'cover', border: '1px solid var(--border)' } }),
+                e('img', { src: img.previewUrl, title: 'Image ' + (idx + 1) + ': ' + img.name, style: { width: 28, height: 28, borderRadius: 4, objectFit: 'cover', border: '1px solid var(--border)' } }),
                 e('button', {
                   style: { position: 'absolute', top: -4, right: -4, background: 'var(--error)', border: 'none', color: 'white', cursor: uploadProgress ? 'not-allowed' : 'pointer', fontSize: 10, width: 14, height: 14, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0, lineHeight: 1 },
                   disabled: !!uploadProgress,
@@ -3128,7 +3129,7 @@
             ),
             imageUploadError && e('div', { className: 'image-upload-error' }, imageUploadError)
           ),
-          pendingImages.length === 0 && imageUploadError && e('div', { className: 'image-upload-error', style: { padding: '4px 12px' } }, imageUploadError),
+          pendingImages.length === 0 && imageUploadError && e('div', { className: 'image-upload-error', style: { padding: '3px 2px' } }, imageUploadError),
           e('div', { className: 'panel-input-wrapper' },
             e('button', { className: 'image-upload-btn', disabled: !!uploadProgress || pendingImages.length >= MAX_CHAT_IMAGES, onClick: () => fileInputRef.current?.click(), title: 'Upload up to 100 images' }, '\uD83D\uDCCE'),
             e('textarea', {
