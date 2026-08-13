@@ -85,6 +85,23 @@ test('live turn snapshots restore progress and use provider activity for stall d
   expect(clientSource).not.toContain('(may be stuck)');
 });
 
+test('long elapsed durations roll up into days, hours, minutes, and seconds', () => {
+  const start = clientSource.indexOf('function formatElapsedDuration(');
+  const end = clientSource.indexOf('\n\n    // Hook: elapsed time', start);
+  expect(start).toBeGreaterThan(-1);
+  expect(end).toBeGreaterThan(start);
+  const formatElapsedDuration = new Function(
+    `${clientSource.slice(start, end)}; return formatElapsedDuration;`,
+  )() as (seconds: number) => string;
+
+  expect(formatElapsedDuration(0)).toBe('0s');
+  expect(formatElapsedDuration(59)).toBe('59s');
+  expect(formatElapsedDuration(60)).toBe('1m 0s');
+  expect(formatElapsedDuration(3_600)).toBe('1h 0m 0s');
+  expect(formatElapsedDuration(86_400)).toBe('1d 0h 0m 0s');
+  expect(formatElapsedDuration((3_724 * 60) + 28)).toBe('2d 14h 4m 28s');
+});
+
 test('the browser application inline script remains syntactically valid', () => {
   const start = clientSource.lastIndexOf('<script>');
   const end = clientSource.lastIndexOf('</script>');
