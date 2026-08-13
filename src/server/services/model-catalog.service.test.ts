@@ -1,6 +1,21 @@
 import { expect, test } from 'bun:test';
-import { STATIC_AGENT_DEFINITIONS, type ModelOption } from '../agents/agent-kinds';
-import { buildCodexDefinition } from './model-catalog.service';
+import { randomUUID } from 'node:crypto';
+import { getAgentDefinition, STATIC_AGENT_DEFINITIONS, type ModelOption } from '../agents/agent-kinds';
+import {
+  buildCodexDefinition,
+  observeProviderModel,
+  parseClaudeModelDiscovery,
+  parseCodexModelDiscovery,
+} from './model-catalog.service';
+
+test('valid Claude models observed through OAuth CLI runs become selectable', () => {
+  const modelId = `claude-opus-5-${randomUUID()}[1m]`;
+  const normalizedId = modelId.replace(/\[[^\]]+\]$/, '');
+  expect(observeProviderModel('claude', modelId)).toBe(true);
+  expect(getAgentDefinition('claude').models.some(model => model.id === normalizedId)).toBe(true);
+  expect(observeProviderModel('claude', '<synthetic>')).toBe(false);
+  expect(getAgentDefinition('claude').models.some(model => model.id === '<synthetic>')).toBe(false);
+});
 
 test('Codex discovery puts the GPT-5.6 family ahead of GPT-5.5 and keeps descriptions', () => {
   const discovered: ModelOption[] = [
@@ -48,4 +63,26 @@ test('failed Codex discovery uses the static Sol and Terra fallback', () => {
     'gpt-5.6-sol',
     'gpt-5.6-terra',
   ]);
+});
+
+test('model discovery rejects malformed payloads and bounds hostile fields', () => {
+  expect(parseCodexModelDiscovery(null)).toEqual([]);
+  expect(parseCodexModelDiscovery({ models: 'not-an-array' })).toEqual([]);
+  const codex = parseCodexModelDiscovery({
+    models: [{
+      slug: `gpt-${'x'.repeat(500)}`,
+      display_name: 'Model',
+      description: 'd'.repeat(5_000),
+      visibility: 'list',
+      supported_in_api: true,
+      supported_reasoning_levels: Array.from({ length: 100 }, (_, index) => `level-${index}`),
+    }],
+  });
+  expect(codex[0]?.id.length).toBeLessThanOrEqual(200);
+  expect(codex[0]?.description?.length).toBeLessThanOrEqual(2_000);
+  expect(codex[0]?.supportedReasoningLevels).toHaveLength(32);
+
+  expect(parseClaudeModelDiscovery({ data: [{}] })).toEqual([]);
+  expect(parseClaudeModelDiscovery({ data: [{ id: 'claude-fixture', display_name: 'Fixture' }] }))
+    .toEqual([{ id: 'claude-fixture', label: 'Fixture' }]);
 });

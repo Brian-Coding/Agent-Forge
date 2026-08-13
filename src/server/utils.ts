@@ -403,17 +403,41 @@ export function defaultCliDirs(platform = process.platform, home = _homedir()): 
   ];
 }
 
-function _cliSearchDirs(): string[] {
-  const isWin = process.platform === 'win32';
-  const pathRaw = process.env.PATH ?? process.env.Path ?? '';
+function _cliSearchDirsFrom(
+  sourceEnv: Record<string, string | undefined>,
+  platform: NodeJS.Platform,
+  home = _homedir(),
+): string[] {
+  const isWin = platform === 'win32';
+  const pathRaw = sourceEnv.PATH ?? sourceEnv.Path
+    ?? Object.entries(sourceEnv).find(([key]) => key.toLowerCase() === 'path')?.[1]
+    ?? '';
   const dirs = pathRaw.split(_pathDelimiter(isWin)).filter(Boolean);
   const seen = new Set<string>();
 
-  return dirs.concat(defaultCliDirs(process.platform)).filter((dir) => {
-    if (seen.has(dir)) return false;
-    seen.add(dir);
+  return dirs.concat(defaultCliDirs(platform, home)).filter((dir) => {
+    const key = isWin ? dir.toLowerCase() : dir;
+    if (seen.has(key)) return false;
+    seen.add(key);
     return true;
   });
+}
+
+function _cliSearchDirs(): string[] {
+  return _cliSearchDirsFrom(process.env, process.platform);
+}
+
+function omitCliEnvironmentKey(key: string): boolean {
+  const normalized = key.toLowerCase();
+  return normalized === 'claudecode'
+    || normalized === '__cfbundleidentifier'
+    || normalized === 'init_cwd'
+    || normalized === 'node'
+    || normalized === 'term_program'
+    || normalized === 'term_program_version'
+    || normalized === 'path'
+    || normalized.startsWith('vscode_')
+    || normalized.startsWith('npm_');
 }
 
 /**
@@ -423,26 +447,32 @@ function _cliSearchDirs(): string[] {
  * that omits user-local installers. Resolve/spawn use the same augmented PATH
  * so newly installed CLIs and absolute shim scripts can find their helpers.
  */
-export function createCliEnv(extra: Record<string, string | undefined> = {}): Record<string, string> {
-  const isWin = process.platform === 'win32';
+export function buildCliEnv(
+  sourceEnv: Record<string, string | undefined>,
+  extra: Record<string, string | undefined> = {},
+  platform: NodeJS.Platform = process.platform,
+  home = _homedir(),
+): Record<string, string> {
+  const isWin = platform === 'win32';
   const env: Record<string, string> = {};
 
-  for (const [k, v] of Object.entries(process.env)) {
-    if (k === 'CLAUDECODE') continue;
-    if (k === '__CFBundleIdentifier') continue;
-    if (k === 'INIT_CWD' || k === 'NODE' || k === 'TERM_PROGRAM' || k === 'TERM_PROGRAM_VERSION') continue;
-    if (k.startsWith('VSCODE_') || k.startsWith('npm_')) continue;
+  for (const [k, v] of Object.entries(sourceEnv)) {
+    if (omitCliEnvironmentKey(k)) continue;
     if (typeof v === 'string') env[k] = v;
   }
 
-  const pathKey = isWin ? (env.Path !== undefined ? 'Path' : 'PATH') : 'PATH';
-  env[pathKey] = _cliSearchDirs().join(_pathDelimiter(isWin));
+  const pathKey = isWin && sourceEnv.Path !== undefined && sourceEnv.PATH === undefined ? 'Path' : 'PATH';
+  env[pathKey] = _cliSearchDirsFrom(sourceEnv, platform, home).join(_pathDelimiter(isWin));
 
   for (const [k, v] of Object.entries(extra)) {
-    if (typeof v === 'string') env[k] = v;
+    if (!omitCliEnvironmentKey(k) && typeof v === 'string') env[k] = v;
   }
 
   return env;
+}
+
+export function createCliEnv(extra: Record<string, string | undefined> = {}): Record<string, string> {
+  return buildCliEnv(process.env, extra, process.platform);
 }
 
 export function resolveCliBinary(name: string): string {

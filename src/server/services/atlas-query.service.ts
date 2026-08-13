@@ -30,6 +30,11 @@ export interface AtlasQueryResponse extends AtlasQueryAnswer {
   reasoningLevel: 'xhigh';
 }
 
+export interface AtlasQueryExecutionOptions {
+  /** Internal reliability-test seam; production uses the five-minute cap. */
+  timeoutMs?: number;
+}
+
 function atlasAnalystPrompt(): string {
   return `You are the read-only Atlas Analyst for one Agent Forge workspace.
 
@@ -60,7 +65,11 @@ function graphIds(graph: any): Set<string> {
 }
 
 export const atlasQueryService = {
-  async ask(workspaceId: string, rawQuestion: string): Promise<AtlasQueryResponse> {
+  async ask(
+    workspaceId: string,
+    rawQuestion: string,
+    options: AtlasQueryExecutionOptions = {},
+  ): Promise<AtlasQueryResponse> {
     const question = rawQuestion.trim();
     if (!question) throw new Error('Ask Atlas question cannot be empty');
     if (question.length > MAX_QUESTION_LENGTH) throw new Error(`Ask Atlas question exceeds ${MAX_QUESTION_LENGTH} characters`);
@@ -103,18 +112,20 @@ export const atlasQueryService = {
       ].join('\n\n');
 
       const send = agentService.sendMessage(analyst.id, request);
+      const timeoutMs = typeof options.timeoutMs === 'number' && Number.isFinite(options.timeoutMs)
+        ? Math.max(1, Math.min(QUERY_TIMEOUT_MS, Math.floor(options.timeoutMs)))
+        : QUERY_TIMEOUT_MS;
       const timeout = new Promise<void>((_, reject) => {
         timer = setTimeout(() => {
           timedOut = true;
-          reject(new Error('Ask Atlas timed out after five minutes'));
-        }, QUERY_TIMEOUT_MS);
+          reject(new Error(`Ask Atlas timed out after ${timeoutMs === QUERY_TIMEOUT_MS ? 'five minutes' : `${timeoutMs}ms`}`));
+        }, timeoutMs);
       });
       try {
         await Promise.race([send, timeout]);
       } catch (error) {
         if (timedOut) {
           await agentService.stopAgent(analyst.id, 'timeout').catch(() => {});
-          await send.catch(() => {});
         }
         throw error;
       }
@@ -129,13 +140,17 @@ export const atlasQueryService = {
       };
     } finally {
       if (timer) clearTimeout(timer);
-      if (analystId) {
-        await agentService.removeAgent(analystId).catch(error => {
-          console.error('[atlas-query] failed to remove temporary analyst:', error);
-        });
-        broadcast({ type: 'agent_removed', agentId: analystId });
+      try {
+        if (analystId) {
+          const removed = await agentService.removeAgent(analystId);
+          if (!removed && agentService.getAgent(analystId)) {
+            throw new Error(`Atlas Analyst ${analystId} could not be removed`);
+          }
+          if (removed) broadcast({ type: 'agent_removed', agentId: analystId });
+        }
+      } finally {
+        activeWorkspaceQueries.delete(workspaceId);
       }
-      activeWorkspaceQueries.delete(workspaceId);
     }
   },
 };

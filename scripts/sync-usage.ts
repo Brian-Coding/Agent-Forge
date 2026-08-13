@@ -1,7 +1,8 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import { homedir, hostname } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { atomicWriteFile } from '../src/server/services/atomic-file';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -29,6 +30,10 @@ const runtimeDirectory = process.env.AGENT_FORGE_USAGE_SYNC_DIR
 const runtimeShardPath = join(runtimeDirectory, `${machineId}.json`);
 const snapshotRelativePath = `.agent-forge-sync/usage/${machineId}.json`;
 const snapshotPath = resolve(repoRoot, snapshotRelativePath);
+const GIT_TIMEOUT_MS = 60_000;
+const GIT_MAX_BUFFER = 4 * 1024 * 1024;
+const MAX_RUNTIME_SHARD_BYTES = 256 * 1024 * 1024;
+const MAX_USAGE_EVENTS = 500_000;
 
 interface GitResult {
   exitCode: number;
@@ -42,6 +47,9 @@ function git(commandArgs: string[], allowFailure = false): GitResult {
     cwd: repoRoot,
     stdout: 'pipe',
     stderr: 'pipe',
+    timeout: GIT_TIMEOUT_MS,
+    killSignal: 'SIGKILL',
+    maxBuffer: GIT_MAX_BUFFER,
   });
   const stdout = result.stdout.toString().trim();
   const stderr = result.stderr.toString().trim();
@@ -60,34 +68,40 @@ interface UsageShardSummary {
   latest: string;
 }
 
-function validateRuntimeShard(): UsageShardSummary {
-  if (!existsSync(runtimeShardPath)) {
-    throw new Error(
-      `No runtime usage shard exists for ${machineId} at ${runtimeShardPath}. `
-      + 'Restart Agent Forge once so it can migrate usage outside the repository.',
-    );
-  }
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(readFileSync(runtimeShardPath, 'utf8'));
-  } catch (error) {
-    throw new Error(`The runtime usage shard is not valid JSON: ${error instanceof Error ? error.message : String(error)}`);
-  }
+export function validateUsageShardValue(parsed: unknown): UsageShardSummary {
   if (!Array.isArray(parsed)) throw new Error('The runtime usage shard must contain a JSON array.');
+  if (parsed.length > MAX_USAGE_EVENTS) throw new Error(`The runtime usage shard exceeds ${MAX_USAGE_EVENTS} events.`);
 
   let totalTokens = 0;
   let earliest = Number.POSITIVE_INFINITY;
   let latest = Number.NEGATIVE_INFINITY;
   for (const [index, raw] of parsed.entries()) {
-    if (!raw || typeof raw !== 'object') throw new Error(`Usage event ${index} is not an object.`);
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error(`Usage event ${index} is not an object.`);
     const event = raw as Record<string, unknown>;
-    if (typeof event.timestamp !== 'number' || !Number.isFinite(event.timestamp)) {
+    if (typeof event.timestamp !== 'number' || !Number.isFinite(event.timestamp) || event.timestamp < 0) {
       throw new Error(`Usage event ${index} has an invalid timestamp.`);
     }
-    const input = typeof event.inputTokens === 'number' && Number.isFinite(event.inputTokens) ? event.inputTokens : 0;
-    const output = typeof event.outputTokens === 'number' && Number.isFinite(event.outputTokens) ? event.outputTokens : 0;
+    if (typeof event.agentId !== 'string' || !event.agentId || event.agentId.length > 256) {
+      throw new Error(`Usage event ${index} has an invalid agentId.`);
+    }
+    if (event.provider !== 'claude' && event.provider !== 'codex') {
+      throw new Error(`Usage event ${index} has an invalid provider.`);
+    }
+    const counter = (key: string, ceiling: number): number => {
+      const value = event[key];
+      if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > ceiling) {
+        throw new Error(`Usage event ${index} has an invalid ${key}.`);
+      }
+      return value;
+    };
+    const input = counter('inputTokens', 100_000_000);
+    const output = counter('outputTokens', 100_000_000);
+    counter('costUsd', 1_000_000);
+    counter('turns', 1_000_000);
     totalTokens += input + output;
+    if (!Number.isSafeInteger(totalTokens) || totalTokens > Number.MAX_SAFE_INTEGER) {
+      throw new Error('Usage shard token total exceeds the safe numeric range.');
+    }
     earliest = Math.min(earliest, event.timestamp);
     latest = Math.max(latest, event.timestamp);
   }
@@ -100,6 +114,26 @@ function validateRuntimeShard(): UsageShardSummary {
     earliest: iso(earliest),
     latest: iso(latest),
   };
+}
+
+function validateRuntimeShard(): UsageShardSummary {
+  if (!existsSync(runtimeShardPath)) {
+    throw new Error(
+      `No runtime usage shard exists for ${machineId} at ${runtimeShardPath}. `
+      + 'Restart Agent Forge once so it can migrate usage outside the repository.',
+    );
+  }
+  if (statSync(runtimeShardPath).size > MAX_RUNTIME_SHARD_BYTES) {
+    throw new Error(`The runtime usage shard exceeds ${MAX_RUNTIME_SHARD_BYTES} bytes.`);
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(runtimeShardPath, 'utf8'));
+  } catch (error) {
+    throw new Error(`The runtime usage shard is not valid JSON: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  return validateUsageShardValue(parsed);
 }
 
 /** One event per line keeps snapshots compact while retaining reviewable diffs. */
@@ -130,6 +164,20 @@ export function isUsageSnapshotCommit(subject: string, paths: readonly string[])
   return subject.startsWith('chore(usage): snapshot ')
     && paths.length > 0
     && paths.every(isUsageSnapshotPath);
+}
+
+export function assertSafeUsageSyncBranch(branch: string, refs: readonly string[]): void {
+  const normalizedRefs = refs.map(ref => ref.trim().replace(/^refs\/(?:heads|remotes)\//, ''));
+  const hasDevelop = normalizedRefs.some(ref => ref === 'develop' || ref.endsWith('/develop'));
+  if (branch === 'master' && hasDevelop) {
+    throw new Error('Refusing to create or push a usage snapshot on master while a local or remote-tracking develop branch exists.');
+  }
+}
+
+function branchRefs(): string[] {
+  return git(['for-each-ref', '--format=%(refname:short)', 'refs/heads', 'refs/remotes']).stdout
+    .split(/\r?\n/)
+    .filter(Boolean);
 }
 
 function upstreamRef(): string {
@@ -188,6 +236,7 @@ async function main(): Promise<void> {
   }
   const branch = git(['branch', '--show-current']).stdout;
   if (!branch) throw new Error('Usage synchronization is disabled in detached-HEAD state.');
+  assertSafeUsageSyncBranch(branch, branchRefs());
 
   const summary = validateRuntimeShard();
   const serializedSnapshot = serializeUsageSnapshot(summary.events);
@@ -209,6 +258,8 @@ async function main(): Promise<void> {
 
   if (!snapshotOnly) {
     git(['fetch']);
+    // Fetch may reveal a remote develop branch that was absent locally.
+    assertSafeUsageSyncBranch(branch, branchRefs());
     assertAheadCommitsAreUsageOnly(upstreamRef());
   }
 
@@ -230,9 +281,7 @@ async function main(): Promise<void> {
 
   if (needsSnapshot) {
     mkdirSync(dirname(snapshotPath), { recursive: true });
-    const tempPath = `${snapshotPath}.${process.pid}.tmp`;
-    writeFileSync(tempPath, serializedSnapshot, 'utf8');
-    renameSync(tempPath, snapshotPath);
+    await atomicWriteFile(snapshotPath, serializedSnapshot);
     git(['add', '--', snapshotRelativePath]);
     git(['commit', '-m', commitMessage, '--', snapshotRelativePath]);
     console.log(`Created snapshot commit for ${machineId}.`);

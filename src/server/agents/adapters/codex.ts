@@ -41,7 +41,7 @@ import type { AgentAdapter, AgentHandle, AgentRunContext } from '../types';
  * Codex has no `--append-system-prompt` flag equivalent.
  */
 
-interface CodexRunState {
+export interface CodexRunState {
   outputPath: string;
   // Streaming state machine — Codex sends discrete items; we treat them like
   // assistant/tool blocks for parity with Claude's content_block semantics.
@@ -64,9 +64,14 @@ interface CodexRunState {
   // exec_command_output_delta repeats the full aggregated output each time;
   // track what we've already shown so we can emit just the delta.
   commandOutputs: Map<string, string>;
+  // Bounded tail of provider-exposed commentary. It deduplicates the same
+  // completed message arriving through both public JSONL and rollout fallback.
+  thinkingTail: string;
 }
 
 const MAX_INLINE_DIFF_CHARS = 80_000;
+const MAX_THINKING_DEDUPE_CHARS = 32_000;
+const MAX_ROLLOUT_POLL_BYTES = 1_048_576;
 
 export interface CodexTransportStatus {
   status: 'retrying' | 'fallback';
@@ -150,6 +155,62 @@ async function findRolloutPath(threadId: string): Promise<string | null> {
     // sessions dir missing or unreadable
   }
   return null;
+}
+
+/** Extract only provider-authored commentary/reasoning summaries from a
+ * rollout record. Prompts, tool inputs/results, and encrypted reasoning are
+ * intentionally excluded. */
+export function extractCodexRolloutCommentary(event: any): string[] {
+  if (!event || typeof event !== 'object') return [];
+  const payload = event.payload;
+  if (!payload || typeof payload !== 'object') return [];
+
+  if (
+    event.type === 'response_item'
+    && payload.type === 'message'
+    && payload.role === 'assistant'
+    && payload.phase === 'commentary'
+  ) {
+    const content = Array.isArray(payload.content) ? payload.content : [];
+    return content
+      .filter((part: any) => part?.type === 'output_text' && typeof part.text === 'string' && part.text)
+      .map((part: any) => part.text);
+  }
+
+  if (event.type === 'event_msg' && payload.type === 'agent_message' && payload.phase === 'commentary') {
+    const text = extractText(payload.message ?? payload.text ?? payload);
+    return text ? [text] : [];
+  }
+
+  if (event.type === 'response_item' && payload.type === 'reasoning' && Array.isArray(payload.summary)) {
+    return payload.summary
+      .filter((part: any) => part?.type === 'summary_text' && typeof part.text === 'string' && part.text)
+      .map((part: any) => part.text);
+  }
+
+  return [];
+}
+
+function emitCodexThinking(
+  ctx: AgentRunContext,
+  state: CodexRunState,
+  text: string,
+  streaming = false,
+): void {
+  if (!text) return;
+  if (!streaming && state.thinkingTail.endsWith(text)) return;
+  ctx.emitAgentEvent({ type: 'thinking-delta', text, streaming });
+  state.thinkingTail = (state.thinkingTail + text).slice(-MAX_THINKING_DEDUPE_CHARS);
+}
+
+export function handleCodexRolloutEvent(ctx: AgentRunContext, state: CodexRunState, event: any): void {
+  const payloadType = typeof event?.payload?.type === 'string' ? event.payload.type : undefined;
+  // A sanitized heartbeat proves liveness without forwarding prompts, tool
+  // results, encrypted reasoning, or full rollout records.
+  ctx.emitChatEvent({ type: 'codex-rollout-liveness', eventType: event?.type, payloadType });
+  for (const text of extractCodexRolloutCommentary(event)) {
+    emitCodexThinking(ctx, state, text);
+  }
 }
 
 async function emitContextFromRollout(ctx: AgentRunContext, threadId: string): Promise<void> {
@@ -617,7 +678,7 @@ export function handleCodexEvent(ctx: AgentRunContext, state: CodexRunState, eve
       // on agent_message items. Treat the item as progress until the matching
       // turn.completed boundary makes it a durable checkpoint. The output file
       // remains the process-level completion fallback below.
-      ctx.emitAgentEvent({ type: 'thinking-delta', text });
+      emitCodexThinking(ctx, state, text);
       ctx.emitAgentEvent({ type: 'assistant-snapshot', text });
       state.lastAssistantMessage = text;
       state.pendingTurnAssistantMessage = text;
@@ -627,19 +688,19 @@ export function handleCodexEvent(ctx: AgentRunContext, state: CodexRunState, eve
 
   if (event.type === 'item.completed' && item?.type === 'reasoning') {
     const text = extractText(item.summary ?? item.text ?? item);
-    if (text) ctx.emitAgentEvent({ type: 'thinking-delta', text });
+    if (text) emitCodexThinking(ctx, state, text);
     return;
   }
 
   // --- Streamed assistant tokens --------------------------------------------
   if (event.type === 'agent_message_delta') {
     const delta = event.delta ?? event.text ?? event.content ?? '';
-    if (typeof delta === 'string' && delta) ctx.emitAgentEvent({ type: 'thinking-delta', text: delta });
+    if (typeof delta === 'string' && delta) emitCodexThinking(ctx, state, delta, true);
     return;
   }
   if (event.type === 'agent_message') {
     const content = event.message ?? event.content ?? event.text ?? '';
-    if (typeof content === 'string' && content) ctx.emitAgentEvent({ type: 'thinking-delta', text: content });
+    if (typeof content === 'string' && content) emitCodexThinking(ctx, state, content);
     return;
   }
 
@@ -739,6 +800,7 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
       currentToolId: null,
       fileSnapshots: new Map(),
       commandOutputs: new Map(),
+      thinkingTail: '',
     };
   },
 
@@ -748,6 +810,9 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
     let terminationPromise: Promise<void> | null = null;
     let terminationResult: ProcessTerminationResult | null = null;
     let terminationWarningEmitted = false;
+    let rolloutTimer: ReturnType<typeof setInterval> | null = null;
+    let rolloutPollPromise: Promise<void> | null = null;
+    let rolloutCursor: { threadId: string; path: string; offset: number; leftover: string } | null = null;
     const unwind = createProcessUnwindSignal();
 
     const warnAndUnwind = (detail: string): void => {
@@ -822,6 +887,73 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
     // installed CLI supports --image on both fresh and resumed exec turns.
     const args = buildCodexExecArgs(codexCommand, baseArgs, sessionId, ctx.imagePaths);
 
+    const pollRollout = async (): Promise<void> => {
+      if (rolloutPollPromise) {
+        await rolloutPollPromise;
+        return;
+      }
+      const operation = (async () => {
+        const threadId = ctx.getSessionId();
+        if (!threadId) return;
+        if (!rolloutCursor || rolloutCursor.threadId !== threadId) {
+          const path = await findRolloutPath(threadId);
+          if (!path) return;
+          // Existing resumed sessions are baselined before spawn below. If a
+          // fallback lookup is needed later, do not replay their old history.
+          const offset = sessionId === threadId ? Bun.file(path).size : 0;
+          rolloutCursor = { threadId, path, offset, leftover: '' };
+        }
+
+        const file = Bun.file(rolloutCursor.path);
+        if (!(await file.exists())) return;
+        const size = file.size;
+        if (size < rolloutCursor.offset) {
+          rolloutCursor.offset = 0;
+          rolloutCursor.leftover = '';
+        }
+        if (size === rolloutCursor.offset) return;
+
+        let start = rolloutCursor.offset;
+        if (size - start > MAX_ROLLOUT_POLL_BYTES) {
+          start = size - MAX_ROLLOUT_POLL_BYTES;
+          rolloutCursor.leftover = '';
+        }
+        const chunk = await file.slice(start, size).text();
+        rolloutCursor.offset = size;
+        const lines = (rolloutCursor.leftover + chunk).split('\n');
+        rolloutCursor.leftover = lines.pop() ?? '';
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const event = JSON.parse(line);
+            handleCodexRolloutEvent(ctx, state, event);
+          } catch {
+            // A partially-written line remains in leftover; malformed complete
+            // lines are ignored and the monitor continues.
+          }
+        }
+      })();
+      rolloutPollPromise = operation;
+      try {
+        await operation;
+      } finally {
+        if (rolloutPollPromise === operation) rolloutPollPromise = null;
+      }
+    };
+
+    const startRolloutMonitor = (): void => {
+      if (rolloutTimer) return;
+      void pollRollout().catch(() => {});
+      rolloutTimer = setInterval(() => void pollRollout().catch(() => {}), 1_250);
+    };
+
+    const stopRolloutMonitor = async (): Promise<void> => {
+      if (rolloutTimer) clearInterval(rolloutTimer);
+      rolloutTimer = null;
+      await pollRollout().catch(() => {});
+      await pollRollout().catch(() => {});
+    };
+
     // The Codex CLI doesn't have an --append-system-prompt flag. We
     // prepend the agent-forge system prompt (guardrails + persona + notes
     // + docs + atlas citation) to the user message with clear markers so
@@ -845,6 +977,13 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
         try {
           const env = createCliEnv();
 
+          if (sessionId) {
+            const path = await findRolloutPath(sessionId);
+            if (path) {
+              rolloutCursor = { threadId: sessionId, path, offset: Bun.file(path).size, leftover: '' };
+            }
+          }
+
           try {
             proc = safeSpawn(args, {
               cwd: ctx.cwd,
@@ -864,6 +1003,7 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
           }
 
           if (proc.pid) persistenceService.trackPid(proc.pid);
+          startRolloutMonitor();
 
           // A stop/kill may have landed between handle registration and the
           // spawn above — honor it now instead of running a full orphan turn.
@@ -1007,6 +1147,7 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
             : terminationResult?.exitCode ?? -1;
           if (rootExitConfirmed && proc.pid) persistenceService.untrackPid(proc.pid);
           proc = null;
+          await stopRolloutMonitor();
 
           const stderrText = (await stderrPromise).trim();
 
@@ -1081,6 +1222,7 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
 
           return state.lastAssistantMessage ? { lastAssistantMessage: state.lastAssistantMessage } : undefined;
         } catch (err: any) {
+          await stopRolloutMonitor();
           const failedProc = proc;
           if (failedProc) {
             await requestTermination();

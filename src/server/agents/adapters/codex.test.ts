@@ -9,7 +9,9 @@ import {
   buildCodexExecArgs,
   codexImageArgs,
   codexReasoningConfigArg,
+  extractCodexRolloutCommentary,
   handleCodexEvent,
+  handleCodexRolloutEvent,
   parseCodexTransportStatus,
   resolveCodexCompletion,
   resolveCodexLaunchCommand,
@@ -46,8 +48,51 @@ function makeState() {
     currentToolId: null,
     fileSnapshots: new Map<string, string | null>(),
     commandOutputs: new Map<string, string>(),
+    thinkingTail: '',
   };
 }
+
+test('Codex rollout fallback exposes only assistant commentary', () => {
+  expect(extractCodexRolloutCommentary({
+    type: 'response_item',
+    payload: {
+      type: 'message',
+      role: 'assistant',
+      phase: 'commentary',
+      content: [{ type: 'output_text', text: 'Running the focused tests.' }],
+    },
+  })).toEqual(['Running the focused tests.']);
+
+  expect(extractCodexRolloutCommentary({
+    type: 'response_item',
+    payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'secret prompt' }] },
+  })).toEqual([]);
+  expect(extractCodexRolloutCommentary({
+    type: 'response_item',
+    payload: { type: 'function_call_output', output: 'secret tool output' },
+  })).toEqual([]);
+});
+
+test('Codex rollout fallback deduplicates commentary already emitted by public JSONL', () => {
+  const events: AgentEvent[] = [];
+  const ctx = makeContext(events);
+  const state = makeState();
+  handleCodexEvent(ctx, state, {
+    type: 'item.completed',
+    item: { type: 'agent_message', text: 'Running the focused tests.' },
+  });
+  handleCodexRolloutEvent(ctx, state, {
+    type: 'response_item',
+    payload: {
+      type: 'message',
+      role: 'assistant',
+      phase: 'commentary',
+      content: [{ type: 'output_text', text: 'Running the focused tests.' }],
+    },
+  });
+
+  expect(events.filter(event => event.type === 'thinking-delta')).toHaveLength(1);
+});
 
 test('Codex reasoning choices become real CLI configuration overrides', () => {
   expect(codexReasoningConfigArg()).toBe('model_reasoning_effort="medium"');

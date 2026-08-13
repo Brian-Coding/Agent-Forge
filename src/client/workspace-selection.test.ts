@@ -75,6 +75,16 @@ test('file changes are reviewable and composer controls are explicit', () => {
   expect(clientSource).toContain("tokenUsage.numTurns === 1 ? 'turn' : 'turns'");
 });
 
+test('live turn snapshots restore progress and use provider activity for stall detection', () => {
+  expect(clientSource).toContain("case 'live_turn_state':");
+  expect(clientSource).toContain('previous.turnId === state.turnId');
+  expect(clientSource).toContain('Number(previous.revision || 0) >= Number(state.revision || 0)');
+  expect(clientSource).toContain('activeLiveTurn?.lastProviderEventAt || null');
+  expect(clientSource).toContain("isActive: isWorking");
+  expect(clientSource).toContain('(possibly stalled)');
+  expect(clientSource).not.toContain('(may be stuck)');
+});
+
 test('the browser application inline script remains syntactically valid', () => {
   const start = clientSource.lastIndexOf('<script>');
   const end = clientSource.lastIndexOf('</script>');

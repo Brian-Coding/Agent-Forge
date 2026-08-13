@@ -1,4 +1,4 @@
-import { test, expect, beforeAll, afterAll } from 'bun:test';
+import { test, expect, beforeAll, beforeEach, afterAll } from 'bun:test';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, utimesSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
@@ -8,12 +8,17 @@ import {
   mapClaudeUsageResponse,
   mapCodexAppServerRateLimits,
   mapCodexRateLimitWindows,
+  mergeProviderLimits,
+  parseRetryAfter,
+  readJsonLineResponse,
 } from './limits.service';
 
 // Parser regression net for the Limits tab: feeds a synthetic Claude bridge
 // file and a synthetic Codex rollout tree through refresh() via env overrides.
 
 let dir: string;
+let claudeFixturePath: string;
+let codexFixturePath: string;
 const envBackup: Record<string, string | undefined> = {};
 
 beforeAll(() => {
@@ -26,8 +31,8 @@ beforeAll(() => {
   process.env.AI_HARNESS_CLAUDE_CREDENTIALS_JSON = join(dir, 'no-credentials.json');
 
   // Claude bridge file (as written by scripts/claude-limits-statusline.ts)
-  const claudePath = join(dir, 'claude-limits.json');
-  writeFileSync(claudePath, JSON.stringify({
+  claudeFixturePath = join(dir, 'claude-limits.json');
+  writeFileSync(claudeFixturePath, JSON.stringify({
     updated_at: Date.now(),
     model: 'Fable 5',
     context_used_percentage: 32,
@@ -36,7 +41,7 @@ beforeAll(() => {
     seven_day_used_percentage: 18.6,
     seven_day_resets_at: 1784046280, // epoch seconds — parser must normalize
   }));
-  process.env.AI_HARNESS_CLAUDE_LIMITS_JSON = claudePath;
+  process.env.AI_HARNESS_CLAUDE_LIMITS_JSON = claudeFixturePath;
 
   // Codex rollout tree: sessions/YYYY/MM/DD/rollout-*.jsonl
   const dayDir = join(dir, 'sessions', '2026', '07', '09');
@@ -80,7 +85,15 @@ beforeAll(() => {
   }) + '\n');
   const futureMtime = new Date(Date.now() + 60_000);
   utimesSync(stalePath, futureMtime, futureMtime);
-  process.env.AI_HARNESS_CODEX_SESSIONS_DIR = join(dir, 'sessions');
+  codexFixturePath = join(dir, 'sessions');
+  process.env.AI_HARNESS_CODEX_SESSIONS_DIR = codexFixturePath;
+});
+
+beforeEach(() => {
+  process.env.AI_HARNESS_CLAUDE_CREDENTIALS_JSON = join(dir, 'no-credentials.json');
+  process.env.AI_HARNESS_CLAUDE_LIMITS_JSON = claudeFixturePath;
+  process.env.AI_HARNESS_CODEX_SESSIONS_DIR = codexFixturePath;
+  limitsService.resetCacheForTests();
 });
 
 afterAll(() => {
@@ -116,6 +129,67 @@ test('mapClaudeUsageResponse tolerates missing windows', () => {
 
 test('limits refresh cadence is one minute', () => {
   expect(LIMITS_REFRESH_INTERVAL_MS).toBe(60_000);
+});
+
+test('transient provider errors retain the last successful usage snapshot', () => {
+  const previous = mapClaudeUsageResponse({
+    five_hour: { utilization: 44, resets_at: '2026-08-11T20:00:00Z' },
+    seven_day: { utilization: 19, resets_at: '2026-08-17T20:00:00Z' },
+  }, 'max');
+  const failed = {
+    ...previous,
+    status: 'unavailable' as const,
+    checkedAt: previous.checkedAt + 60_000,
+    fiveHour: { usedPercent: null, resetsAt: null, windowMinutes: null },
+    weekly: { usedPercent: null, resetsAt: null, windowMinutes: null },
+    detail: 'Claude usage endpoint rate-limited this refresh (HTTP 429).',
+  };
+
+  const merged = mergeProviderLimits(previous, failed);
+  expect(merged.status).toBe('stale');
+  expect(merged.fiveHour.usedPercent).toBe(44);
+  expect(merged.weekly.usedPercent).toBe(19);
+  expect(merged.detail).toContain('HTTP 429');
+});
+
+test('Retry-After supports both seconds and HTTP dates', () => {
+  const now = Date.parse('2026-08-11T19:00:00Z');
+  expect(parseRetryAfter('120', now)).toBe(now + 120_000);
+  expect(parseRetryAfter('Tue, 11 Aug 2026 19:05:00 GMT', now)).toBe(now + 300_000);
+  expect(parseRetryAfter('not-a-date', now)).toBeNull();
+});
+
+function byteStream(chunks: string[]): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder();
+  return new ReadableStream({
+    start(controller) {
+      for (const chunk of chunks) controller.enqueue(encoder.encode(chunk));
+      controller.close();
+    },
+  });
+}
+
+test('Codex app-server reader tolerates malformed and split JSON lines', async () => {
+  const response = await readJsonLineResponse(byteStream([
+    'not json\r\n{"id":99,"result":{}}\n{"i',
+    'd":2,"result":{"ok":true}}\r\n',
+  ]), 2, { timeoutMs: 100 });
+  expect(response).toEqual({ id: 2, result: { ok: true } });
+});
+
+test('Codex app-server reader applies a hard deadline and output ceiling', async () => {
+  const hanging = new ReadableStream<Uint8Array>({ start() {} });
+  const startedAt = Date.now();
+  await expect(readJsonLineResponse(hanging, 7, {
+    timeoutMs: 10,
+    timeoutMessage: 'fixture deadline',
+  })).rejects.toThrow('fixture deadline');
+  expect(Date.now() - startedAt).toBeLessThan(250);
+
+  await expect(readJsonLineResponse(byteStream(['xxxxxxxxxxxxxxxx']), 7, {
+    timeoutMs: 100,
+    maxChars: 8,
+  })).rejects.toThrow('exceeded 8 characters');
 });
 
 test('Codex maps a primary-only weekly limit by duration instead of slot position', () => {
@@ -174,6 +248,7 @@ test('limits refresh parses Claude bridge file and Codex rollout events', async 
 });
 
 test('limits refresh reports unavailable sources without throwing', async () => {
+  limitsService.resetCacheForTests();
   process.env.AI_HARNESS_CLAUDE_LIMITS_JSON = join(dir, 'missing.json');
   process.env.AI_HARNESS_CODEX_SESSIONS_DIR = join(dir, 'no-sessions');
   const snapshot = await limitsService.refresh(false);

@@ -237,7 +237,11 @@ export function migrateAgentRecord(raw: any): PersistedAgentRecord {
       || typeof mm.ran !== 'string' || !mm.ran) {
     record.modelMismatch = null;
   } else {
-    record.modelMismatch = { requested: mm.requested, ran: mm.ran, at: typeof mm.at === 'number' ? mm.at : Date.now() };
+    record.modelMismatch = {
+      requested: mm.requested,
+      ran: mm.ran,
+      at: typeof mm.at === 'number' && Number.isFinite(mm.at) ? mm.at : Date.now(),
+    };
   }
 
   const outcome = record.lastTurnOutcome;
@@ -254,7 +258,9 @@ export function migrateAgentRecord(raw: any): PersistedAgentRecord {
   }
 
   // Normalize empty session marker to null instead of undefined.
-  if (!record.currentSessionId) {
+  const hasValidSessionId = typeof record.currentSessionId === 'string' && record.currentSessionId.length > 0;
+  const hasValidSessionProvider = record.currentSessionProvider === 'claude' || record.currentSessionProvider === 'codex';
+  if (!hasValidSessionId || !hasValidSessionProvider) {
     record.currentSessionId = null;
     record.currentSessionProvider = null;
     record.currentSessionModel = null;
@@ -526,6 +532,28 @@ export interface LimitsSnapshot {
   nextRefreshAt: number;
 }
 
+export type LiveTurnPhase = 'starting' | 'working' | 'thinking' | 'tool' | 'responding' | 'transport' | 'idle';
+
+export interface LiveTurnStateSnapshot {
+  agentId: string;
+  turnId: string;
+  provider: AgentProvider;
+  active: boolean;
+  phase: LiveTurnPhase;
+  thought: string;
+  response: string;
+  activity: {
+    label: string;
+    timestamp: number;
+    kind: 'tool' | 'transport' | 'status';
+    detail?: string;
+  } | null;
+  startedAt: number;
+  lastProviderEventAt: number;
+  lastVisibleProgressAt: number;
+  revision: number;
+}
+
 // Client -> Server messages
 export type ClientMessage =
   | { type: 'create_agent'; name: string; cwd: string; referencePaths?: string[]; systemPrompt?: string; workspaceId?: string }
@@ -592,6 +620,7 @@ export type ServerMessage =
       clear?: boolean;
     }
   | { type: 'thinking_output'; agentId: string; content: string }
+  | { type: 'live_turn_state'; state: LiveTurnStateSnapshot }
   | { type: 'message'; message: ChatMessage }
   | { type: 'history'; agentId: string; messages: ChatMessage[] }
   | { type: 'history_cleared'; agentId: string }
@@ -625,6 +654,8 @@ export type ServerMessage =
 
 // Persistence types
 export interface PersistedData {
+  /** Explicit on new writes; absent only in legacy pre-versioned files. */
+  schemaVersion?: number;
   agents: AgentInfo[];
   messages: ChatMessage[];
   sharedContext: string;

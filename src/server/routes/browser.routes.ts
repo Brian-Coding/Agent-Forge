@@ -7,6 +7,7 @@ import { broadcast } from '../broadcast';
 import * as path from 'node:path';
 import { existsSync, realpathSync } from 'node:fs';
 import { getArtifactRoot, getLegacyQaScreenshotRoot } from '../services/artifact-paths';
+import { readJsonBody, RequestBodyError } from '../request-body';
 
 // ============== Stuck-pattern detection ==============
 // Track recent browser endpoint calls per workspace. If the agent makes the same
@@ -71,9 +72,13 @@ function err(msg: string, status = 400): Response {
   return jsonResponse({ ok: false, error: msg }, status);
 }
 
-async function readJson(req: Request): Promise<any> {
-  try { return await req.json(); }
-  catch { return {}; }
+async function readJson(req: Request): Promise<{ body?: any; error?: Response }> {
+  try {
+    return { body: await readJsonBody(req, 1024 * 1024) };
+  } catch (error) {
+    if (error instanceof RequestBodyError) return { error: err(error.message, error.status) };
+    return { error: err('Unable to read request body', 500) };
+  }
 }
 
 function requireString(obj: any, key: string): string | null {
@@ -94,7 +99,9 @@ function optionalRunId(value: unknown): string | undefined | null {
 }
 
 export async function handleBrowserNavigate(req: Request): Promise<Response> {
-  const body = await readJson(req);
+  const parsed = await readJson(req);
+  if (parsed.error) return parsed.error;
+  const body = parsed.body;
   const workspaceId = requireString(body, 'workspaceId');
   const url = requireString(body, 'url');
   const browserSessionId = optionalBrowserSessionId(body.browserSessionId);
@@ -111,7 +118,9 @@ export async function handleBrowserNavigate(req: Request): Promise<Response> {
 }
 
 export async function handleBrowserScreenshot(req: Request): Promise<Response> {
-  const body = await readJson(req);
+  const parsed = await readJson(req);
+  if (parsed.error) return parsed.error;
+  const body = parsed.body;
   const workspaceId = requireString(body, 'workspaceId');
   const browserSessionId = optionalBrowserSessionId(body.browserSessionId);
   const runId = optionalRunId(body.runId);
@@ -174,7 +183,9 @@ export async function handleBrowserScreenshot(req: Request): Promise<Response> {
 }
 
 export async function handleBrowserClick(req: Request): Promise<Response> {
-  const body = await readJson(req);
+  const parsed = await readJson(req);
+  if (parsed.error) return parsed.error;
+  const body = parsed.body;
   const workspaceId = requireString(body, 'workspaceId');
   const selector = requireString(body, 'selector');
   const browserSessionId = optionalBrowserSessionId(body.browserSessionId);
@@ -191,7 +202,9 @@ export async function handleBrowserClick(req: Request): Promise<Response> {
 }
 
 export async function handleBrowserType(req: Request): Promise<Response> {
-  const body = await readJson(req);
+  const parsed = await readJson(req);
+  if (parsed.error) return parsed.error;
+  const body = parsed.body;
   const workspaceId = requireString(body, 'workspaceId');
   const selector = requireString(body, 'selector');
   const text = typeof body.text === 'string' ? body.text : null;
@@ -210,7 +223,9 @@ export async function handleBrowserType(req: Request): Promise<Response> {
 }
 
 export async function handleBrowserWaitForReady(req: Request): Promise<Response> {
-  const body = await readJson(req);
+  const parsed = await readJson(req);
+  if (parsed.error) return parsed.error;
+  const body = parsed.body;
   const workspaceId = requireString(body, 'workspaceId');
   const browserSessionId = optionalBrowserSessionId(body.browserSessionId);
   if (!workspaceId) return err('workspaceId required');
@@ -239,7 +254,9 @@ export async function handleBrowserConsoleGet(req: Request): Promise<Response> {
 }
 
 export async function handleBrowserConsoleClear(req: Request): Promise<Response> {
-  const body = await readJson(req);
+  const parsed = await readJson(req);
+  if (parsed.error) return parsed.error;
+  const body = parsed.body;
   const workspaceId = requireString(body, 'workspaceId');
   const browserSessionId = optionalBrowserSessionId(body.browserSessionId);
   if (!workspaceId) return err('workspaceId required');
@@ -276,7 +293,9 @@ export async function handleBrowserStatus(req: Request): Promise<Response> {
  * surface, gate it.
  */
 export async function handleBrowserEvaluate(req: Request): Promise<Response> {
-  const body = await readJson(req);
+  const parsed = await readJson(req);
+  if (parsed.error) return parsed.error;
+  const body = parsed.body;
   const workspaceId = requireString(body, 'workspaceId');
   const script = requireString(body, 'script');
   const browserSessionId = optionalBrowserSessionId(body.browserSessionId);
@@ -307,7 +326,9 @@ export async function handleBrowserNetworkGet(req: Request): Promise<Response> {
 }
 
 export async function handleBrowserNetworkClear(req: Request): Promise<Response> {
-  const body = await readJson(req);
+  const parsed = await readJson(req);
+  if (parsed.error) return parsed.error;
+  const body = parsed.body;
   const workspaceId = requireString(body, 'workspaceId');
   const browserSessionId = optionalBrowserSessionId(body.browserSessionId);
   if (!workspaceId) return err('workspaceId required');
@@ -321,7 +342,9 @@ export async function handleBrowserNetworkClear(req: Request): Promise<Response>
 }
 
 export async function handleBrowserViewport(req: Request): Promise<Response> {
-  const body = await readJson(req);
+  const parsed = await readJson(req);
+  if (parsed.error) return parsed.error;
+  const body = parsed.body;
   const workspaceId = requireString(body, 'workspaceId');
   const browserSessionId = optionalBrowserSessionId(body.browserSessionId);
   const width = Number(body.width);
@@ -339,7 +362,9 @@ export async function handleBrowserViewport(req: Request): Promise<Response> {
 }
 
 export async function handleBrowserContextClose(req: Request): Promise<Response> {
-  const body = await readJson(req);
+  const parsed = await readJson(req);
+  if (parsed.error) return parsed.error;
+  const body = parsed.body;
   const workspaceId = requireString(body, 'workspaceId');
   const browserSessionId = optionalBrowserSessionId(body.browserSessionId);
   if (!workspaceId) return err('workspaceId required');

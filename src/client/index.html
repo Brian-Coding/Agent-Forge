@@ -1123,7 +1123,16 @@
     // ======================== HOOKS ========================
 
     // Hook: elapsed time since a status started (Feature 5)
-    function useElapsed(status, statusStartTime) {
+    function formatElapsedShort(timestamp) {
+      if (!timestamp) return '';
+      const seconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1000));
+      if (seconds < 5) return 'active now';
+      if (seconds < 60) return 'active ' + seconds + 's ago';
+      const minutes = Math.floor(seconds / 60);
+      return 'active ' + minutes + 'm ago';
+    }
+
+    function useElapsed(status, statusStartTime, lastProviderEventAt) {
       const [elapsed, setElapsed] = useState('');
       useEffect(() => {
         if (!statusStartTime || (status !== 'working' && status !== 'thinking')) {
@@ -1143,8 +1152,10 @@
         const id = setInterval(tick, 1000);
         return () => clearInterval(id);
       }, [status, statusStartTime]);
-      const isStuck = statusStartTime && status === 'working' && (Date.now() - statusStartTime) > 600000;
-      return { elapsed, isStuck };
+      const isRunning = status === 'working' || status === 'thinking';
+      const activityAt = lastProviderEventAt || statusStartTime;
+      const isStuck = !!(isRunning && activityAt && (Date.now() - activityAt) > 600000);
+      return { elapsed, isStuck, activityAge: isRunning ? formatElapsedShort(activityAt) : '' };
     }
 
     function useWebSocket() {
@@ -1157,6 +1168,7 @@
       const [fileChanges, setFileChanges] = useState({});
       const [thinkingOutput, setThinkingOutput] = useState({});
       const [agentActivity, setAgentActivity] = useState({});
+      const [liveTurnState, setLiveTurnState] = useState({});
       const [settings, setSettings] = useState({});
       const [workspaces, setWorkspaces] = useState([]);
       const [activeWorkspaceId, setActiveWorkspaceId] = useState(readStoredActiveWorkspaceId);
@@ -1179,6 +1191,7 @@
       const agentsRef = useRef([]);
       const workspacesRef = useRef([]);
       const queueRef = useRef({});
+      const liveTurnStateRef = useRef({});
 
       agentsRef.current = agents;
       workspacesRef.current = workspaces;
@@ -1335,6 +1348,8 @@
                 setLiveOutput(prev => { const n = {...prev}; delete n[msg.agentId]; return n; });
                 setThinkingOutput(prev => { const n = {...prev}; delete n[msg.agentId]; return n; });
                 setAgentActivity(prev => { const n = {...prev}; delete n[msg.agentId]; return n; });
+                liveTurnStateRef.current = (() => { const n = {...liveTurnStateRef.current}; delete n[msg.agentId]; return n; })();
+                setLiveTurnState(prev => { const n = {...prev}; delete n[msg.agentId]; return n; });
                 break;
               case 'message':
                 if (isHiddenQaAgent(msg.message.agentId)) break;
@@ -1355,6 +1370,8 @@
                 setLiveOutput(prev => ({ ...prev, [msg.agentId]: '' }));
                 setThinkingOutput(prev => { const n = {...prev}; delete n[msg.agentId]; return n; });
                 setAgentActivity(prev => { const n = {...prev}; delete n[msg.agentId]; return n; });
+                liveTurnStateRef.current = (() => { const n = {...liveTurnStateRef.current}; delete n[msg.agentId]; return n; })();
+                setLiveTurnState(prev => { const n = {...prev}; delete n[msg.agentId]; return n; });
                 break;
               case 'output': {
                 if (isHiddenQaAgent(msg.agentId)) break;
@@ -1395,6 +1412,30 @@
                   }
                   return { ...prev, [msg.agentId]: updated };
                 });
+                break;
+              }
+              case 'live_turn_state': {
+                const state = msg.state;
+                if (!state || isHiddenQaAgent(state.agentId)) break;
+                const previous = liveTurnStateRef.current[state.agentId];
+                const sameTurn = previous && previous.turnId === state.turnId;
+                if (sameTurn && Number(previous.revision || 0) >= Number(state.revision || 0)) break;
+                liveTurnStateRef.current = { ...liveTurnStateRef.current, [state.agentId]: state };
+                setLiveTurnState(prev => ({ ...prev, [state.agentId]: state }));
+                if (state.active) {
+                  setStatusStartTimes(prev => ({ ...prev, [state.agentId]: state.startedAt }));
+                  setThinkingOutput(prev => ({ ...prev, [state.agentId]: state.thought || '' }));
+                  setLiveOutput(prev => ({ ...prev, [state.agentId]: state.response || '' }));
+                  if (state.activity) {
+                    setAgentActivity(prev => ({ ...prev, [state.agentId]: state.activity }));
+                  } else {
+                    setAgentActivity(prev => { const n = {...prev}; delete n[state.agentId]; return n; });
+                  }
+                } else {
+                  setThinkingOutput(prev => ({ ...prev, [state.agentId]: state.thought || '' }));
+                  setLiveOutput(prev => ({ ...prev, [state.agentId]: '' }));
+                  setAgentActivity(prev => { const n = {...prev}; delete n[state.agentId]; return n; });
+                }
                 break;
               }
               case 'shared_context':
@@ -1556,7 +1597,7 @@
       }, []);
 
       return {
-        connected, agents, messages, liveOutput, queued, sharedContext, fileChanges, thinkingOutput, agentActivity, settings, workspaces, activeWorkspaceId, providerCatalog, statusStartTimes, tokenUsage, usageReport, limits, terminals, terminalOutput, errorToasts, qaUnread, qaLiveShots,
+        connected, agents, messages, liveOutput, queued, sharedContext, fileChanges, thinkingOutput, agentActivity, liveTurnState, settings, workspaces, activeWorkspaceId, providerCatalog, statusStartTimes, tokenUsage, usageReport, limits, terminals, terminalOutput, errorToasts, qaUnread, qaLiveShots,
         refreshLimits: () => sendRaw({ type: 'refresh_limits' }),
         createAgent: (name, cwd, referencePaths, systemPrompt, workspaceId) => {
           sendRaw({ type: 'create_agent', name, cwd, referencePaths, systemPrompt, workspaceId });
@@ -1710,6 +1751,7 @@
     function ThinkingBlock({ content, isActive }) {
       const [collapsed, setCollapsed] = useState(false);
       const autoCollapseRef = useRef(null);
+      const manuallyCollapsedRef = useRef(false);
 
       // Auto-collapse 500ms after thinking finishes (isActive goes false)
       useEffect(() => {
@@ -1718,9 +1760,9 @@
           return () => clearTimeout(autoCollapseRef.current);
         }
         if (isActive) {
-          setCollapsed(false);
+          if (!manuallyCollapsedRef.current) setCollapsed(false);
         }
-      }, [isActive, content]);
+      }, [isActive]);
 
       if (!content) return null;
 
@@ -1729,7 +1771,11 @@
       );
 
       return e('div', { className: 'thinking-block' },
-        e('div', { className: 'thinking-header' + (collapsed ? ' collapsed' : ''), onClick: () => setCollapsed(prev => !prev) },
+        e('div', { className: 'thinking-header' + (collapsed ? ' collapsed' : ''), onClick: () => setCollapsed(prev => {
+          const next = !prev;
+          manuallyCollapsedRef.current = next;
+          return next;
+        }) },
           chevronSvg,
           isActive ? 'Thinking...' : 'Thought process'
         ),
@@ -2320,7 +2366,7 @@
     });
 
     // Terminal Panel
-    function TerminalPanel({ agent, messages, liveOutput, queuedMessages, fileChanges, thinkingOutput, agentActivity, statusStartTime, tokenUsage, terminals, terminalOutput, workspace, qaRuns, qaHasUnread, qaLiveShots, onQaSend, onQaAbort, onQaHandoff, onClearQaUnread, onSendMessage, onSendImages, onStop, onClearHistory, onClearFileChanges, onMinimize, onMaximize, isMaximized, onFocus, isFocused, onCreateTerminal, onKillTerminal, onUpdateAgent, onResolveModelMismatch, isLocked, onToggleLock, isDragging, isDragOver, onDragStart, onDragEnd, onDragOver, onDragLeave, onDrop }) {
+    function TerminalPanel({ agent, messages, liveOutput, queuedMessages, fileChanges, thinkingOutput, agentActivity, liveTurnState, statusStartTime, tokenUsage, terminals, terminalOutput, workspace, qaRuns, qaHasUnread, qaLiveShots, onQaSend, onQaAbort, onQaHandoff, onClearQaUnread, onSendMessage, onSendImages, onStop, onClearHistory, onClearFileChanges, onMinimize, onMaximize, isMaximized, onFocus, isFocused, onCreateTerminal, onKillTerminal, onUpdateAgent, onResolveModelMismatch, isLocked, onToggleLock, isDragging, isDragOver, onDragStart, onDragEnd, onDragOver, onDragLeave, onDrop }) {
       const [input, setInput] = useState('');
       const [inputHistory, setInputHistory] = useState([]);
       const [historyIdx, setHistoryIdx] = useState(-1);
@@ -2493,7 +2539,12 @@
       const searchInputRef = useRef(null);
 
       // Elapsed time for status (Feature 5)
-      const { elapsed, isStuck } = useElapsed(agent?.status, statusStartTime);
+      const activeLiveTurn = liveTurnState?.active ? liveTurnState : null;
+      const { elapsed, isStuck, activityAge } = useElapsed(
+        agent?.status,
+        activeLiveTurn?.startedAt || statusStartTime,
+        activeLiveTurn?.lastProviderEventAt || null,
+      );
 
       // Fetch git branch on mount, poll every 10s, and re-fetch on status change
       useEffect(() => {
@@ -2783,8 +2834,25 @@
       const msgs = messages || [];
       const queued = queuedMessages || [];
       const files = fileChanges || [];
-      const thinking = thinkingOutput || '';
-      const activity = isWorking ? agentActivity : null;
+      // A finalized snapshot may still describe the previous turn. Once the
+      // agent starts again, do not let that old thought flash before the new
+      // turn's first live snapshot arrives.
+      const thinking = isWorking
+        ? (thinkingOutput || activeLiveTurn?.thought || '')
+        : (thinkingOutput || liveTurnState?.thought || '');
+      const activity = isWorking
+        ? (liveTurnState?.activity || agentActivity || (liveTurnState?.active
+          ? {
+              label: liveTurnState.phase === 'responding'
+                ? 'Writing response…'
+                : liveTurnState.phase === 'transport'
+                  ? 'Transport active…'
+                  : 'Provider active…',
+              timestamp: liveTurnState.lastProviderEventAt,
+              kind: 'status',
+            }
+          : null))
+        : null;
       const rawContextLimit = Number(tokenUsage?.contextLimit || 0);
       const rawContextTokens = Number(tokenUsage?.contextTokens || 0);
       const safeContextLimit = rawContextLimit > 0 ? rawContextLimit : 0;
@@ -2819,7 +2887,9 @@
       const presentationStatus = agentPresentationStatus(agent);
       const statusTextMap = { idle: 'Ready', completed: 'Completed', working: 'Working...', thinking: 'Thinking...', error: 'Failed', stopped: 'Stopped' };
       const statusText = isWorking && elapsed
-        ? (agent.status === 'thinking' ? 'Thinking' : 'Working') + '... ' + elapsed + (isStuck ? ' (may be stuck)' : '')
+        ? (agent.status === 'thinking' ? 'Thinking' : 'Working') + '... ' + elapsed
+          + (activityAge ? ' · ' + activityAge : '')
+          + (isStuck ? ' (possibly stalled)' : '')
         : (statusTextMap[presentationStatus] || '')
           + (agent.lastTurnOutcome?.at && !isWorking ? ' · ' + formatOutcomeAge(agent.lastTurnOutcome.at) : '');
 
@@ -3038,7 +3108,7 @@
                     })
                   );
                 })(),
-                thinking && e(ThinkingBlock, { key: 'thinking', content: thinking, isActive: agent.status === 'thinking' }),
+                thinking && e(ThinkingBlock, { key: 'thinking', content: thinking, isActive: isWorking }),
                 activity && e('div', {
                   className: 'agent-activity-pill' + (activity.kind === 'transport' ? ' transport' : ''),
                   title: activity.detail || undefined,
@@ -3188,7 +3258,7 @@
             const modelInCatalog = currentProvider.models.some(m => m.id === configuredModelId);
             const modelOptions = modelInCatalog
               ? currentProvider.models
-              : [{ id: configuredModelId, label: configuredModelId + ' (not in catalog)' }].concat(currentProvider.models);
+              : [{ id: configuredModelId, label: configuredModelId + ' (provider-reported)' }].concat(currentProvider.models);
             const selectedModel = modelOptions.find(m => m.id === configuredModelId);
             const reasoningLevels = selectedModel?.supportedReasoningLevels || currentProvider.reasoningLevels;
             const defaultReasoning = selectedModel?.defaultReasoningLevel || currentProvider.defaultReasoningLevel || 'medium';
@@ -3517,10 +3587,17 @@
     // ======================== SIDEBAR PANELS ========================
 
     // Agents Sidebar - with verbose status (Feature 5)
-    function AgentStatusText({ agent, statusStartTimes }) {
-      const { elapsed, isStuck } = useElapsed(agent.status, statusStartTimes[agent.id]);
-      if (agent.status === 'thinking') return e('span', { className: isStuck ? 'status-stuck' : '' }, 'Thinking...' + (elapsed ? ' ' + elapsed : ''));
-      if (agent.status === 'working') return e('span', { className: isStuck ? 'status-stuck' : '' }, 'Working...' + (elapsed ? ' ' + elapsed : '') + (isStuck ? ' (may be stuck)' : ''));
+    function AgentStatusText({ agent, statusStartTimes, liveTurnState }) {
+      const live = liveTurnState?.[agent.id];
+      const activeLive = live?.active ? live : null;
+      const { elapsed, isStuck, activityAge } = useElapsed(
+        agent.status,
+        activeLive?.startedAt || statusStartTimes[agent.id],
+        activeLive?.lastProviderEventAt || null,
+      );
+      const activitySuffix = activityAge ? ' · ' + activityAge : '';
+      if (agent.status === 'thinking') return e('span', { className: isStuck ? 'status-stuck' : '' }, 'Thinking...' + (elapsed ? ' ' + elapsed : '') + activitySuffix + (isStuck ? ' (possibly stalled)' : ''));
+      if (agent.status === 'working') return e('span', { className: isStuck ? 'status-stuck' : '' }, 'Working...' + (elapsed ? ' ' + elapsed : '') + activitySuffix + (isStuck ? ' (possibly stalled)' : ''));
       const presentationStatus = agentPresentationStatus(agent);
       const age = formatOutcomeAge(agent.lastTurnOutcome?.at);
       if (presentationStatus === 'error') return e('span', { style: { color: 'var(--error)' } }, 'Failed' + (age ? ' · ' + age : ''));
@@ -3529,7 +3606,7 @@
       return e('span', null, 'Ready');
     }
 
-    function AgentsSidebar({ agents, selectedAgents, totalPanels, onToggle, onRemove, onNewAgent, onEdit, statusStartTimes }) {
+    function AgentsSidebar({ agents, selectedAgents, totalPanels, onToggle, onRemove, onNewAgent, onEdit, statusStartTimes, liveTurnState }) {
       return e(React.Fragment, null,
         e('div', { className: 'sidebar-header' },
           e('span', null, 'Agents'),
@@ -3550,7 +3627,7 @@
                   e('div', { className: 'agent-info' },
                     e('div', { className: 'agent-name' }, agent.name),
                     e('div', { className: 'agent-status' },
-                      e(AgentStatusText, { agent, statusStartTimes })
+                      e(AgentStatusText, { agent, statusStartTimes, liveTurnState })
                     )
                   ),
                   onEdit && e('button', {
@@ -3633,7 +3710,7 @@
       );
     }
 
-    function WorkspacesSidebar({ workspaces, agents, activeWorkspaceId, onSelectWorkspace, onCreateWorkspace, onDeleteWorkspace, onRenameWorkspace, onReorderWorkspaces, onUpdateWorkspaceTesting, onProvisionAtlas, onStopAtlas, onRescanAtlas, onResumeAtlas, onDiscardAtlasCandidate, onOpenAtlasViewer, qaLiveShots, onNewAgent, onEditAgent, onRemoveAgent, statusStartTimes }) {
+    function WorkspacesSidebar({ workspaces, agents, activeWorkspaceId, onSelectWorkspace, onCreateWorkspace, onDeleteWorkspace, onRenameWorkspace, onReorderWorkspaces, onUpdateWorkspaceTesting, onProvisionAtlas, onStopAtlas, onRescanAtlas, onResumeAtlas, onDiscardAtlasCandidate, onOpenAtlasViewer, qaLiveShots, onNewAgent, onEditAgent, onRemoveAgent, statusStartTimes, liveTurnState }) {
       const [showNewModal, setShowNewModal] = useState(false);
       const [renamingId, setRenamingId] = useState(null);
       const [renameValue, setRenameValue] = useState('');
@@ -3885,7 +3962,7 @@
                       e('div', { key: agent.id, className: 'workspace-agent-chip' + (agentPresentationStatus(agent) === 'error' ? ' has-attention' : '') },
                         e('span', { className: 'status-dot status-' + agentPresentationStatus(agent) }),
                         e('span', { style: { flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, agent.name),
-                        e('span', { style: { fontSize: 10, color: 'var(--text-muted)', flexShrink: 0 } }, e(AgentStatusText, { agent, statusStartTimes })),
+                        e('span', { style: { fontSize: 10, color: 'var(--text-muted)', flexShrink: 0 } }, e(AgentStatusText, { agent, statusStartTimes, liveTurnState })),
                         onEditAgent && e('button', {
                           className: 'agent-edit-btn',
                           style: { opacity: 0.7 },
@@ -5612,7 +5689,7 @@
 
     function App() {
       const ws = useWebSocket();
-      const { connected, agents, messages, liveOutput, queued, sharedContext, fileChanges, thinkingOutput, agentActivity, settings, workspaces, activeWorkspaceId, statusStartTimes, tokenUsage, usageReport, terminals, terminalOutput, errorToasts } = ws;
+      const { connected, agents, messages, liveOutput, queued, sharedContext, fileChanges, thinkingOutput, agentActivity, liveTurnState, settings, workspaces, activeWorkspaceId, statusStartTimes, tokenUsage, usageReport, terminals, terminalOutput, errorToasts } = ws;
       const [showModal, setShowModal] = useState(false);
       const [showSharedContext, setShowSharedContext] = useState(false);
       const [sidebarTab, setSidebarTab] = useState('agents');
@@ -5964,6 +6041,7 @@
             onEditAgent: (agent) => { setEditingAgent(agent); setShowModal(true); },
             onRemoveAgent: ws.removeAgent,
             statusStartTimes,
+            liveTurnState,
           }),
           sidebarTab === 'atlas' && e(AtlasPanel, {
             activeWorkspace,
@@ -6023,6 +6101,7 @@
                   fileChanges: fileChanges[maximizedAgent] || [],
                   thinkingOutput: thinkingOutput[maximizedAgent] || '',
                   agentActivity: agentActivity[maximizedAgent] || null,
+                  liveTurnState: liveTurnState[maximizedAgent] || null,
                   statusStartTime: statusStartTimes[maximizedAgent],
                   tokenUsage: tokenUsage[maximizedAgent],
                   terminals,
@@ -6075,6 +6154,7 @@
                   fileChanges: fileChanges[agentId] || [],
                   thinkingOutput: thinkingOutput[agentId] || '',
                   agentActivity: agentActivity[agentId] || null,
+                  liveTurnState: liveTurnState[agentId] || null,
                   statusStartTime: statusStartTimes[agentId],
                   tokenUsage: tokenUsage[agentId],
                   terminals,

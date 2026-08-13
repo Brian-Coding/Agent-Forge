@@ -16,6 +16,7 @@ import { browserService } from './browser.service';
 import { workspaceService } from './workspace.service';
 import { UI_ATLAS_SYSTEM_PROMPT_TEMPLATE } from './prompts/atlas-system-prompt';
 import { CODEX_XHIGH_SPECIALIST_PROFILE } from './specialist-agent-profile';
+import { runKeyedSerial } from './keyed-serial';
 
 let guiPort: number = ((globalThis as any).__guiPort as number) || 0;
 
@@ -29,6 +30,7 @@ const UI_ATLAS_AGENT_CREATE_OPTIONS = Object.freeze({
 // A run is driven by exactly one agent turn at a time. HMR-safe so a hot
 // reload cannot accidentally launch the same candidate twice.
 const executingAtlasRuns: Set<string> = (globalThis as any).__executingAtlasRuns ??= new Set<string>();
+const atlasWorkspaceTails: Map<string, Promise<void>> = (globalThis as any).__atlasWorkspaceTails ??= new Map();
 
 function broadcastWorkspace(workspace: WorkspaceInfo | null | undefined): void {
   if (workspace) broadcast({ type: 'workspace_updated', workspace });
@@ -323,11 +325,23 @@ async function startAtlasRun(
     phase: mode === 'build' ? 'initial discovery' : 'updating from current Atlas',
     resumeCount: 0,
   };
-  broadcastWorkspace(await workspaceService.update(workspaceId, {
-    atlasAgentId: created.id,
-    atlasProjectCwd: projectRoot,
-    atlasRun: run,
-  }));
+  try {
+    const linked = await workspaceService.update(workspaceId, {
+      atlasAgentId: created.id,
+      atlasProjectCwd: projectRoot,
+      atlasRun: run,
+    });
+    if (!linked) throw new Error('The workspace disappeared while starting its Atlas run');
+    broadcastWorkspace(linked);
+  } catch (error) {
+    const cleanupErrors: unknown[] = [];
+    await agentService.removeAgent(created.id).catch(cleanupError => cleanupErrors.push(cleanupError));
+    await discardAtlasCandidate(projectRoot, runId).catch(cleanupError => cleanupErrors.push(cleanupError));
+    if (cleanupErrors.length > 0) {
+      throw new AggregateError([error, ...cleanupErrors], 'Atlas provisioning failed and orphan cleanup was incomplete');
+    }
+    throw error;
+  }
 
   const kickoff = [
     `${mode === 'build' ? 'Build' : 'Update'} the UI Atlas using the transactional run contract in your system prompt.`,
@@ -350,17 +364,21 @@ export const atlasService = {
   },
 
   async provisionAtlasAgent(workspaceId: string, projectCwd: string): Promise<AgentInfo> {
-    return startAtlasRun(workspaceId, projectCwd, 'build');
+    return runKeyedSerial(atlasWorkspaceTails, workspaceId, () =>
+      startAtlasRun(workspaceId, projectCwd, 'build'));
   },
 
   async rescanAtlas(workspaceId: string): Promise<AgentInfo> {
+    return runKeyedSerial(atlasWorkspaceTails, workspaceId, async () => {
     const ws = workspaceService.get(workspaceId);
     if (!ws) throw new Error(`Workspace not found: ${workspaceId}`);
     if (!ws.atlasProjectCwd) throw new Error('No Atlas project directory is configured — use Build first');
     return startAtlasRun(workspaceId, ws.atlasProjectCwd, 'rescan');
+    });
   },
 
   async resumeAtlas(workspaceId: string): Promise<{ agent: AgentInfo; created: boolean }> {
+    return runKeyedSerial(atlasWorkspaceTails, workspaceId, async () => {
     const ws = workspaceService.get(workspaceId);
     if (!ws?.atlasRun || !ws.atlasProjectCwd || !ws.testUrl) throw new Error('No resumable Atlas run found');
     if (ws.atlasRun.status !== 'paused' && ws.atlasRun.status !== 'failed') {
@@ -422,9 +440,11 @@ export const atlasService = {
     ].join('\n\n');
     void executeAtlasTurn(workspaceId, agent.id, resumed.id, prompt);
     return { agent, created };
+    });
   },
 
   async discardCandidate(workspaceId: string): Promise<void> {
+    return runKeyedSerial(atlasWorkspaceTails, workspaceId, async () => {
     const ws = workspaceService.get(workspaceId);
     if (!ws?.atlasRun || !ws.atlasProjectCwd) throw new Error('No Atlas candidate to discard');
     if (ws.atlasRun.status === 'running' || ws.atlasRun.status === 'validating') {
@@ -437,5 +457,6 @@ export const atlasService = {
       if (removed) broadcast({ type: 'agent_removed', agentId: atlasAgent.id });
     }
     broadcastWorkspace(await workspaceService.update(workspaceId, { atlasAgentId: null, atlasRun: null }));
+    });
   },
 };

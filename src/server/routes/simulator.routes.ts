@@ -1,17 +1,26 @@
 import { join } from 'path';
 import { homedir } from 'os';
 import { jsonResponse } from '../utils';
+import { readJsonBody, RequestBodyError } from '../request-body';
+import { collectBoundedProcess } from '../services/bounded-subprocess';
+import { killProcessTree } from '../utils';
 
-async function runSimctl(...args: string[]): Promise<{ ok: boolean; output: string }> {
+export async function runSimctl(...args: string[]): Promise<{ ok: boolean; output: string }> {
   try {
     const proc = Bun.spawn(['xcrun', 'simctl', ...args], {
       stdout: 'pipe',
       stderr: 'pipe',
     });
-    const exitCode = await proc.exited;
-    const stdout = await new Response(proc.stdout).text();
-    const stderr = await new Response(proc.stderr).text();
-    return { ok: exitCode === 0, output: stdout || stderr };
+    const result = await collectBoundedProcess(proc, {
+      timeoutMs: 30_000,
+      terminationTimeoutMs: 3_000,
+      maxChars: 2 * 1024 * 1024,
+      retainOutput: 'head',
+      label: 'iOS simulator command',
+      terminate: () => killProcessTree(proc),
+    });
+    if (result.timedOut || result.error) return { ok: false, output: result.error || 'Simulator command timed out' };
+    return { ok: result.exitCode === 0, output: result.stdout || result.stderr };
   } catch (e: any) {
     return { ok: false, output: e.message || 'xcrun not found. Is Xcode installed?' };
   }
@@ -31,24 +40,47 @@ export async function handleListSimulators(req: Request): Promise<Response> {
 }
 
 export async function handleBootSimulator(req: Request): Promise<Response> {
-  const body = (await req.json()) as { udid: string };
-  if (!body.udid) return jsonResponse({ error: 'Missing udid' }, 400);
-  const result = await runSimctl('boot', body.udid);
+  let body: any;
+  try { body = await readJsonBody(req, 4_096); }
+  catch (error) { return bodyError(error); }
+  const udid = parseSimulatorUdid(body?.udid);
+  if (!udid) return jsonResponse({ error: 'Invalid or missing udid' }, 400);
+  const result = await runSimctl('boot', udid);
   return jsonResponse({ ok: result.ok, message: result.output });
 }
 
 export async function handleShutdownSimulator(req: Request): Promise<Response> {
-  const body = (await req.json()) as { udid: string };
-  if (!body.udid) return jsonResponse({ error: 'Missing udid' }, 400);
-  const result = await runSimctl('shutdown', body.udid);
+  let body: any;
+  try { body = await readJsonBody(req, 4_096); }
+  catch (error) { return bodyError(error); }
+  const udid = parseSimulatorUdid(body?.udid);
+  if (!udid) return jsonResponse({ error: 'Invalid or missing udid' }, 400);
+  const result = await runSimctl('shutdown', udid);
   return jsonResponse({ ok: result.ok, message: result.output });
 }
 
 export async function handleEraseSimulator(req: Request): Promise<Response> {
-  const body = (await req.json()) as { udid: string };
-  if (!body.udid) return jsonResponse({ error: 'Missing udid' }, 400);
-  const result = await runSimctl('erase', body.udid);
+  let body: any;
+  try { body = await readJsonBody(req, 4_096); }
+  catch (error) { return bodyError(error); }
+  const udid = parseSimulatorUdid(body?.udid);
+  if (!udid) return jsonResponse({ error: 'Invalid or missing udid' }, 400);
+  const result = await runSimctl('erase', udid);
   return jsonResponse({ ok: result.ok, message: result.output });
+}
+
+export function parseSimulatorUdid(value: unknown): string | null {
+  if (value === 'booted') return value;
+  return typeof value === 'string' && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(value)
+    ? value
+    : null;
+}
+
+function bodyError(error: unknown): Response {
+  return jsonResponse(
+    { error: error instanceof Error ? error.message : 'Invalid request body' },
+    error instanceof RequestBodyError ? error.status : 400,
+  );
 }
 
 export async function handleCleanDerivedData(req: Request): Promise<Response> {

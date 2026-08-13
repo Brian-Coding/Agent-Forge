@@ -96,3 +96,13 @@ export function isChatAgentKind(value: unknown): value is ChatAgentKind {
 export function stripModelTier(model: string): string {
   return model.replace(/\[[^\]]*\]$/, '');
 }
+
+/**
+ * Claude Code occasionally reports bookkeeping buckets such as
+ * `<synthetic>` in result.modelUsage. Those are accounting labels, not models
+ * that can be selected or resumed, and must never become model ground truth.
+ */
+export function isRealClaudeModelId(model: unknown): model is string {
+  if (typeof model !== 'string') return false;
+  return /^claude-[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\[[a-z0-9-]+\])?$/i.test(model);
+}

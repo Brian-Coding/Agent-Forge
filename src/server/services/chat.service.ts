@@ -1,7 +1,7 @@
 import type { AgentEvent } from '../agents/events';
 import type { AgentHandle, AgentRunContext } from '../agents/types';
 import type { ChatImageAttachment } from '../../shared/protocol';
-import { stripModelTier, type ChatAgentKind } from '../agents/agent-kinds';
+import { isRealClaudeModelId, stripModelTier, type ChatAgentKind } from '../agents/agent-kinds';
 import { getAgentAdapter, resolveAgentModel, resolveAgentReasoningLevel } from '../agents/registry';
 import { broadcast } from '../broadcast';
 import { agentService } from './agent.service';
@@ -9,6 +9,8 @@ import { documentService } from './document.service';
 import { persistenceService } from './persistence.service';
 import { promptBuilderService } from './prompt-builder.service';
 import { usageService } from './usage.service';
+import { liveTurnStateService } from './live-turn-state.service';
+import { observeProviderModel } from './model-catalog.service';
 import { compactThinkingText, sanitizeCliText } from '../agents/stream-utils';
 import {
   createInactivityWatchdog,
@@ -34,6 +36,7 @@ const currentHandles: Map<string, AgentHandle> = (globalThis as any).__chatCurre
 // long-lived goal providers may also persist completed turn checkpoints while
 // retaining the same buffer until the underlying CLI process exits.
 interface TurnBuffer {
+  liveTurnId: string;
   accumulatedText: string;
   lastResultEmitted: string | null;
   lastAssistantSnapshot: string | null;
@@ -49,6 +52,8 @@ interface TurnBuffer {
   // turn, not one row per internal API sub-call.
   turnUsage: { inputTokens: number; outputTokens: number; costUsd: number; turns: number };
   modelRan?: string;
+  /** Automatic stale-session retries are unsafe after any tool/checkpoint. */
+  retrySafe: boolean;
 }
 
 export interface ChatTurnOptions {
@@ -65,6 +70,7 @@ const turnBuffers: Map<string, TurnBuffer> = (globalThis as any).__chatTurnBuffe
 // continuations AND let a brand-new send run concurrently with the old
 // turn's teardown (clobbering turnBuffers/currentHandles).
 const turnEpochs: Map<string, number> = (globalThis as any).__chatTurnEpochs ??= new Map();
+const liveStateLastBroadcastAt: Map<string, number> = (globalThis as any).__liveStateLastBroadcastAt ??= new Map();
 
 // Long-running work (especially Codex /goal automatic continuation) has no
 // output-silence deadline by default. Operators can explicitly opt into one
@@ -87,6 +93,33 @@ const HISTORY_RECENT_TURNS = 20;
 const HISTORY_USER_CAP = 1500;
 const HISTORY_ASSISTANT_CAP = 1500;
 const HISTORY_MAX_TOTAL = 12000;
+export const MAX_PERSISTED_CHAT_CHARS = 512_000;
+const MAX_OUTPUT_FRAME_CHARS = 64_000;
+
+function boundedChatText(text: string, maxChars = MAX_PERSISTED_CHAT_CHARS): string {
+  if (text.length <= maxChars) return text;
+  const marker = '\n\n[Output truncated by Agent Forge]';
+  return text.slice(0, Math.max(0, maxChars - marker.length)) + marker;
+}
+
+function appendBoundedChatText(current: string, delta: string): string {
+  if (!delta || current.length >= MAX_PERSISTED_CHAT_CHARS) return current;
+  const remaining = MAX_PERSISTED_CHAT_CHARS - current.length;
+  if (delta.length <= remaining) return current + delta;
+  const marker = '\n\n[Output truncated by Agent Forge]';
+  return current + delta.slice(0, Math.max(0, remaining - marker.length)) + marker;
+}
+
+function broadcastOutputFrames(agentId: string, content: string): void {
+  for (let offset = 0; offset < content.length; offset += MAX_OUTPUT_FRAME_CHARS) {
+    broadcast({
+      type: 'output',
+      agentId,
+      content: content.slice(offset, offset + MAX_OUTPUT_FRAME_CHARS),
+      stream: 'stdout',
+    });
+  }
+}
 
 function prependPriorHistory(agentId: string, currentUserContent: string): string {
   const all = agentService.getMessages(agentId);
@@ -155,7 +188,7 @@ function persistAssistantResult(
   turn: TurnBuffer,
   allowRepeatedCheckpoint = false,
 ): boolean {
-  const content = text.trim();
+  const content = boundedChatText(text.trim());
   if (!content || (!allowRepeatedCheckpoint && content === turn.lastPersistedResult)) return false;
 
   const assistantMsg = agentService.appendMessage(
@@ -174,24 +207,42 @@ function persistAssistantResult(
   return true;
 }
 
+function broadcastLiveTurnState(agentId: string, force = false): void {
+  const state = liveTurnStateService.get(agentId);
+  if (!state) return;
+  const now = Date.now();
+  const last = liveStateLastBroadcastAt.get(agentId) ?? 0;
+  if (!force && now - last < 2_000) return;
+  liveStateLastBroadcastAt.set(agentId, now);
+  broadcast({ type: 'live_turn_state', state });
+}
+
 function handleEvent(agentId: string, event: AgentEvent): void {
+  const activeTurn = turnBuffers.get(agentId);
+  if (activeTurn) liveTurnStateService.touch(agentId, activeTurn.liveTurnId);
+
   switch (event.type) {
     case 'text-delta': {
-      const turn = turnBuffers.get(agentId);
-      if (turn) turn.accumulatedText += event.text;
-      broadcast({ type: 'output', agentId, content: event.text, stream: 'stdout' });
+      const turn = activeTurn;
+      if (turn) turn.accumulatedText = appendBoundedChatText(turn.accumulatedText, event.text);
+      if (turn) liveTurnStateService.appendResponse(agentId, turn.liveTurnId, event.text);
+      broadcastOutputFrames(agentId, event.text);
       return;
     }
 
     case 'thinking-delta': {
-      const compact = compactThinkingText(event.text);
-      if (compact) broadcast({ type: 'thinking_output', agentId, content: compact + '\n' });
+      const compact = event.streaming ? event.text : compactThinkingText(event.text);
+      if (compact) {
+        const content = event.streaming ? compact : compact + '\n';
+        if (activeTurn) liveTurnStateService.appendThought(agentId, activeTurn.liveTurnId, content);
+        broadcast({ type: 'thinking_output', agentId, content });
+      }
       return;
     }
 
     case 'assistant-snapshot': {
       const turn = turnBuffers.get(agentId);
-      if (turn) observeTurnOutputEvent(turn, event);
+      if (turn) observeTurnOutputEvent(turn, { ...event, text: boundedChatText(event.text) });
       return;
     }
 
@@ -208,13 +259,22 @@ function handleEvent(agentId: string, event: AgentEvent): void {
       // live-document sync. Other tool calls stay hidden to keep chat readable.
       sniffPlanWrite(agentId, event.toolName, event.input);
       const label = event.summary ? `${event.toolName}: ${event.summary}` : `Using ${event.toolName}`;
-      broadcast({ type: 'agent_activity', agentId, label, timestamp: Date.now(), kind: 'tool' });
+      const timestamp = Date.now();
+      if (activeTurn) {
+        activeTurn.retrySafe = false;
+        liveTurnStateService.setActivity(agentId, activeTurn.liveTurnId, { label, timestamp, kind: 'tool' });
+      }
+      broadcast({ type: 'agent_activity', agentId, label, timestamp, kind: 'tool' });
+      broadcastLiveTurnState(agentId, true);
       return;
     }
 
     case 'tool-call-end': {
       // Tool results are surfaced by the next assistant turn's narrative; no
       // separate wire event needed.
+      if (activeTurn) liveTurnStateService.clearActivity(agentId, activeTurn.liveTurnId, 'tool');
+      broadcast({ type: 'agent_activity', agentId, label: '', timestamp: Date.now(), kind: 'tool', clear: true });
+      broadcastLiveTurnState(agentId, true);
       return;
     }
 
@@ -231,11 +291,16 @@ function handleEvent(agentId: string, event: AgentEvent): void {
       // Accumulate into the per-turn buffer for the usage-log record at finalize.
       const turn = turnBuffers.get(agentId);
       if (turn) {
-        if (typeof event.inputTokensDelta === 'number') turn.turnUsage.inputTokens += event.inputTokensDelta;
-        if (typeof event.outputTokensDelta === 'number') turn.turnUsage.outputTokens += event.outputTokensDelta;
-        if (typeof event.costUsdDelta === 'number') turn.turnUsage.costUsd += event.costUsdDelta;
-        if (typeof event.turnsDelta === 'number') turn.turnUsage.turns += event.turnsDelta;
-        if (typeof event.modelRan === 'string' && event.modelRan) turn.modelRan = event.modelRan;
+        const finitePositive = (value: unknown): value is number =>
+          typeof value === 'number' && Number.isFinite(value) && value > 0;
+        if (finitePositive(event.inputTokensDelta)) turn.turnUsage.inputTokens += event.inputTokensDelta;
+        if (finitePositive(event.outputTokensDelta)) turn.turnUsage.outputTokens += event.outputTokensDelta;
+        if (finitePositive(event.costUsdDelta)) turn.turnUsage.costUsd += event.costUsdDelta;
+        if (finitePositive(event.turnsDelta)) turn.turnUsage.turns += event.turnsDelta;
+        if (typeof event.modelRan === 'string' && event.modelRan) {
+          turn.modelRan = event.modelRan;
+          observeProviderModel(turn.provider, event.modelRan);
+        }
       }
       const snap = agentService.getTokenUsage(agentId);
       if (snap) {
@@ -268,6 +333,24 @@ function handleEvent(agentId: string, event: AgentEvent): void {
             ? 'idle'
             : 'working';
       agentService.setStatus(agentId, wire as any);
+      if (activeTurn) {
+        const phase = event.status === 'thinking'
+          ? 'thinking'
+          : event.status === 'responding'
+            ? 'responding'
+            : event.status === 'tool'
+              ? 'tool'
+              : event.status === 'idle'
+                ? 'idle'
+                : 'working';
+        const current = liveTurnStateService.get(agentId);
+        if (current?.phase !== phase) {
+          liveTurnStateService.setPhase(agentId, activeTurn.liveTurnId, phase);
+          broadcastLiveTurnState(agentId, true);
+        } else {
+          broadcastLiveTurnState(agentId);
+        }
+      }
       return;
     }
 
@@ -277,8 +360,9 @@ function handleEvent(agentId: string, event: AgentEvent): void {
       // continue working for hours after one completed assistant response.
       const turn = turnBuffers.get(agentId);
       if (turn) {
-        const observation = observeTurnOutputEvent(turn, event);
+        const observation = observeTurnOutputEvent(turn, { ...event, text: boundedChatText(event.text) });
         if (observation.checkpointText) {
+          turn.retrySafe = false;
           persistAssistantResult(agentId, observation.checkpointText, turn, true);
         }
       }
@@ -297,6 +381,8 @@ function handleEvent(agentId: string, event: AgentEvent): void {
           kind: 'transport',
           clear: true,
         });
+        if (activeTurn) liveTurnStateService.clearActivity(agentId, activeTurn.liveTurnId, 'transport');
+        broadcastLiveTurnState(agentId, true);
         return;
       }
 
@@ -309,21 +395,32 @@ function handleEvent(agentId: string, event: AgentEvent): void {
       console.warn(
         `[chat] ${label} agent=${agentId} name=${JSON.stringify(agentName)}: ${event.message ?? 'transport interrupted'}`,
       );
+      const timestamp = Date.now();
       broadcast({
         type: 'agent_activity',
         agentId,
         label,
-        timestamp: Date.now(),
+        timestamp,
         kind: 'transport',
         detail: event.message,
       });
+      if (activeTurn) {
+        liveTurnStateService.setActivity(agentId, activeTurn.liveTurnId, {
+          label,
+          timestamp,
+          kind: 'transport',
+          detail: event.message,
+        });
+      }
+      broadcastLiveTurnState(agentId, true);
       return;
     }
 
     case 'error': {
       const turn = turnBuffers.get(agentId);
-      if (turn) observeTurnOutputEvent(turn, event);
-      broadcast({ type: 'error', message: event.message, agentId });
+      const message = boundedChatText(event.message);
+      if (turn) observeTurnOutputEvent(turn, { ...event, message });
+      broadcast({ type: 'error', message, agentId });
       return;
     }
 
@@ -371,6 +468,7 @@ async function runChatTurn(agentId: string, content: string, source?: 'qa', opti
     console.warn(`[chat] sendMessage: agent not found ${agentId}`);
     return;
   }
+  const turnEpochAtStart = turnEpochs.get(agentId) ?? 0;
 
   // 0) Model-mismatch hard stop. A prior turn was served by a different model
   // than the user selected; refuse to run more turns until they resolve it via
@@ -455,6 +553,7 @@ async function runChatTurn(agentId: string, content: string, source?: 'qa', opti
 
   // 6) Build AgentRunContext — closures over agentId so emit callbacks route.
   const turn: TurnBuffer = {
+    liveTurnId: liveTurnStateService.begin(agentId, provider).turnId,
     accumulatedText: '',
     lastResultEmitted: null,
     lastAssistantSnapshot: null,
@@ -464,11 +563,15 @@ async function runChatTurn(agentId: string, content: string, source?: 'qa', opti
     provider,
     resolvedModel: requestedResolvedModel,
     turnUsage: { inputTokens: 0, outputTokens: 0, costUsd: 0, turns: 0 },
+    retrySafe: true,
   };
   turnBuffers.set(agentId, turn);
+  broadcastLiveTurnState(agentId, true);
 
   // Watchdog activity clock — any adapter event counts as liveness.
   let activeWatchdog: InactivityWatchdog | null = null;
+  let activeAttemptId = 0;
+  let acceptingEvents = true;
 
   // Never swap a requested model silently: if the resolver rejects the agent's
   // configured model (not in the provider catalog), tell the user which model
@@ -490,47 +593,58 @@ async function runChatTurn(agentId: string, content: string, source?: 'qa', opti
     broadcast({ type: 'message', message: sysMsg });
   }
 
-  const ctx: AgentRunContext = {
-    paneId: agentId,
-    cwd: info.cwd,
-    referencePaths: validReferencePaths,
-    systemPrompt: appendedSystemPrompt,
-    model: resolvedModel,
-    reasoningLevel: resolvedReasoningLevel,
-    imagePaths: options.imagePaths,
+  const createAttemptContext = (attemptId: number): AgentRunContext => {
+    const isCurrent = () => acceptingEvents
+      && activeAttemptId === attemptId
+      && turnBuffers.get(agentId) === turn
+      && (turnEpochs.get(agentId) ?? 0) === turnEpochAtStart;
+    return {
+      paneId: agentId,
+      cwd: info.cwd,
+      referencePaths: validReferencePaths,
+      systemPrompt: appendedSystemPrompt,
+      model: resolvedModel,
+      reasoningLevel: resolvedReasoningLevel,
+      imagePaths: options.imagePaths,
 
-    getSessionId(): string | null {
-      return sessionIdForAdapter;
-    },
-    updateSessionId(nextSessionId: string): void {
-      // Claim the new session for this turn's provider/model. If the user swaps
-      // either again, this lookup will detect the mismatch on the next turn and
-      // start fresh.
-      agentService.setCurrentSession(agentId, provider, resolvedModel, nextSessionId);
-    },
-    emitChatEvent(_event: unknown): void {
-      // Every valid provider event proves the process is alive, including new
-      // event kinds that the normalized adapter has not learned yet.
-      activeWatchdog?.touch();
-      // Raw provider events currently have no UI surface. Hook target for
-      // future plugins (e.g. transcript logging, debug dumps).
-    },
-    emitAgentEvent(event: AgentEvent): void {
-      activeWatchdog?.touch();
-      handleEvent(agentId, event);
-    },
-    emitStatus(status: string): void {
-      const wire = status === 'thinking' ? 'thinking' : status === 'error' ? 'error' : 'working';
-      agentService.setStatus(agentId, wire as any);
-    },
-    emitActivity(_activity): void {
-      // No wire surface yet; reserved for the activity bar.
-    },
-    emitSystemMessage(message: string): void {
-      const sysMsg = agentService.addSystemMessage(agentId, message);
-      turn.persistedSystemMessages.add(message.trim());
-      broadcast({ type: 'message', message: sysMsg });
-    },
+      getSessionId(): string | null {
+        return sessionIdForAdapter;
+      },
+      updateSessionId(nextSessionId: string): void {
+        if (!isCurrent()) return;
+        // Claim the new session for this turn's provider/model. If the user
+        // swaps either again, the next turn starts fresh.
+        agentService.setCurrentSession(agentId, provider, resolvedModel, nextSessionId);
+      },
+      emitChatEvent(_event: unknown): void {
+        if (!isCurrent()) return;
+        // Every valid provider event proves the process is alive, including
+        // new event kinds that the normalized adapter has not learned yet.
+        activeWatchdog?.touch();
+        liveTurnStateService.touch(agentId, turn.liveTurnId);
+        broadcastLiveTurnState(agentId);
+      },
+      emitAgentEvent(event: AgentEvent): void {
+        if (!isCurrent()) return;
+        activeWatchdog?.touch();
+        handleEvent(agentId, event);
+      },
+      emitStatus(status: string): void {
+        if (!isCurrent()) return;
+        const wire = status === 'thinking' ? 'thinking' : status === 'error' ? 'error' : 'working';
+        agentService.setStatus(agentId, wire as any);
+      },
+      emitActivity(_activity): void {
+        // No wire surface yet; reserved for the activity bar.
+      },
+      emitSystemMessage(message: string): void {
+        if (!isCurrent()) return;
+        const bounded = boundedChatText(message);
+        const sysMsg = agentService.addSystemMessage(agentId, bounded);
+        turn.persistedSystemMessages.add(bounded.trim());
+        broadcast({ type: 'message', message: sysMsg });
+      },
+    };
   };
 
   try {
@@ -539,6 +653,8 @@ async function runChatTurn(agentId: string, content: string, source?: 'qa', opti
       // 7) Create handle, register, and run. Long-lived goal processes are
       //    unlimited unless the operator explicitly configured an inactivity
       //    timeout for this server.
+      const attemptId = ++activeAttemptId;
+      const ctx = createAttemptContext(attemptId);
       const state = adapter.createState(ctx);
       const handle = adapter.createHandle(promptBody, ctx, state);
       currentHandles.set(agentId, handle);
@@ -569,11 +685,12 @@ async function runChatTurn(agentId: string, content: string, source?: 'qa', opti
       } finally {
         watchdog.stop();
         if (activeWatchdog === watchdog) activeWatchdog = null;
+        if (activeAttemptId === attemptId) activeAttemptId++;
         // Identity-guarded: never clobber a newer turn's handle.
         if (currentHandles.get(agentId) === handle) currentHandles.delete(agentId);
       }
 
-      if (result?.recoverableError === 'stale-session' && !didStaleSessionRetry) {
+      if (result?.recoverableError === 'stale-session' && !didStaleSessionRetry && turn.retrySafe) {
         didStaleSessionRetry = true;
         console.warn(`[chat] stale ${provider} session for ${agentId}; clearing saved session and retrying fresh`);
         agentService.clearCurrentSession(agentId);
@@ -585,6 +702,8 @@ async function runChatTurn(agentId: string, content: string, source?: 'qa', opti
         turn.lastResultEmitted = null;
         turn.lastAssistantSnapshot = null;
         turn.lastErrorMessage = null;
+        turn.liveTurnId = liveTurnStateService.begin(agentId, provider).turnId;
+        broadcastLiveTurnState(agentId, true);
         continue;
       }
       if (result?.recoverableError === 'stale-session') {
@@ -602,9 +721,11 @@ async function runChatTurn(agentId: string, content: string, source?: 'qa', opti
     }
   } catch (e: any) {
     console.error(`[chat] adapter run failed for ${agentId}:`, e);
-    const errorMessage = e?.message || String(e);
+    const errorMessage = boundedChatText(e?.message || String(e));
     turn.lastErrorMessage = errorMessage;
   } finally {
+    acceptingEvents = false;
+    activeAttemptId++;
     // Flush any process-level result that was not already persisted at a
     // provider turn boundary. Stopped, failed, and empty exits also receive a
     // durable outcome so an accepted user message can never disappear silently.
@@ -646,7 +767,8 @@ async function runChatTurn(agentId: string, content: string, source?: 'qa', opti
     // further sends on this agent until the user resolves it. Tier suffixes
     // ("[1m]") are stripped so a context-tier difference alone doesn't trip it.
     const ranModel = turnState?.modelRan;
-    if (ranModel && resolvedModel && stripModelTier(ranModel) !== stripModelTier(resolvedModel)) {
+    const ranModelCanDriveMismatch = provider !== 'claude' || isRealClaudeModelId(ranModel);
+    if (ranModel && ranModelCanDriveMismatch && resolvedModel && stripModelTier(ranModel) !== stripModelTier(resolvedModel)) {
       agentService.setModelMismatch(agentId, resolvedModel, ranModel);
     }
 
@@ -661,6 +783,10 @@ async function runChatTurn(agentId: string, content: string, source?: 'qa', opti
 
     // Identity-guarded: never delete a newer turn's buffer.
     if (turnBuffers.get(agentId) === turn) turnBuffers.delete(agentId);
+
+    const finalLiveState = liveTurnStateService.finalize(agentId, turn.liveTurnId);
+    if (finalLiveState) broadcast({ type: 'live_turn_state', state: finalLiveState });
+    liveStateLastBroadcastAt.delete(agentId);
 
     await documentService.releaseLocksForAgent(agentId);
     // If a newer turn is already running (stop + immediate resend race),
@@ -699,10 +825,18 @@ export const chatService = {
       return runChatTurn(agentId, content, source, options);
     };
     const prev = sendLocks.get(agentId) ?? Promise.resolve();
-    const current = prev.then(runIfCurrent, runIfCurrent)
-      .catch(e => { console.error(`[chat] sendMessage(${agentId}) error:`, e); });
-    sendLocks.set(agentId, current);
-    return current;
+    const execution = prev.then(runIfCurrent, runIfCurrent);
+    // Keep the internal queue usable after failure, but return the original
+    // execution promise so persistence/infrastructure errors reach callers.
+    const queueTail = execution.catch(e => {
+      console.error(`[chat] sendMessage(${agentId}) error:`, e);
+    });
+    sendLocks.set(agentId, queueTail);
+    try {
+      return await execution;
+    } finally {
+      if (sendLocks.get(agentId) === queueTail) sendLocks.delete(agentId);
+    }
   },
 
   /**
@@ -765,5 +899,24 @@ export const chatService = {
       Promise.allSettled([...sendLocks.values()]),
       new Promise<void>(resolve => setTimeout(resolve, capMs)),
     ]);
+  },
+
+  /** Wait for one agent's queued/active turn teardown without hanging CRUD. */
+  async waitForAgentTurn(agentId: string, capMs = 3000): Promise<boolean> {
+    const pending = sendLocks.get(agentId);
+    if (!pending && !currentHandles.has(agentId)) return true;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const completed = pending
+      ? pending.then(() => true, () => true)
+      : new Promise<boolean>(() => {});
+    const timedOut = new Promise<boolean>(resolve => {
+      timer = setTimeout(() => resolve(false), capMs);
+    });
+    try {
+      const settled = await Promise.race([completed, timedOut]);
+      return settled && !currentHandles.has(agentId);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
   },
 };

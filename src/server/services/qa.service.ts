@@ -12,6 +12,7 @@ import { formatQaReport, parseQaResult, QA_RESULT_START, type ParsedQaResult } f
 import { workspaceService } from './workspace.service';
 import { QA_SYSTEM_PROMPT_TEMPLATE } from './prompts/qa-system-prompt';
 import { CODEX_XHIGH_SPECIALIST_PROFILE } from './specialist-agent-profile';
+import { runKeyedSerial } from './keyed-serial';
 
 interface QueuedQaTest {
   runId: string;
@@ -28,6 +29,8 @@ interface QueuedQaTest {
 
 const qaQueues: Map<string, QueuedQaTest[]> = (globalThis as any).__structuredQaQueues ??= new Map();
 const executingQaAgents: Set<string> = (globalThis as any).__executingQaAgents ??= new Set();
+const qaWorkspaceTails: Map<string, Promise<void>> = (globalThis as any).__qaWorkspaceTails ??= new Map();
+const qaHandoffTails: Map<string, Promise<void>> = (globalThis as any).__qaHandoffTails ??= new Map();
 
 let guiPort: number = ((globalThis as any).__guiPort as number) || 0;
 
@@ -157,8 +160,19 @@ async function ensureQaAgent(workspace: WorkspaceInfo, sourceAgent: AgentInfo): 
     .replace(/{GUI_PORT}/g, String(port))
     .replace(/{WORKSPACE_ID}/g, workspace.id);
   const created = await agentService.createAgent('QA Tester', qaCwd, refs, systemPrompt, workspace.id, QA_TESTER_AGENT_CREATE_OPTIONS);
-  broadcastWorkspace(await workspaceService.update(workspace.id, { qaAgentId: created.id }));
-  return created;
+  try {
+    const linked = await workspaceService.update(workspace.id, { qaAgentId: created.id });
+    if (!linked) throw new Error('The workspace disappeared while provisioning its QA Tester');
+    broadcastWorkspace(linked);
+    return created;
+  } catch (error) {
+    try {
+      await agentService.removeAgent(created.id);
+    } catch (cleanupError) {
+      throw new AggregateError([error, cleanupError], 'QA Tester provisioning failed and its orphan cleanup also failed');
+    }
+    throw error;
+  }
 }
 
 function isPathInside(root: string, target: string): boolean {
@@ -538,6 +552,7 @@ export const qaService = {
     userContent: string,
     rerunOf?: string,
   ): Promise<QaRunInfo> {
+    return runKeyedSerial(qaWorkspaceTails, workspaceId, async () => {
     const ws = workspaceService.get(workspaceId);
     if (!ws) throw new Error(`Workspace not found: ${workspaceId}`);
     if (!ws.testUrl) throw new Error('Workspace has no Test URL set');
@@ -603,6 +618,7 @@ export const qaService = {
     qaQueues.get(qaAgent.id)!.push(queued);
     void dispatchQaQueue(qaAgent.id);
     return run;
+    });
   },
 
   async abortQaTest(workspaceId: string): Promise<void> {
@@ -611,10 +627,11 @@ export const qaService = {
     if (!ws.qaAgentId) throw new Error('No QA agent provisioned');
     const running = [...(ws.qaRuns || [])].reverse().find(run => run.status === 'running');
     if (!running) throw new Error('No QA run is currently executing');
-    await agentService.stopAgent(ws.qaAgentId);
+    if (!(await agentService.stopAgent(ws.qaAgentId))) throw new Error('The QA agent no longer exists');
   },
 
   async handoffRun(workspaceId: string, runId: string): Promise<void> {
+    return runKeyedSerial(qaHandoffTails, `${workspaceId}:${runId}`, async () => {
     const ws = workspaceService.get(workspaceId);
     if (!ws) throw new Error('Workspace not found');
     const run = (ws.qaRuns || []).find(item => item.id === runId);
@@ -658,6 +675,7 @@ export const qaService = {
           handoffError: 'The coding agent did not accept this QA handoff. Resolve its status and try again.',
         });
       });
+    });
   },
 };
 

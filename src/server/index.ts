@@ -1,7 +1,7 @@
 import type { PersistedData } from '../shared/protocol';
 import index from '../client/index.html';
 
-import { persistenceService } from './services/persistence.service';
+import { persistenceService, PERSISTED_SCHEMA_VERSION } from './services/persistence.service';
 import { settingsService } from './services/settings.service';
 import { workspaceService } from './services/workspace.service';
 import { documentService } from './services/document.service';
@@ -13,6 +13,16 @@ import { atlasService } from './services/atlas.service';
 import { usageService } from './services/usage.service';
 import { limitsService } from './services/limits.service';
 import { MAX_CHAT_IMAGE_TOTAL_BYTES } from './services/chat-image.service';
+import {
+  acquireProcessLockFile,
+  processExists,
+  releaseProcessLockFile,
+  type ProcessLockHandle,
+} from './services/process-lock';
+import { collectBoundedProcess } from './services/bounded-subprocess';
+import { killProcessTree, treeKill } from './utils';
+import { createShutdownCoordinator } from './services/shutdown-coordinator';
+import { parseServerPort } from './server-config';
 
 import { websocketHandlers } from './ws';
 
@@ -36,19 +46,6 @@ import { handleChatImage, handleChatImageUpload } from './routes/chat-image.rout
 import { handleListSimulators, handleBootSimulator, handleShutdownSimulator, handleEraseSimulator, handleCleanDerivedData } from './routes/simulator.routes';
 import { handleBrowserNavigate, handleBrowserScreenshot, handleBrowserClick, handleBrowserType, handleBrowserWaitForReady, handleBrowserConsoleGet, handleBrowserConsoleClear, handleBrowserStatus, handleBrowserEvaluate, handleBrowserNetworkGet, handleBrowserNetworkClear, handleBrowserViewport, handleBrowserContextClose, handleQaScreenshot, handleAtlasFile } from './routes/browser.routes';
 
-// Catch unhandled promise rejections to prevent silent crashes
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('Unhandled rejection at:', promise, 'reason:', reason);
-});
-
-// Catch synchronous uncaught exceptions. Without this, anything thrown
-// outside an async context (a stray sync error in a hot path) takes the
-// whole server down and orphans port 3333 on Windows. Log and continue;
-// graceful shutdown is wired to SIGINT/SIGTERM/SIGHUP below.
-process.on('uncaughtException', (err, origin) => {
-  console.error(`Uncaught exception (${origin}):`, err);
-});
-
 // --- Process lock --------------------------------------------------------
 // Prevents two agent-forge bun.exe instances from clobbering the same
 // data.json. The lock is cwd-relative so two checkouts in different dirs
@@ -59,6 +56,7 @@ process.on('uncaughtException', (err, origin) => {
 // parent.
 
 const LOCK_FILE = './agent-forge.lock';
+let processLockHandle: ProcessLockHandle | null = null;
 
 /**
  * One tasklist call returning a Map<pid, processName>. Replaces the per-PID
@@ -73,8 +71,14 @@ async function getProcessNameMap(): Promise<Map<number, string>> {
   if (process.platform !== 'win32') return map;
   try {
     const proc = Bun.spawn(['tasklist', '/FO', 'CSV', '/NH'], { stdout: 'pipe', stderr: 'pipe' });
-    await proc.exited;
-    const out = await new Response(proc.stdout).text();
+    const result = await collectBoundedProcess(proc, {
+      timeoutMs: 3_000,
+      maxChars: 1024 * 1024,
+      label: 'Windows process inventory',
+      terminate: () => killProcessTree(proc),
+    });
+    if (result.timedOut || result.error || result.exitCode !== 0) return map;
+    const out = result.stdout;
     for (const line of out.split('\n')) {
       const m = line.match(/^"([^"]+)","(\d+)"/);
       if (!m) continue;
@@ -111,69 +115,60 @@ function isPidImmediateAncestor(targetPid: number): boolean {
 }
 
 async function acquireProcessLock(): Promise<void> {
-  const { readFileSync, writeFileSync, existsSync } = await import('fs');
-  let priorPid: number | null = null;
-  try {
-    if (existsSync(LOCK_FILE)) {
-      const raw = readFileSync(LOCK_FILE, 'utf8');
-      const parsed = JSON.parse(raw);
-      if (typeof parsed.pid === 'number' && parsed.pid !== process.pid) {
-        priorPid = parsed.pid;
-      }
-    }
-  } catch {
-    // Malformed lock file — overwrite below.
-  }
+  processLockHandle = await acquireProcessLockFile({
+    path: LOCK_FILE,
+    inspectExisting: async owner => {
+      const priorPid = owner.pid;
+      if (priorPid === process.pid) return { action: 'replace', reason: 'same-process legacy lock' };
 
-  if (priorPid !== null && process.platform === 'win32') {
-    // Single tasklist call covers both the "is it alive?" and "is it bun?"
-    // questions in one ~10ms shell-out instead of a 1-2s PowerShell spawn.
-    const nameMap = await getProcessNameMap();
-    const priorName = nameMap.get(priorPid);
-    const isAliveBun = priorName === 'bun';
-
-    if (isAliveBun) {
-      if (isPidImmediateAncestor(priorPid)) {
-        console.error(
-          `\nRefusing to start: agent-forge.lock is owned by our ancestor process (PID ${priorPid}).\n` +
-          `This usually means an agent (Claude/Codex) inside a running agent-forge tried to spawn its own \`bun run dev\`.\n` +
-          `Exiting so the parent server stays alive.\n`,
-        );
-        process.exit(1);
+      if (process.platform !== 'win32') {
+        if (processExists(priorPid)) {
+          return {
+            action: 'refuse',
+            reason: `Refusing to start: agent-forge.lock is owned by live PID ${priorPid}.`,
+          };
+        }
+        console.log(`Stale agent-forge.lock (PID ${priorPid} no longer running); overwriting.`);
+        return { action: 'replace' };
       }
-      console.log(`Another agent-forge bun.exe is running (PID ${priorPid}); killing it to free data.json + ports.`);
-      try {
-        const proc = Bun.spawn(['taskkill', '/F', '/T', '/PID', String(priorPid)], { stdout: 'pipe', stderr: 'pipe' });
-        await proc.exited;
-        // Brief pause so Windows finishes releasing file handles + sockets.
-        await new Promise(r => setTimeout(r, 500));
-      } catch (e) {
-        console.warn(`Failed to kill prior bun.exe ${priorPid}:`, e);
-      }
-    } else if (priorName) {
-      console.log(`Stale agent-forge.lock (PID ${priorPid} now running as '${priorName}', not bun); overwriting.`);
-    } else {
-      console.log(`Stale agent-forge.lock (PID ${priorPid} no longer running); overwriting.`);
-    }
-  }
 
-  try {
-    writeFileSync(LOCK_FILE, JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }, null, 2));
-  } catch (e) {
-    console.warn('Could not write agent-forge.lock:', e);
-  }
+      // One tasklist call covers both the "is it alive?" and "is it bun?"
+      // questions in one bounded native shell-out.
+      const nameMap = await getProcessNameMap();
+      const priorName = nameMap.get(priorPid);
+      if (priorName === 'bun') {
+        if (isPidImmediateAncestor(priorPid)) {
+          return {
+            action: 'refuse',
+            reason:
+              `Refusing to start: agent-forge.lock is owned by our ancestor process (PID ${priorPid}). ` +
+              'An agent inside a running Agent Forge may have tried to start another server.',
+          };
+        }
+        console.log(`Another agent-forge bun.exe is running (PID ${priorPid}); killing it to free data.json + ports.`);
+        const killed = await treeKill(priorPid);
+        if (!killed.succeeded) {
+          return {
+            action: 'refuse',
+            reason: `Could not confirm termination of prior Agent Forge PID ${priorPid}; refusing to share state.`,
+          };
+        }
+        await new Promise(resolve => setTimeout(resolve, 500));
+      } else if (priorName) {
+        console.log(`Stale agent-forge.lock (PID ${priorPid} now running as '${priorName}', not bun); overwriting.`);
+      } else {
+        console.log(`Stale agent-forge.lock (PID ${priorPid} no longer running); overwriting.`);
+      }
+      return { action: 'replace' };
+    },
+  });
 }
 
 async function releaseProcessLock(): Promise<void> {
-  try {
-    const { readFileSync, unlinkSync, existsSync } = await import('fs');
-    if (existsSync(LOCK_FILE)) {
-      const parsed = JSON.parse(readFileSync(LOCK_FILE, 'utf8'));
-      if (parsed.pid === process.pid) unlinkSync(LOCK_FILE);
-    }
-  } catch {
-    // Best-effort cleanup; never block shutdown for this.
-  }
+  if (!processLockHandle) return;
+  const handle = processLockHandle;
+  processLockHandle = null;
+  await releaseProcessLockFile(handle);
 }
 
 // --- Orphan-port cleanup -------------------------------------------------
@@ -201,8 +196,17 @@ async function killOrphanBunOnPortRange(preferredPort: number): Promise<void> {
     [netstatOut, nameMap] = await Promise.all([
       (async () => {
         const proc = Bun.spawn(['netstat', '-ano'], { stdout: 'pipe', stderr: 'pipe' });
-        await proc.exited;
-        return new Response(proc.stdout).text();
+        const result = await collectBoundedProcess(proc, {
+          timeoutMs: 5_000,
+          maxChars: 2 * 1024 * 1024,
+          retainOutput: 'head',
+          label: 'Windows port inventory',
+          terminate: () => killProcessTree(proc),
+        });
+        if (result.timedOut || result.error || result.exitCode !== 0) {
+          throw new Error(result.error || result.stderr || 'netstat failed');
+        }
+        return result.stdout;
       })(),
       getProcessNameMap(),
     ]);
@@ -247,8 +251,8 @@ async function killOrphanBunOnPortRange(preferredPort: number): Promise<void> {
   await Promise.all(
     safeToKill.map(async pid => {
       try {
-        const proc = Bun.spawn(['taskkill', '/F', '/T', '/PID', String(pid)], { stdout: 'pipe', stderr: 'pipe' });
-        await proc.exited;
+        const result = await treeKill(pid);
+        if (!result.succeeded) throw new Error(result.error || `taskkill exited with ${result.exitCode}`);
       } catch (e) {
         console.warn(`Orphan-port scan: taskkill PID ${pid} failed:`, e);
       }
@@ -271,21 +275,14 @@ async function init() {
       messages: data.messages,
       sharedContext: data.sharedContext,
     });
-    await workspaceService.loadAndMigrate(
-      data.workspaces,
-      data.settings,
-      data.agents.map(a => a.id),
-      agentService.setAgentWorkspace,
-    );
     usageService.load(data.usageEvents);
-    console.log(`Loaded ${data.agents.length} agents, ${data.messages.length} messages, ${documentService.getAll().length} documents, ${workspaceService.getAll().length} workspaces, ${(data.usageEvents ?? []).length} usage entries from disk`);
   }
 
-  // Wire up cross-service callbacks
-  initAgentService();
-
-  // Register the buildPersistedData collector
+  // Register the collector before any migration/recovery calls saveNow(). A
+  // save made without a collector is intentionally a no-op, which previously
+  // left recovered QA/Atlas states and the default workspace undurable.
   persistenceService.setBuildPersistedData((): PersistedData => ({
+    schemaVersion: PERSISTED_SCHEMA_VERSION,
     agents: agentService.buildPersistedAgents() as any,
     messages: agentService.buildPersistedMessages(),
     sharedContext: agentService.getSharedContext(),
@@ -294,6 +291,19 @@ async function init() {
     workspaces: workspaceService.getAll(),
     usageEvents: usageService.getEvents(),
   }));
+
+  if (data) {
+    await workspaceService.loadAndMigrate(
+      data.workspaces,
+      data.settings,
+      data.agents.map(a => a.id),
+      agentService.setAgentWorkspace,
+    );
+    console.log(`Loaded ${data.agents.length} agents, ${data.messages.length} messages, ${documentService.getAll().length} documents, ${workspaceService.getAll().length} workspaces, ${(data.usageEvents ?? []).length} usage entries from disk`);
+  }
+
+  // Wire up cross-service callbacks
+  initAgentService();
 
   usageService.startSync();
 }
@@ -433,7 +443,7 @@ function startServer(preferredPort: number) {
   throw lastErr;
 }
 
-const preferredPort = parseInt(process.env.PORT || '3333');
+const preferredPort = parseServerPort(process.env.PORT);
 await killOrphanBunOnPortRange(preferredPort);
 
 const server = startServer(preferredPort);
@@ -450,52 +460,49 @@ googleDocsService.setGuiPort(server.port ?? 0);
 limitsService.start();
 console.log(`Server running at http://localhost:${server.port}`);
 
-// --- Graceful shutdown ---
-// CRITICAL: persistenceService.save() is debounced 200ms. If the user types
-// a message and Ctrl+Cs within that window, process.exit kills the event
-// loop before the timer fires and the message is dropped from data.json.
-// The saveNow() race below flushes pending mutations BEFORE exit. Wrapped
-// in its own timeout so a hung disk write can't block shutdown forever —
-// losing pending data is bad, but a stuck shutdown that orphans the port
-// is also bad.
-let shuttingDown = false;
-async function shutdown() {
-  if (shuttingDown) return; // Second Ctrl+C while already shutting down — ignore.
-  shuttingDown = true;
-  console.log('\nShutting down...');
+// --- Graceful and fatal shutdown ---
+// All stages are exactly-once and bounded. PIDs are not blindly cleared:
+// each subsystem removes only confirmed exits, leaving any unconfirmed child
+// durable for next-start orphan recovery.
+export const shutdown = createShutdownCoordinator({
+  stopIntake() {
+    limitsService.stop();
+    usageService.stopSync();
+    server.stop(true);
+  },
+  async stopWork() {
+    const results = await Promise.allSettled([
+      agentService.shutdownAll(),
+      terminalService.killAll(),
+      browserService.close(),
+    ]);
+    const failures = results.filter(result => result.status === 'rejected');
+    if (failures.length > 0) throw new AggregateError(failures.map(result => (result as PromiseRejectedResult).reason), 'One or more cleanup operations failed');
+  },
+  async forceStopWork() {
+    await Promise.allSettled([
+      agentService.killAllProcesses(),
+      terminalService.killAll(),
+      browserService.close(),
+    ]);
+  },
+  persistData: () => persistenceService.saveNow(),
+  persistPids: () => persistenceService.savePidsNow(),
+  releaseLock: releaseProcessLock,
+  exit: code => process.exit(code),
+});
 
-  await Promise.race([
-    (async () => {
-      await agentService.shutdownAll();
-      await terminalService.killAll();
-      await browserService.close();
-    })(),
-    new Promise<void>(resolve => setTimeout(() => {
-      console.warn('Shutdown timeout — force killing all processes...');
-      agentService.killAllProcesses().catch(() => {});
-      resolve();
-    }, 5000)),
-  ]);
-
-  // Flush pending data.json writes BEFORE clearing PIDs / stopping the
-  // server. 2s timeout so a stuck save can't prevent shutdown.
-  await Promise.race([
-    persistenceService.saveNow().catch(e => console.error('Final saveNow failed:', e)),
-    new Promise<void>(resolve => setTimeout(() => {
-      console.warn('Final data save timed out after 2s — proceeding to exit.');
-      resolve();
-    }, 2000)),
-  ]);
-
-  persistenceService.clearAllPids();
-  await persistenceService.savePidsNow();
-  await releaseProcessLock();
-  server.stop(true);
-  process.exit(0);
-}
-process.on('SIGINT', shutdown);
-process.on('SIGTERM', shutdown);
+process.on('unhandledRejection', reason => {
+  console.error('Unhandled rejection; initiating fatal shutdown:', reason);
+  void shutdown({ exitCode: 1, reason: 'unhandled promise rejection', force: true });
+});
+process.on('uncaughtException', (error, origin) => {
+  console.error(`Uncaught exception (${origin}); initiating fatal shutdown:`, error);
+  void shutdown({ exitCode: 1, reason: `uncaught exception (${origin})`, force: true });
+});
+process.on('SIGINT', () => { void shutdown({ reason: 'SIGINT' }); });
+process.on('SIGTERM', () => { void shutdown({ reason: 'SIGTERM' }); });
 // SIGHUP fires on terminal close on Windows when the parent shell exits.
 // Same flush-then-die path so data isn't lost if you close the PowerShell
 // window instead of Ctrl+C-ing.
-process.on('SIGHUP', shutdown);
+process.on('SIGHUP', () => { void shutdown({ reason: 'SIGHUP' }); });
