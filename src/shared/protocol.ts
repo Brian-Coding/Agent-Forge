@@ -520,6 +520,8 @@ export interface ProviderLimitsSnapshot {
   contextUsedPercent: number | null;
   fiveHour: LimitsWindow;
   weekly: LimitsWindow;
+  /** Provider-specific weekly model allowance. Claude reports this under the legacy `seven_day_sonnet` key (currently Fable). */
+  modelWeekly: LimitsWindow;
   /** Human-readable description of where the data came from. */
   source: string;
   /** Error text or setup hint when status is unavailable/error. */

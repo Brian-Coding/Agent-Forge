@@ -5608,6 +5608,7 @@
         ),
         hasData && Number.isFinite(snap.fiveHour?.usedPercent) && e(LimitsMeter, { label: '5-Hour', window: snap.fiveHour }),
         hasData && Number.isFinite(snap.weekly?.usedPercent) && e(LimitsMeter, { label: '7-Day', window: snap.weekly }),
+        hasData && snap.provider === 'claude' && Number.isFinite(snap.modelWeekly?.usedPercent) && e(LimitsMeter, { label: 'Fable', window: snap.modelWeekly }),
         hasData && typeof snap.contextUsedPercent === 'number' && e('div', { className: 'limits-meta' },
           e('span', null, 'last session context: ' + Math.round(snap.contextUsedPercent) + '%')
         ),
@@ -5655,6 +5656,7 @@
         const windows = [
           { key: 'fiveHour', label: '5-Hour', data: snap.fiveHour },
           { key: 'weekly', label: '7-Day', data: snap.weekly },
+          ...(kind === 'claude' ? [{ key: 'modelWeekly', label: 'Fable', data: snap.modelWeekly }] : []),
         ].filter(item => Number.isFinite(item.data?.usedPercent));
         return windows.length ? { kind, snap, windows } : null;
       }).filter(Boolean);

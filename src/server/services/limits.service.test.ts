@@ -40,6 +40,8 @@ beforeAll(() => {
     five_hour_resets_at: '2026-07-10T02:00:00Z',
     seven_day_used_percentage: 18.6,
     seven_day_resets_at: 1784046280, // epoch seconds — parser must normalize
+    seven_day_sonnet_used_percentage: 49.2,
+    seven_day_sonnet_resets_at: '2026-07-12T02:00:00Z',
   }));
   process.env.AI_HARNESS_CLAUDE_LIMITS_JSON = claudeFixturePath;
 
@@ -110,6 +112,7 @@ test('mapClaudeUsageResponse maps the /api/oauth/usage shape', () => {
   const snap = mapClaudeUsageResponse({
     five_hour: { utilization: 38, resets_at: '2026-07-10T04:50:00.000Z' },
     seven_day: { utilization: 16, resets_at: '2026-07-12T02:00:00.000Z' },
+    seven_day_sonnet: { utilization: 49, resets_at: '2026-07-12T02:00:00.000Z' },
   }, 'max');
   expect(snap.status).toBe('available');
   expect(snap.planType).toBe('max');
@@ -118,6 +121,8 @@ test('mapClaudeUsageResponse maps the /api/oauth/usage shape', () => {
   expect(snap.fiveHour.resetsAt).toBe(Date.parse('2026-07-10T04:50:00.000Z'));
   expect(snap.weekly.usedPercent).toBe(16);
   expect(snap.weekly.resetsAt).toBe(Date.parse('2026-07-12T02:00:00.000Z'));
+  expect(snap.modelWeekly.usedPercent).toBe(49);
+  expect(snap.modelWeekly.resetsAt).toBe(Date.parse('2026-07-12T02:00:00.000Z'));
 });
 
 test('mapClaudeUsageResponse tolerates missing windows', () => {
@@ -125,6 +130,40 @@ test('mapClaudeUsageResponse tolerates missing windows', () => {
   expect(snap.status).toBe('available');
   expect(snap.fiveHour.usedPercent).toBeNull();
   expect(snap.weekly.usedPercent).toBeNull();
+  expect(snap.modelWeekly.usedPercent).toBeNull();
+});
+
+test('Claude statusline bridge preserves the model-specific Fable weekly window', async () => {
+  const outputPath = join(dir, 'statusline-fable-limits.json');
+  const scriptPath = join(import.meta.dir, '../../../scripts/claude-limits-statusline.ts');
+  const proc = Bun.spawn([process.execPath, scriptPath], {
+    env: { ...process.env, AI_HARNESS_CLAUDE_LIMITS_JSON: outputPath },
+    stdin: 'pipe',
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  proc.stdin.write(JSON.stringify({
+    model: { display_name: 'Fable 5' },
+    rate_limits: {
+      five_hour: { used_percentage: 1, resets_at: '2026-08-14T01:00:00Z' },
+      seven_day: { used_percentage: 28, resets_at: '2026-08-16T02:00:00Z' },
+      seven_day_sonnet: { used_percentage: 49, resets_at: '2026-08-16T02:00:00Z' },
+    },
+  }));
+  proc.stdin.end();
+
+  const [exitCode, stdout, stderr] = await Promise.all([
+    proc.exited,
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ]);
+  expect(exitCode).toBe(0);
+  expect(stderr).toBe('');
+  expect(stdout).toContain('Fable 7d 49%');
+
+  const written = await Bun.file(outputPath).json();
+  expect(written.seven_day_sonnet_used_percentage).toBe(49);
+  expect(written.seven_day_sonnet_resets_at).toBe('2026-08-16T02:00:00Z');
 });
 
 test('limits refresh cadence is one minute', () => {
@@ -135,6 +174,7 @@ test('transient provider errors retain the last successful usage snapshot', () =
   const previous = mapClaudeUsageResponse({
     five_hour: { utilization: 44, resets_at: '2026-08-11T20:00:00Z' },
     seven_day: { utilization: 19, resets_at: '2026-08-17T20:00:00Z' },
+    seven_day_sonnet: { utilization: 51, resets_at: '2026-08-17T20:00:00Z' },
   }, 'max');
   const failed = {
     ...previous,
@@ -149,6 +189,7 @@ test('transient provider errors retain the last successful usage snapshot', () =
   expect(merged.status).toBe('stale');
   expect(merged.fiveHour.usedPercent).toBe(44);
   expect(merged.weekly.usedPercent).toBe(19);
+  expect(merged.modelWeekly.usedPercent).toBe(51);
   expect(merged.detail).toContain('HTTP 429');
 });
 
@@ -233,9 +274,11 @@ test('limits refresh parses Claude bridge file and Codex rollout events', async 
   expect(claude.model).toBe('Fable 5');
   expect(claude.fiveHour.usedPercent).toBeCloseTo(41.2, 1);
   expect(claude.weekly.usedPercent).toBeCloseTo(18.6, 1);
+  expect(claude.modelWeekly.usedPercent).toBeCloseTo(49.2, 1);
   // ISO string and epoch-seconds forms both normalize to epoch ms
   expect(claude.fiveHour.resetsAt).toBe(Date.parse('2026-07-10T02:00:00Z'));
   expect(claude.weekly.resetsAt).toBe(1784046280 * 1000);
+  expect(claude.modelWeekly.resetsAt).toBe(Date.parse('2026-07-12T02:00:00Z'));
   expect(claude.contextUsedPercent).toBe(32);
 
   const codex = snapshot.providers.codex;

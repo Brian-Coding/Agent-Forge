@@ -5,7 +5,9 @@
  * `GET https://api.anthropic.com/api/oauth/usage`, authenticated with the
  * access token Claude Code already stores in `~/.claude/.credentials.json`
  * (kept fresh by every Claude turn the app runs). It's a free GET (no
- * inference cost) and returns five_hour / seven_day utilization + reset times.
+ * inference cost) and returns five_hour / seven_day utilization + reset times,
+ * plus Claude's model-specific weekly window (`seven_day_sonnet`, currently
+ * presented as Fable in Claude's usage UI).
  * This works fully headlessly — no interactive statusLine session required.
  * The old statusLine JSON bridge (scripts/claude-limits-statusline.ts →
  * `~/.claude/claude-code-limits.json`) remains as a fallback for when the
@@ -81,6 +83,7 @@ function baseSnapshot(provider: 'claude' | 'codex', source: string): ProviderLim
     contextUsedPercent: null,
     fiveHour: emptyWindow(),
     weekly: emptyWindow(),
+    modelWeekly: emptyWindow(),
     source,
     detail: null,
   };
@@ -114,6 +117,9 @@ function applyFreshness(snap: ProviderLimitsSnapshot): void {
 function hasLimitData(snapshot: ProviderLimitsSnapshot): boolean {
   return snapshot.fiveHour.usedPercent !== null
     || snapshot.weekly.usedPercent !== null
+    // Optional chaining keeps an older HMR-cached snapshot safe across this
+    // protocol addition until the next successful provider refresh.
+    || typeof snapshot.modelWeekly?.usedPercent === 'number'
     || snapshot.contextUsedPercent !== null;
 }
 
@@ -210,6 +216,9 @@ async function readClaudeOAuth(): Promise<{ token: string; subscriptionType: str
  */
 export function mapClaudeUsageResponse(data: any, subscriptionType: string | null): ProviderLimitsSnapshot {
   const snap = baseSnapshot('claude', `oauth usage → ${CLAUDE_USAGE_URL}`);
+  // Anthropic's wire name predates the Fable product name. Claude's own client
+  // still reads `seven_day_sonnet` for the model-specific weekly allowance.
+  const modelWeekly = data?.seven_day_sonnet;
   snap.updatedAt = Date.now();
   snap.planType = subscriptionType;
   snap.fiveHour = {
@@ -220,6 +229,11 @@ export function mapClaudeUsageResponse(data: any, subscriptionType: string | nul
   snap.weekly = {
     usedPercent: toPercent(data?.seven_day?.utilization),
     resetsAt: toEpochMs(data?.seven_day?.resets_at),
+    windowMinutes: 10080,
+  };
+  snap.modelWeekly = {
+    usedPercent: toPercent(modelWeekly?.utilization),
+    resetsAt: toEpochMs(modelWeekly?.resets_at),
     windowMinutes: 10080,
   };
   snap.status = 'available';
@@ -299,6 +313,11 @@ async function readClaudeLimitsFromBridge(): Promise<ProviderLimitsSnapshot> {
     snap.weekly = {
       usedPercent: toPercent(data.seven_day_used_percentage),
       resetsAt: toEpochMs(data.seven_day_resets_at),
+      windowMinutes: 10080,
+    };
+    snap.modelWeekly = {
+      usedPercent: toPercent(data.seven_day_sonnet_used_percentage),
+      resetsAt: toEpochMs(data.seven_day_sonnet_resets_at),
       windowMinutes: 10080,
     };
     snap.status = 'available';

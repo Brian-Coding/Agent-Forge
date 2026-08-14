@@ -102,6 +102,12 @@ test('long elapsed durations roll up into days, hours, minutes, and seconds', ()
   expect(formatElapsedDuration((3_724 * 60) + 28)).toBe('2d 14h 4m 28s');
 });
 
+test('Claude model-specific weekly usage renders as Fable in both limits surfaces', () => {
+  expect(clientSource).toContain("snap.provider === 'claude' && Number.isFinite(snap.modelWeekly?.usedPercent)");
+  expect(clientSource).toContain("e(LimitsMeter, { label: 'Fable', window: snap.modelWeekly })");
+  expect(clientSource).toContain("{ key: 'modelWeekly', label: 'Fable', data: snap.modelWeekly }");
+});
+
 test('the browser application inline script remains syntactically valid', () => {
   const start = clientSource.lastIndexOf('<script>');
   const end = clientSource.lastIndexOf('</script>');
