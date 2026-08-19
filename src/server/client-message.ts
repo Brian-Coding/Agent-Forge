@@ -68,6 +68,16 @@ function optionalStringArray(value: unknown, field: string, maxItems: number, ma
   if (value !== undefined) stringArray(value, field, maxItems, maxChars);
 }
 
+function optionalSlotIdArray(value: unknown, field: string, maxItems: number): void {
+  if (value === undefined) return;
+  if (!Array.isArray(value)) fail(`${field} must be an array`);
+  if (value.length > maxItems) fail(`${field} exceeds ${maxItems} items`);
+  value.forEach((item, index) => {
+    if (item === '') return;
+    string(item, `${field}[${index}]`, MAX_ID_CHARS, true);
+  });
+}
+
 function id(value: unknown, field: string): void {
   string(value, field, MAX_ID_CHARS, true);
 }
@@ -97,7 +107,7 @@ function validateSettings(value: unknown): void {
   if (settings.sidebarWidth !== undefined) integer(settings.sidebarWidth, 'settings.sidebarWidth', 100, 2_000);
   if (settings.gridColumns !== undefined) integer(settings.gridColumns, 'settings.gridColumns', 1, 12);
   if (settings.gridRows !== undefined) integer(settings.gridRows, 'settings.gridRows', 1, 12);
-  optionalStringArray(settings.selectedAgentIds, 'settings.selectedAgentIds', MAX_ID_LIST);
+  optionalSlotIdArray(settings.selectedAgentIds, 'settings.selectedAgentIds', MAX_ID_LIST);
 }
 
 function validateInlineImage(value: unknown, field: string): void {
@@ -244,7 +254,7 @@ export function validateClientMessage(value: unknown): ClientMessage {
       optionalString(message.name, 'name', MAX_NAME_CHARS);
       if (message.gridColumns !== undefined) integer(message.gridColumns, 'gridColumns', 1, 12);
       if (message.gridRows !== undefined) integer(message.gridRows, 'gridRows', 1, 12);
-      optionalStringArray(message.selectedAgentIds, 'selectedAgentIds', MAX_ID_LIST);
+      optionalSlotIdArray(message.selectedAgentIds, 'selectedAgentIds', MAX_ID_LIST);
       optionalStringArray(message.lockedAgentIds, 'lockedAgentIds', MAX_ID_LIST);
       optionalString(message.testUrl, 'testUrl', 8_192);
       if (message.googleDocsTrackerEnabled !== undefined) boolean(message.googleDocsTrackerEnabled, 'googleDocsTrackerEnabled');

@@ -220,6 +220,80 @@ test('a clean stale session retries once with no duplicate user turn or partial 
   expect(agentService.getAgent(id)?.lastTurnOutcome?.status).toBe('completed');
 });
 
+// An expired OAuth token is recoverable the same way a stale session is, with
+// one difference: the conversation is intact, so the retry must keep the
+// session id rather than starting fresh.
+test('an expired OAuth token retries once on the same session', async () => {
+  const id = loadAgent({ sessionId: 'live-session' });
+  const sessionIds: Array<string | null> = [];
+  registerTestAdapter((_prompt, ctx, attempt) => ({
+    async run() {
+      sessionIds.push(ctx.getSessionId());
+      if (attempt === 1) {
+        ctx.emitAgentEvent({ type: 'text-delta', text: 'discarded auth-failure fragment' });
+        return { recoverableError: 'expired-auth' as const, errorMessage: 'OAuth access token has expired' };
+      }
+      ctx.emitAgentEvent({ type: 'result', text: 'Retried on the refreshed token.', checkpoint: true });
+    },
+    stop() {},
+    kill() {},
+  }));
+
+  await chatService.sendMessage(id, 'Survive a token rotation.');
+
+  expect(sessionIds).toEqual(['live-session', 'live-session']);
+  expect(agentMessages(id).filter(message => message.role === 'user')).toHaveLength(1);
+  expect(agentMessages(id).filter(message => message.role === 'assistant').map(message => message.content))
+    .toEqual(['Retried on the refreshed token.']);
+  expect(agentService.getAgent(id)?.lastTurnOutcome?.status).toBe('completed');
+});
+
+test('an expired OAuth token that survives the retry surfaces an actionable failure', async () => {
+  const id = loadAgent({ sessionId: 'live-session' });
+  let attempts = 0;
+  registerTestAdapter(() => ({
+    async run() {
+      attempts++;
+      return { recoverableError: 'expired-auth' as const, errorMessage: 'OAuth access token has expired' };
+    },
+    stop() {},
+    kill() {},
+  }));
+
+  await chatService.sendMessage(id, 'Token is really gone.');
+
+  expect(attempts).toBe(2);
+  const systemMessages = agentMessages(id).filter(message => message.role === 'system').map(message => message.content);
+  expect(systemMessages.some(message => message.includes('retried once and it failed again'))).toBe(true);
+  expect(agentService.getAgent(id)?.lastTurnOutcome?.status).toBe('failed');
+});
+
+test('expired-auth recovery does not retry after a tool call could have mutated external state', async () => {
+  const id = loadAgent({ sessionId: 'live-session' });
+  let attempts = 0;
+  registerTestAdapter((_prompt, ctx) => ({
+    async run() {
+      attempts++;
+      ctx.emitAgentEvent({
+        type: 'tool-call-start',
+        toolCallId: 'mutation-1',
+        toolName: 'external_mutation',
+        input: { target: 'record-1' },
+      });
+      return { recoverableError: 'expired-auth' as const, errorMessage: 'OAuth access token has expired' };
+    },
+    stop() {},
+    kill() {},
+  }));
+
+  await chatService.sendMessage(id, 'Do not duplicate this action.');
+
+  expect(attempts).toBe(1);
+  expect(agentMessages(id).filter(message => message.role === 'system').map(message => message.content))
+    .toContain('Codex login expired mid-turn (OAuth access token has expired). This turn had already done work, so it was not retried automatically. Run any Claude turn (or `claude auth status`) to refresh the token, then resend.');
+  expect(agentService.getAgent(id)?.lastTurnOutcome?.status).toBe('failed');
+});
+
 test('stale-session recovery does not retry after a tool call could have mutated external state', async () => {
   const id = loadAgent({ sessionId: 'stale-session' });
   let attempts = 0;

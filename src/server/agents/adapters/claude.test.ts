@@ -3,6 +3,8 @@ import type { AgentEvent } from '../events';
 import type { AgentRunContext } from '../types';
 import {
   createClaudeRunState,
+  eventReportsExpiredAuth,
+  isClaudeExpiredAuthText,
   normalizeClaudeEvent,
   resolveClaudeLaunchCommand,
   selectClaudeServingModel,
@@ -140,4 +142,56 @@ test('a real assistant response claims the pending Claude session exactly once',
   expect(events.filter(event => event.type === 'session')).toEqual([
     { type: 'session', providerSessionId: 'real-session' },
   ]);
+});
+
+// Expired-OAuth detection. The CLI reports a dead access token as an assistant
+// text block on stdout and exits 1 with an empty stderr, so this text is the
+// only evidence that the turn is retryable rather than genuinely broken.
+
+test('isClaudeExpiredAuthText matches the CLI expired-token report', () => {
+  expect(isClaudeExpiredAuthText(
+    'Failed to authenticate. API Error: 401 OAuth access token has expired. Re-authenticate to continue.',
+  )).toBe(true);
+  expect(isClaudeExpiredAuthText('API Error: 401 {"type":"error"} — please re-authenticate')).toBe(true);
+});
+
+test('isClaudeExpiredAuthText ignores unrelated failures', () => {
+  expect(isClaudeExpiredAuthText('')).toBe(false);
+  expect(isClaudeExpiredAuthText(null)).toBe(false);
+  expect(isClaudeExpiredAuthText('API Error: 429 rate limit exceeded')).toBe(false);
+  expect(isClaudeExpiredAuthText('No conversation found with session ID abc')).toBe(false);
+  // A 401 that is not an expiry still needs a real login, not a silent retry.
+  expect(isClaudeExpiredAuthText('API Error: 401 invalid api key')).toBe(false);
+});
+
+test('eventReportsExpiredAuth finds the report in an assistant text block', () => {
+  expect(eventReportsExpiredAuth({
+    type: 'assistant',
+    message: {
+      content: [
+        { type: 'text', text: 'Failed to authenticate. API Error: 401 OAuth access token has expired.' },
+      ],
+    },
+  })).toBe(true);
+});
+
+test('eventReportsExpiredAuth finds the report on result and error events', () => {
+  expect(eventReportsExpiredAuth({
+    type: 'result',
+    is_error: true,
+    result: '401 OAuth access token has expired. Re-authenticate to continue.',
+  })).toBe(true);
+  expect(eventReportsExpiredAuth({
+    type: 'error',
+    message: 'OAuth access token has expired',
+  })).toBe(true);
+});
+
+test('eventReportsExpiredAuth ignores ordinary traffic', () => {
+  expect(eventReportsExpiredAuth(null)).toBe(false);
+  expect(eventReportsExpiredAuth({ type: 'system', subtype: 'init', session_id: 'abc' })).toBe(false);
+  expect(eventReportsExpiredAuth({
+    type: 'assistant',
+    message: { content: [{ type: 'text', text: 'Done — the token bucket refills hourly.' }] },
+  })).toBe(false);
 });

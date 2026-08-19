@@ -649,6 +649,7 @@ async function runChatTurn(agentId: string, content: string, source?: 'qa', opti
 
   try {
     let didStaleSessionRetry = false;
+    let didExpiredAuthRetry = false;
     while (true) {
       // 7) Create handle, register, and run. Long-lived goal processes are
       //    unlimited unless the operator explicitly configured an inactivity
@@ -715,6 +716,36 @@ async function runChatTurn(agentId: string, content: string, source?: 'qa', opti
         );
         turn.lastErrorMessage = recoveryError;
         turn.persistedSystemMessages.add(recoveryMessage);
+        broadcast({ type: 'message', message: sysMsg });
+      }
+
+      // The CLI's OAuth access token expired as this turn spawned. It refreshes
+      // the token in place, so one immediate re-spawn normally succeeds. Unlike
+      // a stale session the conversation is intact — keep the session id and the
+      // prompt, and only reset the buffers holding the failed attempt's output.
+      if (result?.recoverableError === 'expired-auth' && !didExpiredAuthRetry && turn.retrySafe) {
+        didExpiredAuthRetry = true;
+        console.warn(`[chat] expired ${provider} OAuth token for ${agentId}; retrying once with the refreshed token`);
+        turn.accumulatedText = '';
+        turn.lastResultEmitted = null;
+        turn.lastAssistantSnapshot = null;
+        turn.lastErrorMessage = null;
+        turn.liveTurnId = liveTurnStateService.begin(agentId, provider).turnId;
+        broadcastLiveTurnState(agentId, true);
+        continue;
+      }
+      if (result?.recoverableError === 'expired-auth') {
+        const authError = result.errorMessage || 'OAuth access token has expired';
+        const authMessage = [
+          `${provider === 'codex' ? 'Codex' : 'Claude'} login expired mid-turn (${authError}).`,
+          didExpiredAuthRetry
+            ? 'Agent Forge retried once and it failed again.'
+            : 'This turn had already done work, so it was not retried automatically.',
+          'Run any Claude turn (or `claude auth status`) to refresh the token, then resend.',
+        ].join(' ');
+        const sysMsg = agentService.addSystemMessage(agentId, authMessage);
+        turn.lastErrorMessage = authError;
+        turn.persistedSystemMessages.add(authMessage);
         broadcast({ type: 'message', message: sysMsg });
       }
       break;

@@ -37,7 +37,13 @@ export interface AgentHandle {
 
 export interface AgentRunResult {
   lastAssistantMessage?: string;
-  recoverableError?: 'stale-session';
+  /**
+   * A failure the bridge can retry once instead of burning the turn:
+   *  - 'stale-session': the saved session id no longer exists → retry fresh.
+   *  - 'expired-auth':  the CLI's OAuth access token expired mid-spawn → retry
+   *    once, by which point the CLI has rewritten the refreshed token.
+   */
+  recoverableError?: 'stale-session' | 'expired-auth';
   errorMessage?: string;
 }
 

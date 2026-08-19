@@ -11,6 +11,7 @@ import {
   mergeProviderLimits,
   parseRetryAfter,
   readJsonLineResponse,
+  selectClaudeModelWeekly,
 } from './limits.service';
 
 // Parser regression net for the Limits tab: feeds a synthetic Claude bridge
@@ -131,6 +132,55 @@ test('mapClaudeUsageResponse tolerates missing windows', () => {
   expect(snap.fiveHour.usedPercent).toBeNull();
   expect(snap.weekly.usedPercent).toBeNull();
   expect(snap.modelWeekly.usedPercent).toBeNull();
+});
+
+// Anthropic retired the flat `seven_day_sonnet` key: live responses now send it
+// as null and carry the Fable weekly window as a scoped entry in `limits[]`.
+// Reading only the old key silently blanked the Fable meter.
+test('mapClaudeUsageResponse reads the Fable weekly window from the scoped limits array', () => {
+  const snap = mapClaudeUsageResponse({
+    five_hour: { utilization: 7, resets_at: '2026-08-18T04:10:00.000Z' },
+    seven_day: { utilization: 33, resets_at: '2026-08-23T02:00:00.000Z' },
+    seven_day_sonnet: null,
+    limits: [
+      { kind: 'session', group: 'session', percent: 7, resets_at: '2026-08-18T04:10:00.000Z', scope: null },
+      { kind: 'weekly_all', group: 'weekly', percent: 33, resets_at: '2026-08-23T02:00:00.000Z', scope: null },
+      {
+        kind: 'weekly_scoped',
+        group: 'weekly',
+        percent: 65,
+        resets_at: '2026-08-23T02:00:00.000Z',
+        scope: { model: { id: null, display_name: 'Fable' }, surface: null },
+        is_active: true,
+      },
+    ],
+  }, 'max');
+  expect(snap.modelWeekly.usedPercent).toBe(65);
+  expect(snap.modelWeekly.resetsAt).toBe(Date.parse('2026-08-23T02:00:00.000Z'));
+  expect(snap.modelWeekly.windowMinutes).toBe(10080);
+  // The unscoped weekly entry must not be mistaken for the model window.
+  expect(snap.weekly.usedPercent).toBe(33);
+});
+
+test('selectClaudeModelWeekly prefers the scoped entry and falls back to the legacy key', () => {
+  expect(selectClaudeModelWeekly({
+    seven_day_sonnet: { utilization: 49, resets_at: '2026-07-12T02:00:00.000Z' },
+    limits: [{ kind: 'weekly_scoped', group: 'weekly', percent: 65, resets_at: '2026-08-23T02:00:00.000Z' }],
+  }).usedPercent).toBe(65);
+
+  // Payload predating the limits array.
+  expect(selectClaudeModelWeekly({
+    seven_day_sonnet: { utilization: 49, resets_at: '2026-07-12T02:00:00.000Z' },
+  })).toEqual({ usedPercent: 49, resetsAt: Date.parse('2026-07-12T02:00:00.000Z') });
+
+  // Array present but carrying no scoped weekly window.
+  expect(selectClaudeModelWeekly({
+    seven_day_sonnet: null,
+    limits: [{ kind: 'weekly_all', group: 'weekly', percent: 33, scope: null }],
+  })).toEqual({ usedPercent: null, resetsAt: null });
+
+  expect(selectClaudeModelWeekly({}).usedPercent).toBeNull();
+  expect(selectClaudeModelWeekly(null).usedPercent).toBeNull();
 });
 
 test('Claude statusline bridge preserves the model-specific Fable weekly window', async () => {
@@ -298,4 +348,47 @@ test('limits refresh reports unavailable sources without throwing', async () => 
   expect(snapshot.providers.claude.status).toBe('unavailable');
   expect(snapshot.providers.codex.status).toBe('unavailable');
   expect(snapshot.providers.claude.detail).toContain('statusLine');
+});
+
+test('Claude statusline bridge reads the Fable weekly window from a scoped limits array', async () => {
+  const outputPath = join(dir, 'statusline-fable-scoped-limits.json');
+  const scriptPath = join(import.meta.dir, '../../../scripts/claude-limits-statusline.ts');
+  const proc = Bun.spawn([process.execPath, scriptPath], {
+    env: { ...process.env, AI_HARNESS_CLAUDE_LIMITS_JSON: outputPath },
+    stdin: 'pipe',
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  proc.stdin.write(JSON.stringify({
+    model: { display_name: 'Fable 5' },
+    rate_limits: {
+      five_hour: { used_percentage: 7, resets_at: '2026-08-18T04:10:00Z' },
+      seven_day: { used_percentage: 33, resets_at: '2026-08-23T02:00:00Z' },
+      seven_day_sonnet: null,
+      limits: [
+        { kind: 'weekly_all', group: 'weekly', percent: 33, resets_at: '2026-08-23T02:00:00Z', scope: null },
+        {
+          kind: 'weekly_scoped',
+          group: 'weekly',
+          percent: 65,
+          resets_at: '2026-08-23T02:00:00Z',
+          scope: { model: { id: null, display_name: 'Fable' } },
+        },
+      ],
+    },
+  }));
+  proc.stdin.end();
+
+  const [exitCode, stdout, stderr] = await Promise.all([
+    proc.exited,
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ]);
+  expect(exitCode).toBe(0);
+  expect(stderr).toBe('');
+  expect(stdout).toContain('Fable 7d 65%');
+
+  const written = await Bun.file(outputPath).json();
+  expect(written.seven_day_sonnet_used_percentage).toBe(65);
+  expect(written.seven_day_sonnet_resets_at).toBe('2026-08-23T02:00:00Z');
 });

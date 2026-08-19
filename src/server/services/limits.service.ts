@@ -6,8 +6,8 @@
  * access token Claude Code already stores in `~/.claude/.credentials.json`
  * (kept fresh by every Claude turn the app runs). It's a free GET (no
  * inference cost) and returns five_hour / seven_day utilization + reset times,
- * plus Claude's model-specific weekly window (`seven_day_sonnet`, currently
- * presented as Fable in Claude's usage UI).
+ * plus Claude's model-specific weekly window (presented as Fable in Claude's
+ * usage UI — see selectClaudeModelWeekly for where that figure now lives).
  * This works fully headlessly — no interactive statusLine session required.
  * The old statusLine JSON bridge (scripts/claude-limits-statusline.ts →
  * `~/.claude/claude-code-limits.json`) remains as a fallback for when the
@@ -29,7 +29,14 @@ import type { LimitsSnapshot, LimitsWindow, ProviderLimitsSnapshot } from '../..
 import { broadcast } from '../broadcast';
 import { resolveCodexLaunchCommand } from '../agents/adapters/codex';
 import { drainStreamToString } from '../agents/stream-utils';
-import { createCliEnv, killProcessTree, resolveCliBinary, safeSpawn } from '../utils';
+import {
+  claudeCredentialsPath,
+  createCliEnv,
+  killProcessTree,
+  readClaudeCredentialState,
+  resolveCliBinary,
+  safeSpawn,
+} from '../utils';
 import { fetchWithTimeout } from './external-io';
 
 export const LIMITS_REFRESH_INTERVAL_MS = 60 * 1000;
@@ -188,26 +195,44 @@ export function mapCodexRateLimitWindows(rateLimits: any): Pick<ProviderLimitsSn
 
 const CLAUDE_USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
 
-export function claudeCredentialsPath(): string {
-  return process.env.AI_HARNESS_CLAUDE_CREDENTIALS_JSON || join(homedir(), '.claude', '.credentials.json');
-}
+export { claudeCredentialsPath };
 
 export function claudeLimitsFilePath(): string {
   return process.env.AI_HARNESS_CLAUDE_LIMITS_JSON || join(homedir(), '.claude', 'claude-code-limits.json');
 }
 
 async function readClaudeOAuth(): Promise<{ token: string; subscriptionType: string | null } | null> {
-  try {
-    const file = Bun.file(claudeCredentialsPath());
-    if (!(await file.exists())) return null;
-    const data = JSON.parse(await file.text());
-    const oa = data?.claudeAiOauth ?? data?.oauth ?? {};
-    const token = oa.accessToken ?? oa.access_token;
-    if (typeof token !== 'string' || !token) return null;
-    return { token, subscriptionType: typeof oa.subscriptionType === 'string' ? oa.subscriptionType : null };
-  } catch {
-    return null;
+  const creds = await readClaudeCredentialState();
+  if (!creds?.accessToken) return null;
+  return { token: creds.accessToken, subscriptionType: creds.subscriptionType };
+}
+
+/**
+ * Claude's model-scoped weekly allowance — the window presented as "Fable" in
+ * Claude's usage UI.
+ *
+ * Anthropic retired the flat `seven_day_sonnet` key: as of 2026-08 it is
+ * always null on live responses and the figure moved into the `limits[]`
+ * array as a `weekly_scoped` entry that names the model it applies to:
+ *
+ *   {"kind":"weekly_scoped","group":"weekly","percent":65,
+ *    "scope":{"model":{"id":null,"display_name":"Fable"}},
+ *    "resets_at":"2026-08-23T02:00:00Z"}
+ *
+ * Read the array first and keep the legacy key as a fallback, so an older
+ * payload (or the statusline bridge's older shape) still maps.
+ */
+export function selectClaudeModelWeekly(data: any): { usedPercent: number | null; resetsAt: number | null } {
+  const entries: any[] = Array.isArray(data?.limits) ? data.limits : [];
+  const scoped = entries.find(entry =>
+    entry && typeof entry === 'object'
+    && (entry.kind === 'weekly_scoped' || (entry.group === 'weekly' && entry.scope?.model))
+    && toPercent(entry.percent) !== null);
+  if (scoped) {
+    return { usedPercent: toPercent(scoped.percent), resetsAt: toEpochMs(scoped.resets_at) };
   }
+  const legacy = data?.seven_day_sonnet;
+  return { usedPercent: toPercent(legacy?.utilization), resetsAt: toEpochMs(legacy?.resets_at) };
 }
 
 /**
@@ -216,9 +241,7 @@ async function readClaudeOAuth(): Promise<{ token: string; subscriptionType: str
  */
 export function mapClaudeUsageResponse(data: any, subscriptionType: string | null): ProviderLimitsSnapshot {
   const snap = baseSnapshot('claude', `oauth usage → ${CLAUDE_USAGE_URL}`);
-  // Anthropic's wire name predates the Fable product name. Claude's own client
-  // still reads `seven_day_sonnet` for the model-specific weekly allowance.
-  const modelWeekly = data?.seven_day_sonnet;
+  const modelWeekly = selectClaudeModelWeekly(data);
   snap.updatedAt = Date.now();
   snap.planType = subscriptionType;
   snap.fiveHour = {
@@ -232,8 +255,8 @@ export function mapClaudeUsageResponse(data: any, subscriptionType: string | nul
     windowMinutes: 10080,
   };
   snap.modelWeekly = {
-    usedPercent: toPercent(modelWeekly?.utilization),
-    resetsAt: toEpochMs(modelWeekly?.resets_at),
+    usedPercent: modelWeekly.usedPercent,
+    resetsAt: modelWeekly.resetsAt,
     windowMinutes: 10080,
   };
   snap.status = 'available';

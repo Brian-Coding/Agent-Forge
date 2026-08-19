@@ -20,13 +20,13 @@ const validMessages: ClientMessage[] = [
   { type: 'list_agents' },
   { type: 'get_history', agentId: 'a1' },
   { type: 'get_settings' },
-  { type: 'update_settings', settings: { activeWorkspaceId: 'w1', sidebarWidth: 240, gridColumns: 3, gridRows: 2, selectedAgentIds: ['a1'] } },
+  { type: 'update_settings', settings: { activeWorkspaceId: 'w1', sidebarWidth: 240, gridColumns: 3, gridRows: 2, selectedAgentIds: ['a1', '', ''] } },
   { type: 'send_image', agentId: 'a1', imageData: 'AAAA', mimeType: 'image/png', prompt: '' },
   { type: 'send_images', agentId: 'a1', images: [{ imageData: 'AAAA', mimeType: 'image/png' }] },
   { type: 'send_uploaded_images', agentId: 'a1', images: [{ path: 'C:\\images\\a.png', name: 'a.png', mimeType: 'image/png', size: 4 }] },
   { type: 'get_workspaces' },
   { type: 'create_workspace', name: 'Workspace' },
-  { type: 'update_workspace', id: 'w1', name: '', gridColumns: 4, gridRows: 3, selectedAgentIds: ['a1'], lockedAgentIds: [], testUrl: '', googleDocsTrackerEnabled: false },
+  { type: 'update_workspace', id: 'w1', name: '', gridColumns: 4, gridRows: 3, selectedAgentIds: ['a1', '', ''], lockedAgentIds: [], testUrl: '', googleDocsTrackerEnabled: false },
   { type: 'reorder_workspaces', orderedIds: ['w1'] },
   { type: 'delete_workspace', id: 'w1' },
   { type: 'set_active_workspace', id: 'w1' },
@@ -86,6 +86,28 @@ test('malformed types, required fields, enums, ranges, and image arrays are reje
   for (const value of invalid) {
     expect(() => validateClientMessage(value)).toThrow(ClientMessageValidationError);
   }
+});
+
+test('selected agent grids accept empty slots without weakening other ID arrays', () => {
+  expect(() => validateClientMessage({
+    type: 'update_workspace',
+    id: 'w1',
+    selectedAgentIds: ['a1', '', 'a2', ''],
+  })).not.toThrow();
+  expect(() => validateClientMessage({
+    type: 'update_settings',
+    settings: { selectedAgentIds: ['', 'a1'] },
+  })).not.toThrow();
+  expect(() => validateClientMessage({
+    type: 'update_workspace',
+    id: 'w1',
+    selectedAgentIds: ['a1', '   '],
+  })).toThrow('selectedAgentIds[1] cannot be empty');
+  expect(() => validateClientMessage({
+    type: 'update_workspace',
+    id: 'w1',
+    lockedAgentIds: [''],
+  })).toThrow('lockedAgentIds[0] cannot be empty');
 });
 
 test('wire decoder rejects oversized, invalid JSON, and invalid UTF-8 payloads', () => {

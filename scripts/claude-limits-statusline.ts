@@ -31,9 +31,18 @@ try {
 const rate = data?.rate_limits ?? {};
 const five = rate?.five_hour ?? {};
 const week = rate?.seven_day ?? {};
-// Claude retains the historical `seven_day_sonnet` wire key for the
-// model-specific weekly allowance now presented as Fable in the usage UI.
-const modelWeek = rate?.seven_day_sonnet ?? {};
+// The model-specific weekly allowance (presented as Fable in the usage UI) was
+// historically the flat `seven_day_sonnet` key. Anthropic moved it into a
+// `limits[]` array of scoped windows; prefer that and fall back to the old key
+// so both CLI generations map. Mirrors selectClaudeModelWeekly in
+// src/server/services/limits.service.ts.
+const scopedWeek = (Array.isArray(rate?.limits) ? rate.limits : []).find((entry: any) =>
+  entry && typeof entry === 'object'
+  && (entry.kind === 'weekly_scoped' || (entry.group === 'weekly' && entry.scope?.model))
+  && typeof (entry.percent ?? entry.used_percentage) === 'number');
+const modelWeek = scopedWeek
+  ? { used_percentage: scopedWeek.percent ?? scopedWeek.used_percentage, resets_at: scopedWeek.resets_at }
+  : (rate?.seven_day_sonnet ?? {});
 
 const out = {
   updated_at: Date.now(),

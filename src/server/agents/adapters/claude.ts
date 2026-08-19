@@ -2,9 +2,13 @@ import { existsSync } from 'fs';
 import { extname, win32 as win32Path } from 'path';
 import {
   ArgvTooLongError,
+  claudeCredentialsPath,
   createCliEnv,
   createProcessUnwindSignal,
+  isClaudeAccessTokenExpired,
+  isClaudeRefreshTokenExpired,
   killProcessTree,
+  readClaudeCredentialState,
   resolveCliBinary,
   safeSpawn,
   type ProcessTerminationResult,
@@ -354,8 +358,10 @@ export const claudeAdapter: AgentAdapter<ClaudeRunState> = {
           const decoder = new TextDecoder();
           let leftover = '';
           let lastResultText = '';
+          let expiredAuthDetected = false;
 
           const handleEvent = (event: any) => {
+            if (!expiredAuthDetected && eventReportsExpiredAuth(event)) expiredAuthDetected = true;
             try {
               normalizeClaudeEvent(event, ctx, state, (resultText: string) => { lastResultText = resultText; });
             } catch (e) {
@@ -403,6 +409,17 @@ export const claudeAdapter: AgentAdapter<ClaudeRunState> = {
             return {
               recoverableError: 'stale-session',
               errorMessage: stderrText,
+            };
+          }
+          if (!killed && exitCode !== 0 && (expiredAuthDetected || isClaudeExpiredAuthText(stderrText))) {
+            // The CLI's OAuth access token died before/while this turn ran. It
+            // rewrites `~/.claude/.credentials.json` with a refreshed token, so
+            // a second spawn normally succeeds — hand the bridge a recoverable
+            // error instead of burning the turn on "exited with code 1".
+            ctx.emitAgentEvent({ type: 'finish', reason: 'expired-auth' });
+            return {
+              recoverableError: 'expired-auth',
+              errorMessage: stderrText || 'OAuth access token has expired',
             };
           }
           if (!killed && exitCode !== 0) {
@@ -465,12 +482,62 @@ export const claudeAdapter: AgentAdapter<ClaudeRunState> = {
 
 const CLAUDE_AUTH_CHECK_TIMEOUT_MS = 5_000;
 
+/**
+ * The CLI's own words when it starts a turn with a dead access token. It exits
+ * 1 with an empty stderr, so this text is the only evidence — it arrives as an
+ * assistant text block on stdout, not on the error channel.
+ *   "Failed to authenticate. API Error: 401 OAuth access token has expired.
+ *    Re-authenticate to continue."
+ */
+const CLAUDE_EXPIRED_AUTH_PATTERN =
+  /(oauth[^\n]{0,40}token has expired|401[^\n]{0,80}(?:token has expired|re-?authenticate))/i;
+
+export function isClaudeExpiredAuthText(text: string | null | undefined): boolean {
+  return typeof text === 'string' && text.length > 0 && CLAUDE_EXPIRED_AUTH_PATTERN.test(text);
+}
+
+/** Scan one stream-json event for the CLI's expired-token report. Targeted at
+ *  the blocks that can carry it rather than stringifying every event. */
+export function eventReportsExpiredAuth(event: any): boolean {
+  if (!event || typeof event !== 'object') return false;
+  if (isClaudeExpiredAuthText(event.message) || isClaudeExpiredAuthText(event.error)) return true;
+  if (typeof event.result === 'string' && isClaudeExpiredAuthText(event.result)) return true;
+  const content = event.message?.content ?? event.content;
+  if (Array.isArray(content)) {
+    for (const block of content) {
+      if (block?.type === 'text' && isClaudeExpiredAuthText(block.text)) return true;
+    }
+  }
+  return false;
+}
+
 async function getClaudeAuthError(claudeCommand: readonly string[], env: Record<string, string>): Promise<string | null> {
   if (env.AGENT_FORGE_SKIP_CLAUDE_AUTH_CHECK === '1') return null;
 
   // API-key/token environments do not need Claude Code's persisted first-party login.
   if (env.ANTHROPIC_API_KEY || env.ANTHROPIC_AUTH_TOKEN || env.CLAUDE_CODE_OAUTH_TOKEN) {
     return null;
+  }
+
+  // `claude auth status` reports the stored login, not token freshness, so it
+  // answers loggedIn=true right up to the moment a turn 401s. Read the token
+  // metadata directly for the one state the CLI cannot recover from on its
+  // own: a dead *refresh* token, which needs an interactive login. An expired
+  // access token alone is not blocked — the CLI refreshes it on spawn, and the
+  // expired-auth retry in chat.service covers the case where it loses that race.
+  const creds = await readClaudeCredentialState();
+  if (isClaudeRefreshTokenExpired(creds)) {
+    return [
+      'Claude Code cannot refresh its login: the stored refresh token has expired.',
+      `Credentials: ${claudeCredentialsPath()}`,
+      'Run `claude auth login` in a normal terminal, then retry this turn.',
+    ].join('\n');
+  }
+  if (isClaudeAccessTokenExpired(creds)) {
+    console.warn(
+      '[claude] stored OAuth access token is expired or expiring; the CLI should refresh it on spawn '
+      + '(a 401 on this turn is retried once)',
+    );
   }
 
   try {

@@ -513,3 +513,84 @@ export function resolveCliBinary(name: string): string {
   _binaryCache.set(name, name);
   return name;
 }
+
+// --- Claude OAuth credentials ----------------------------------------------
+// Claude Code persists its subscription OAuth tokens in `~/.claude/.credentials.json`
+// and refreshes them in place. Two subsystems need to read that file — the
+// limits service (to authenticate the usage endpoint) and the Claude adapter
+// (to pre-flight auth before spawning a turn) — so the accessor lives here
+// instead of being duplicated in both.
+//
+// Why the adapter cares: `claude auth status` reports `loggedIn: true` from the
+// stored login alone; it says nothing about whether the *access* token is still
+// fresh. A turn spawned with an expired access token fails with
+// `401 OAuth access token has expired` and exits 1 with no stderr, which used
+// to surface as the misleading "Claude CLI exited with code 1 and no output".
+
+export interface ClaudeCredentialState {
+  accessToken: string | null;
+  subscriptionType: string | null;
+  /** Epoch ms when the access token expires; null when the field is absent. */
+  expiresAt: number | null;
+  /** Epoch ms when the refresh token expires; null when the field is absent. */
+  refreshTokenExpiresAt: number | null;
+}
+
+/** Treat a token expiring within this window as already expired — the CLI needs
+ *  a moment to refresh, and a turn spawned inside it races the rotation. */
+export const CLAUDE_TOKEN_EXPIRY_MARGIN_MS = 60_000;
+
+export function claudeCredentialsPath(): string {
+  return process.env.AI_HARNESS_CLAUDE_CREDENTIALS_JSON
+    || _pathJoin(_homedir(), '.claude', '.credentials.json');
+}
+
+function toEpochMsField(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value) {
+    const parsed = Date.parse(value);
+    if (!Number.isNaN(parsed)) return parsed;
+  }
+  return null;
+}
+
+/** Read Claude Code's stored OAuth state. Returns null when the file is
+ *  missing or unreadable — callers treat that as "no first-party login". */
+export async function readClaudeCredentialState(): Promise<ClaudeCredentialState | null> {
+  try {
+    const file = Bun.file(claudeCredentialsPath());
+    if (!(await file.exists())) return null;
+    const data = JSON.parse(await file.text());
+    const oa = data?.claudeAiOauth ?? data?.oauth ?? {};
+    const accessToken = oa.accessToken ?? oa.access_token;
+    return {
+      accessToken: typeof accessToken === 'string' && accessToken ? accessToken : null,
+      subscriptionType: typeof oa.subscriptionType === 'string' ? oa.subscriptionType : null,
+      expiresAt: toEpochMsField(oa.expiresAt ?? oa.expires_at),
+      refreshTokenExpiresAt: toEpochMsField(oa.refreshTokenExpiresAt ?? oa.refresh_token_expires_at),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** True when the access token is expired (or about to be). Unknown expiry is
+ *  reported as not-expired: absent metadata must never block a working login. */
+export function isClaudeAccessTokenExpired(
+  creds: ClaudeCredentialState | null,
+  nowMs = Date.now(),
+  marginMs = CLAUDE_TOKEN_EXPIRY_MARGIN_MS,
+): boolean {
+  if (!creds || creds.expiresAt === null) return false;
+  return nowMs >= creds.expiresAt - marginMs;
+}
+
+/** True when the refresh token itself has expired — the CLI cannot recover
+ *  from this on its own, so it is the one auth state worth blocking a spawn for. */
+export function isClaudeRefreshTokenExpired(
+  creds: ClaudeCredentialState | null,
+  nowMs = Date.now(),
+): boolean {
+  if (!creds || creds.refreshTokenExpiresAt === null) return false;
+  return nowMs >= creds.refreshTokenExpiresAt;
+}
