@@ -5,7 +5,9 @@
  * `GET https://api.anthropic.com/api/oauth/usage`, authenticated with the
  * access token Claude Code already stores in `~/.claude/.credentials.json`
  * (kept fresh by every Claude turn the app runs). It's a free GET (no
- * inference cost) and returns five_hour / seven_day utilization + reset times.
+ * inference cost) and returns five_hour / seven_day utilization + reset times,
+ * plus Claude's model-specific weekly window (presented as Fable in Claude's
+ * usage UI — see selectClaudeModelWeekly for where that figure now lives).
  * This works fully headlessly — no interactive statusLine session required.
  * The old statusLine JSON bridge (scripts/claude-limits-statusline.ts →
  * `~/.claude/claude-code-limits.json`) remains as a fallback for when the
@@ -26,7 +28,16 @@ import { homedir } from 'os';
 import type { LimitsSnapshot, LimitsWindow, ProviderLimitsSnapshot } from '../../shared/protocol';
 import { broadcast } from '../broadcast';
 import { resolveCodexLaunchCommand } from '../agents/adapters/codex';
-import { createCliEnv, killProcessTree, resolveCliBinary, safeSpawn } from '../utils';
+import { drainStreamToString } from '../agents/stream-utils';
+import {
+  claudeCredentialsPath,
+  createCliEnv,
+  killProcessTree,
+  readClaudeCredentialState,
+  resolveCliBinary,
+  safeSpawn,
+} from '../utils';
+import { fetchWithTimeout } from './external-io';
 
 export const LIMITS_REFRESH_INTERVAL_MS = 60 * 1000;
 /** Data older than this renders as 'stale' — usage percentages decay, so old reads mislead. */
@@ -37,13 +48,32 @@ const CODEX_FILE_SCAN_CAP = 6;
 const CODEX_TAIL_BYTES = 512 * 1024;
 /** Bound a broken or incompatible app-server instead of blocking refresh forever. */
 const CODEX_APP_SERVER_TIMEOUT_MS = 10_000;
+const CODEX_APP_SERVER_MAX_RESPONSE_CHARS = 1024 * 1024;
+const CODEX_APP_SERVER_STDERR_CHARS = 64 * 1024;
+const CLAUDE_USAGE_TIMEOUT_MS = 10_000;
+const CLAUDE_BACKOFF_BASE_MS = 60_000;
+const CLAUDE_BACKOFF_MAX_MS = 15 * 60_000;
 
 // HMR-safe cached snapshot + timer.
 const state: {
   snapshot: LimitsSnapshot | null;
   timer: ReturnType<typeof setInterval> | null;
   nextRefreshAt: number;
-} = (globalThis as any).__limitsState ??= { snapshot: null, timer: null, nextRefreshAt: 0 };
+  refreshPromise: Promise<LimitsSnapshot> | null;
+  claudeBackoffUntil: number;
+  claudeFailureCount: number;
+} = (globalThis as any).__limitsState ??= {
+  snapshot: null,
+  timer: null,
+  nextRefreshAt: 0,
+  refreshPromise: null,
+  claudeBackoffUntil: 0,
+  claudeFailureCount: 0,
+};
+// Backfill fields when an older HMR state object is reused.
+state.refreshPromise ??= null;
+state.claudeBackoffUntil ??= 0;
+state.claudeFailureCount ??= 0;
 
 function emptyWindow(): LimitsWindow {
   return { usedPercent: null, resetsAt: null, windowMinutes: null };
@@ -60,6 +90,7 @@ function baseSnapshot(provider: 'claude' | 'codex', source: string): ProviderLim
     contextUsedPercent: null,
     fiveHour: emptyWindow(),
     weekly: emptyWindow(),
+    modelWeekly: emptyWindow(),
     source,
     detail: null,
   };
@@ -88,6 +119,40 @@ function applyFreshness(snap: ProviderLimitsSnapshot): void {
     snap.status = 'stale';
     snap.detail = 'Data is over 6h old — send a turn with this provider to refresh it.';
   }
+}
+
+function hasLimitData(snapshot: ProviderLimitsSnapshot): boolean {
+  return snapshot.fiveHour.usedPercent !== null
+    || snapshot.weekly.usedPercent !== null
+    // Optional chaining keeps an older HMR-cached snapshot safe across this
+    // protocol addition until the next successful provider refresh.
+    || typeof snapshot.modelWeekly?.usedPercent === 'number'
+    || snapshot.contextUsedPercent !== null;
+}
+
+/** Keep the last successful provider data visible when a refresh source has a
+ * transient failure. The failed attempt remains explicit in detail/checkedAt. */
+export function mergeProviderLimits(
+  previous: ProviderLimitsSnapshot | null | undefined,
+  next: ProviderLimitsSnapshot,
+): ProviderLimitsSnapshot {
+  if (next.status === 'available' || next.status === 'stale') return next;
+  if (!previous || !hasLimitData(previous) || !['available', 'stale'].includes(previous.status)) return next;
+  return {
+    ...previous,
+    status: 'stale',
+    checkedAt: next.checkedAt,
+    detail: `Latest refresh failed (${next.detail || next.status}); showing the last successful data.`,
+  };
+}
+
+/** Convert Retry-After (seconds or HTTP date) to an absolute epoch-ms value. */
+export function parseRetryAfter(value: string | null, now = Date.now()): number | null {
+  if (!value) return null;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) return now + seconds * 1000;
+  const date = Date.parse(value);
+  return Number.isNaN(date) ? null : Math.max(now, date);
 }
 
 /**
@@ -130,26 +195,44 @@ export function mapCodexRateLimitWindows(rateLimits: any): Pick<ProviderLimitsSn
 
 const CLAUDE_USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
 
-export function claudeCredentialsPath(): string {
-  return process.env.AI_HARNESS_CLAUDE_CREDENTIALS_JSON || join(homedir(), '.claude', '.credentials.json');
-}
+export { claudeCredentialsPath };
 
 export function claudeLimitsFilePath(): string {
   return process.env.AI_HARNESS_CLAUDE_LIMITS_JSON || join(homedir(), '.claude', 'claude-code-limits.json');
 }
 
 async function readClaudeOAuth(): Promise<{ token: string; subscriptionType: string | null } | null> {
-  try {
-    const file = Bun.file(claudeCredentialsPath());
-    if (!(await file.exists())) return null;
-    const data = JSON.parse(await file.text());
-    const oa = data?.claudeAiOauth ?? data?.oauth ?? {};
-    const token = oa.accessToken ?? oa.access_token;
-    if (typeof token !== 'string' || !token) return null;
-    return { token, subscriptionType: typeof oa.subscriptionType === 'string' ? oa.subscriptionType : null };
-  } catch {
-    return null;
+  const creds = await readClaudeCredentialState();
+  if (!creds?.accessToken) return null;
+  return { token: creds.accessToken, subscriptionType: creds.subscriptionType };
+}
+
+/**
+ * Claude's model-scoped weekly allowance — the window presented as "Fable" in
+ * Claude's usage UI.
+ *
+ * Anthropic retired the flat `seven_day_sonnet` key: as of 2026-08 it is
+ * always null on live responses and the figure moved into the `limits[]`
+ * array as a `weekly_scoped` entry that names the model it applies to:
+ *
+ *   {"kind":"weekly_scoped","group":"weekly","percent":65,
+ *    "scope":{"model":{"id":null,"display_name":"Fable"}},
+ *    "resets_at":"2026-08-23T02:00:00Z"}
+ *
+ * Read the array first and keep the legacy key as a fallback, so an older
+ * payload (or the statusline bridge's older shape) still maps.
+ */
+export function selectClaudeModelWeekly(data: any): { usedPercent: number | null; resetsAt: number | null } {
+  const entries: any[] = Array.isArray(data?.limits) ? data.limits : [];
+  const scoped = entries.find(entry =>
+    entry && typeof entry === 'object'
+    && (entry.kind === 'weekly_scoped' || (entry.group === 'weekly' && entry.scope?.model))
+    && toPercent(entry.percent) !== null);
+  if (scoped) {
+    return { usedPercent: toPercent(scoped.percent), resetsAt: toEpochMs(scoped.resets_at) };
   }
+  const legacy = data?.seven_day_sonnet;
+  return { usedPercent: toPercent(legacy?.utilization), resetsAt: toEpochMs(legacy?.resets_at) };
 }
 
 /**
@@ -158,6 +241,7 @@ async function readClaudeOAuth(): Promise<{ token: string; subscriptionType: str
  */
 export function mapClaudeUsageResponse(data: any, subscriptionType: string | null): ProviderLimitsSnapshot {
   const snap = baseSnapshot('claude', `oauth usage → ${CLAUDE_USAGE_URL}`);
+  const modelWeekly = selectClaudeModelWeekly(data);
   snap.updatedAt = Date.now();
   snap.planType = subscriptionType;
   snap.fiveHour = {
@@ -170,6 +254,11 @@ export function mapClaudeUsageResponse(data: any, subscriptionType: string | nul
     resetsAt: toEpochMs(data?.seven_day?.resets_at),
     windowMinutes: 10080,
   };
+  snap.modelWeekly = {
+    usedPercent: modelWeekly.usedPercent,
+    resetsAt: modelWeekly.resetsAt,
+    windowMinutes: 10080,
+  };
   snap.status = 'available';
   applyFreshness(snap);
   return snap;
@@ -179,15 +268,20 @@ async function readClaudeLimitsFromOAuth(): Promise<ProviderLimitsSnapshot | nul
   const creds = await readClaudeOAuth();
   if (!creds) return null;
   const snap = baseSnapshot('claude', `oauth usage → ${CLAUDE_USAGE_URL}`);
+  const now = Date.now();
+  if (state.claudeBackoffUntil > now) {
+    snap.status = 'unavailable';
+    snap.detail = `Claude usage is temporarily rate-limited; retrying after ${new Date(state.claudeBackoffUntil).toLocaleTimeString()}.`;
+    return snap;
+  }
   try {
-    const res = await fetch(CLAUDE_USAGE_URL, {
+    const res = await fetchWithTimeout(CLAUDE_USAGE_URL, {
       headers: {
         authorization: `Bearer ${creds.token}`,
         'anthropic-version': '2023-06-01',
         'anthropic-beta': 'oauth-2025-04-20',
       },
-      signal: AbortSignal.timeout(10_000),
-    });
+    }, CLAUDE_USAGE_TIMEOUT_MS, 'Claude usage request');
     if (res.status === 401 || res.status === 403) {
       // Token expired/invalid — Claude Code refreshes it on its next run.
       snap.status = 'unavailable';
@@ -195,10 +289,23 @@ async function readClaudeLimitsFromOAuth(): Promise<ProviderLimitsSnapshot | nul
       return snap;
     }
     if (!res.ok) {
+      if (res.status === 429) {
+        state.claudeFailureCount += 1;
+        const exponentialDelay = Math.min(
+          CLAUDE_BACKOFF_MAX_MS,
+          CLAUDE_BACKOFF_BASE_MS * (2 ** Math.max(0, state.claudeFailureCount - 1)),
+        );
+        state.claudeBackoffUntil = parseRetryAfter(res.headers.get('retry-after'), now) ?? now + exponentialDelay;
+        snap.status = 'unavailable';
+        snap.detail = `Claude usage endpoint rate-limited this refresh (HTTP 429); retrying after ${new Date(state.claudeBackoffUntil).toLocaleTimeString()}.`;
+        return snap;
+      }
       snap.status = 'error';
       snap.detail = `Usage endpoint returned HTTP ${res.status}.`;
       return snap;
     }
+    state.claudeFailureCount = 0;
+    state.claudeBackoffUntil = 0;
     return mapClaudeUsageResponse(await res.json(), creds.subscriptionType);
   } catch (e: any) {
     snap.status = 'error';
@@ -229,6 +336,11 @@ async function readClaudeLimitsFromBridge(): Promise<ProviderLimitsSnapshot> {
     snap.weekly = {
       usedPercent: toPercent(data.seven_day_used_percentage),
       resetsAt: toEpochMs(data.seven_day_resets_at),
+      windowMinutes: 10080,
+    };
+    snap.modelWeekly = {
+      usedPercent: toPercent(data.seven_day_sonnet_used_percentage),
+      resetsAt: toEpochMs(data.seven_day_sonnet_resets_at),
       windowMinutes: 10080,
     };
     snap.status = 'available';
@@ -306,13 +418,33 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string)
   });
 }
 
-async function readJsonLineResponse(
+export interface JsonLineResponseOptions {
+  timeoutMs?: number;
+  timeoutMessage?: string;
+  maxChars?: number;
+}
+
+export async function readJsonLineResponse(
   stream: ReadableStream<Uint8Array>,
   responseId: number,
+  options: JsonLineResponseOptions = {},
 ): Promise<any> {
   const reader = stream.getReader();
   const decoder = new TextDecoder();
   let buffered = '';
+  let observedChars = 0;
+  const timeoutMs = Number.isFinite(options.timeoutMs) && (options.timeoutMs ?? -1) >= 0
+    ? Math.floor(options.timeoutMs!)
+    : CODEX_APP_SERVER_TIMEOUT_MS;
+  const maxChars = Number.isFinite(options.maxChars) && (options.maxChars ?? 0) > 0
+    ? Math.floor(options.maxChars!)
+    : CODEX_APP_SERVER_MAX_RESPONSE_CHARS;
+  const timeoutError = new Error(options.timeoutMessage
+    || `Timed out reading Codex app-server response ${responseId}.`);
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(timeoutError), timeoutMs);
+  });
 
   const parseLine = (line: string): any | null => {
     if (!line.trim()) return null;
@@ -326,22 +458,30 @@ async function readJsonLineResponse(
 
   try {
     while (true) {
-      const { done, value } = await reader.read();
+      const { done, value } = await Promise.race([reader.read(), deadline]);
       if (done) {
-        const response = parseLine(buffered);
+        buffered += decoder.decode();
+        const response = parseLine(buffered.replace(/\r$/, ''));
         if (response) return response;
         throw new Error(`Codex app-server closed before response ${responseId}.`);
       }
 
-      buffered += decoder.decode(value, { stream: true });
+      const decoded = decoder.decode(value, { stream: true });
+      observedChars += decoded.length;
+      if (observedChars > maxChars) {
+        throw new Error(`Codex app-server exceeded ${maxChars} characters before response ${responseId}.`);
+      }
+      buffered += decoded;
       const lines = buffered.split('\n');
       buffered = lines.pop() ?? '';
       for (const line of lines) {
-        const response = parseLine(line);
+        const response = parseLine(line.replace(/\r$/, ''));
         if (response) return response;
       }
     }
   } finally {
+    if (timer) clearTimeout(timer);
+    void reader.cancel().catch(() => {});
     try { reader.releaseLock(); } catch {}
   }
 }
@@ -364,6 +504,7 @@ async function readCodexLimitsFromAppServer(): Promise<ProviderLimitsSnapshot> {
   const unavailable = baseSnapshot('codex', 'Codex app-server account/rateLimits/read');
   let proc: ReturnType<typeof safeSpawn> | null = null;
   let stderrPromise: Promise<string> | null = null;
+  let stderrAbort: AbortController | null = null;
 
   try {
     const codexCommand = resolveCodexLaunchCommand(resolveCliBinary('codex'));
@@ -374,7 +515,8 @@ async function readCodexLimitsFromAppServer(): Promise<ProviderLimitsSnapshot> {
       stderr: 'pipe',
       env: createCliEnv(),
     });
-    stderrPromise = new Response(proc.stderr).text();
+    stderrAbort = new AbortController();
+    stderrPromise = drainStreamToString(proc.stderr, CODEX_APP_SERVER_STDERR_CHARS, stderrAbort.signal);
 
     proc.stdin.write(JSON.stringify({
       method: 'initialize',
@@ -385,11 +527,10 @@ async function readCodexLimitsFromAppServer(): Promise<ProviderLimitsSnapshot> {
       },
     }) + '\n');
 
-    const initialize = await withTimeout(
-      readJsonLineResponse(proc.stdout, 1),
-      CODEX_APP_SERVER_TIMEOUT_MS,
-      'Timed out initializing Codex app-server.',
-    );
+    const initialize = await readJsonLineResponse(proc.stdout, 1, {
+      timeoutMs: CODEX_APP_SERVER_TIMEOUT_MS,
+      timeoutMessage: 'Timed out initializing Codex app-server.',
+    });
     if (initialize?.error) {
       throw new Error(initialize.error.message || 'Codex app-server initialization failed.');
     }
@@ -399,11 +540,10 @@ async function readCodexLimitsFromAppServer(): Promise<ProviderLimitsSnapshot> {
       JSON.stringify({ method: 'account/rateLimits/read', id: 2 }),
     ].join('\n') + '\n');
 
-    const response = await withTimeout(
-      readJsonLineResponse(proc.stdout, 2),
-      CODEX_APP_SERVER_TIMEOUT_MS,
-      'Timed out reading Codex account rate limits.',
-    );
+    const response = await readJsonLineResponse(proc.stdout, 2, {
+      timeoutMs: CODEX_APP_SERVER_TIMEOUT_MS,
+      timeoutMessage: 'Timed out reading Codex account rate limits.',
+    });
     if (response?.error) {
       throw new Error(response.error.message || 'Codex rate-limit read failed.');
     }
@@ -417,10 +557,13 @@ async function readCodexLimitsFromAppServer(): Promise<ProviderLimitsSnapshot> {
       try { proc.stdin.end(); } catch {}
       if (!(await waitForProcessExit(proc, 1_500))) {
         await killProcessTree(proc);
-        await proc.exited.catch(() => {});
+        await waitForProcessExit(proc, 750);
       }
     }
-    if (stderrPromise) await stderrPromise.catch(() => '');
+    stderrAbort?.abort(new Error('Codex app-server collection finished.'));
+    if (stderrPromise) {
+      await withTimeout(stderrPromise, 250, 'Timed out draining Codex app-server stderr.').catch(() => '');
+    }
   }
 }
 
@@ -554,14 +697,25 @@ async function readCodexLimits(): Promise<ProviderLimitsSnapshot> {
 
 export const limitsService = {
   async refresh(broadcastIt = true): Promise<LimitsSnapshot> {
-    // Providers are independent — one failing source must not blank the other.
-    const [claude, codex] = await Promise.all([readClaudeLimits(), readCodexLimits()]);
-    const snapshot: LimitsSnapshot = {
-      providers: { claude, codex },
-      refreshIntervalMs: LIMITS_REFRESH_INTERVAL_MS,
-      nextRefreshAt: state.nextRefreshAt || Date.now() + LIMITS_REFRESH_INTERVAL_MS,
-    };
-    state.snapshot = snapshot;
+    if (!state.refreshPromise) {
+      state.refreshPromise = (async () => {
+        // Providers are independent — one failing source must not blank the other.
+        const [nextClaude, nextCodex] = await Promise.all([readClaudeLimits(), readCodexLimits()]);
+        const snapshot: LimitsSnapshot = {
+          providers: {
+            claude: mergeProviderLimits(state.snapshot?.providers.claude, nextClaude),
+            codex: mergeProviderLimits(state.snapshot?.providers.codex, nextCodex),
+          },
+          refreshIntervalMs: LIMITS_REFRESH_INTERVAL_MS,
+          nextRefreshAt: state.nextRefreshAt || Date.now() + LIMITS_REFRESH_INTERVAL_MS,
+        };
+        state.snapshot = snapshot;
+        return snapshot;
+      })().finally(() => {
+        state.refreshPromise = null;
+      });
+    }
+    const snapshot = await state.refreshPromise;
     if (broadcastIt) broadcast({ type: 'limits_snapshot', snapshot });
     return snapshot;
   },
@@ -580,5 +734,19 @@ export const limitsService = {
       limitsService.refresh().catch(e => console.error('[limits] scheduled refresh failed:', e));
     }, LIMITS_REFRESH_INTERVAL_MS);
     limitsService.refresh().catch(e => console.error('[limits] initial refresh failed:', e));
+  },
+
+  stop(): void {
+    if (state.timer) clearInterval(state.timer);
+    state.timer = null;
+    state.nextRefreshAt = 0;
+  },
+
+  /** Tests only. Does not stop a production timer. */
+  resetCacheForTests(): void {
+    state.snapshot = null;
+    state.refreshPromise = null;
+    state.claudeBackoffUntil = 0;
+    state.claudeFailureCount = 0;
   },
 };

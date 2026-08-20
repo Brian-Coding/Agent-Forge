@@ -147,3 +147,47 @@ test('usage exports honor current-machine scope', () => {
   expect(usageService.buildExportRows('current').every(row => row.machineId === currentMachineId)).toBe(true);
   usageService.load([]);
 });
+
+test('non-finite and negative persisted counters are normalized without poisoning reports', () => {
+  usageService.load([
+    ev({ timestamp: Number.NaN }),
+    ev({
+      timestamp: Date.now(),
+      inputTokens: Number.POSITIVE_INFINITY,
+      outputTokens: -10,
+      costUsd: Number.NaN,
+      turns: Number.POSITIVE_INFINITY,
+    }),
+  ]);
+
+  const stored = usageService.getEvents();
+  expect(stored).toHaveLength(1);
+  expect(stored[0]).toMatchObject({ inputTokens: 0, outputTokens: 0, costUsd: 0, turns: 0 });
+  const serialized = JSON.stringify(usageService.getReportForConnect());
+  expect(serialized).not.toContain('"inputTokens":null');
+  expect(serialized).not.toContain('"outputTokens":null');
+  expect(serialized).not.toContain('"turns":null');
+  usageService.load([]);
+});
+
+test('usage snapshots cannot mutate the service internal event log', () => {
+  usageService.load([ev({ inputTokens: 10 })]);
+  const snapshot = usageService.getEvents();
+  snapshot[0]!.inputTokens = 999;
+  snapshot.push(ev({ inputTokens: 888 }));
+
+  expect(usageService.getEvents()).toHaveLength(1);
+  expect(usageService.getEvents()[0]?.inputTokens).toBe(10);
+  usageService.load([]);
+});
+
+test('record ignores non-finite deltas instead of persisting an invalid event', () => {
+  usageService.load([]);
+  usageService.record('missing-agent', 'claude', {
+    inputTokens: Number.NaN,
+    outputTokens: Number.POSITIVE_INFINITY,
+    costUsd: Number.POSITIVE_INFINITY,
+    turns: Number.NaN,
+  });
+  expect(usageService.getEvents()).toEqual([]);
+});

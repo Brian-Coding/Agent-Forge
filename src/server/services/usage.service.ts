@@ -49,27 +49,34 @@ function legacyEventId(ev: Pick<UsageEvent, 'timestamp' | 'agentId' | 'provider'
 
 function normalizeEvent(ev: UsageEvent): UsageEvent | null {
   if (!ev || typeof ev !== 'object'
-    || typeof ev.timestamp !== 'number'
-    || typeof ev.agentId !== 'string'
+    || typeof ev.timestamp !== 'number' || !Number.isFinite(ev.timestamp)
+    || typeof ev.agentId !== 'string' || !ev.agentId
     || (ev.provider !== 'claude' && ev.provider !== 'codex')) return null;
+  const finiteNonNegative = (value: unknown, ceiling = Number.MAX_SAFE_INTEGER): number =>
+    typeof value === 'number' && Number.isFinite(value) && value > 0
+      ? Math.min(value, ceiling)
+      : 0;
+  const inputTokens = finiteNonNegative(ev.inputTokens, 100_000_000);
+  const outputTokens = finiteNonNegative(ev.outputTokens, 100_000_000);
+  const turns = finiteNonNegative(ev.turns, 1_000_000);
   const normalized: UsageEvent = {
     id: typeof ev.id === 'string' && ev.id ? ev.id : legacyEventId({
       timestamp: ev.timestamp,
       agentId: ev.agentId,
       provider: ev.provider,
-      inputTokens: typeof ev.inputTokens === 'number' ? ev.inputTokens : 0,
-      outputTokens: typeof ev.outputTokens === 'number' ? ev.outputTokens : 0,
-      turns: typeof ev.turns === 'number' ? ev.turns : 0,
+      inputTokens,
+      outputTokens,
+      turns,
       model: typeof ev.model === 'string' ? ev.model : undefined,
     }),
     machineId: typeof ev.machineId === 'string' && ev.machineId ? ev.machineId : 'legacy',
     timestamp: ev.timestamp,
     agentId: ev.agentId,
     provider: ev.provider,
-    inputTokens: typeof ev.inputTokens === 'number' ? ev.inputTokens : 0,
-    outputTokens: typeof ev.outputTokens === 'number' ? ev.outputTokens : 0,
-    costUsd: typeof ev.costUsd === 'number' ? ev.costUsd : 0,
-    turns: typeof ev.turns === 'number' ? ev.turns : 0,
+    inputTokens,
+    outputTokens,
+    costUsd: finiteNonNegative(ev.costUsd, 1_000_000),
+    turns,
     model: typeof ev.model === 'string' && ev.model ? ev.model : undefined,
     agentName: typeof ev.agentName === 'string' && ev.agentName ? ev.agentName : undefined,
     workspaceId: typeof ev.workspaceId === 'string' && ev.workspaceId ? ev.workspaceId : undefined,
@@ -506,10 +513,14 @@ export const usageService = {
     // reporting Codex spend in the Tokens tab. A flat, generous ceiling catches
     // garbage without truncating real turns.
     const saneDeltaCeiling = 100_000_000;
-    const inputTokens = Math.min(Math.max(0, deltas.inputTokens ?? 0), saneDeltaCeiling);
-    const outputTokens = Math.min(Math.max(0, deltas.outputTokens ?? 0), saneDeltaCeiling);
-    const costUsd = Math.max(0, deltas.costUsd ?? 0);
-    const turns = Math.max(0, deltas.turns ?? 0);
+    const finiteNonNegative = (value: unknown, ceiling: number): number =>
+      typeof value === 'number' && Number.isFinite(value) && value > 0
+        ? Math.min(value, ceiling)
+        : 0;
+    const inputTokens = finiteNonNegative(deltas.inputTokens, saneDeltaCeiling);
+    const outputTokens = finiteNonNegative(deltas.outputTokens, saneDeltaCeiling);
+    const costUsd = finiteNonNegative(deltas.costUsd, 1_000_000);
+    const turns = finiteNonNegative(deltas.turns, 1_000_000);
     if (inputTokens === 0 && outputTokens === 0 && costUsd === 0 && turns === 0) return;
     const agent = agentService.getAgent(agentId);
     const workspace = agent?.workspaceId ? workspaceService.get(agent.workspaceId) : undefined;
@@ -539,7 +550,7 @@ export const usageService = {
 
   /** Snapshot the current log for persistence. */
   getEvents(): UsageEvent[] {
-    return events;
+    return events.map(event => ({ ...event }));
   },
 
   /** Build the full report — used by ws.ts on each WS connect. */

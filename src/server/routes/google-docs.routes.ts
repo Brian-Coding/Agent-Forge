@@ -1,10 +1,12 @@
 import { googleDocsService } from '../services/google-docs.service';
 import { jsonResponse } from '../utils';
+import { readJsonBody } from '../request-body';
 
 const MAX_WRITE_TEXT = 100_000;
+const MAX_GOOGLE_DOCS_BODY_BYTES = 512_000;
 
 async function readJson(req: Request): Promise<any> {
-  try { return await req.json(); } catch { throw new Error('Request body must be valid JSON'); }
+  return readJsonBody(req, MAX_GOOGLE_DOCS_BODY_BYTES);
 }
 
 function textField(value: unknown, name: string, allowEmpty = false): string {

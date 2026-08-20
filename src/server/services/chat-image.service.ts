@@ -85,7 +85,30 @@ export async function storeChatImageRequest(
   if (announcedSize > MAX_CHAT_IMAGE_TOTAL_BYTES) {
     throw new ChatImageError('The image exceeds the 512 MiB model input limit', 413);
   }
-  const bytes = new Uint8Array(await req.arrayBuffer());
+  if (!req.body) throw new ChatImageError('Image uploads cannot be empty');
+  const reader = req.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      totalBytes += value.byteLength;
+      if (totalBytes > MAX_CHAT_IMAGE_TOTAL_BYTES) {
+        await reader.cancel().catch(() => {});
+        throw new ChatImageError('The image exceeds the 512 MiB model input limit', 413);
+      }
+      chunks.push(value);
+    }
+  } finally {
+    try { reader.releaseLock(); } catch {}
+  }
+  const bytes = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
   return storeChatImageBytes(agentId, originalName, req.headers.get('content-type') || '', bytes);
 }
 

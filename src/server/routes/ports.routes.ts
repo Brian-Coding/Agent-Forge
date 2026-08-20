@@ -1,4 +1,21 @@
 import { jsonResponse } from '../utils';
+import { readJsonBody } from '../request-body';
+import { collectBoundedProcess } from '../services/bounded-subprocess';
+import { killProcessTree } from '../utils';
+
+async function runPortCommand(args: string[], maxChars = 2 * 1024 * 1024) {
+  const proc = Bun.spawn(args, { stdout: 'pipe', stderr: 'pipe' });
+  const result = await collectBoundedProcess(proc, {
+    timeoutMs: 5_000,
+    terminationTimeoutMs: 2_000,
+    maxChars,
+    retainOutput: 'head',
+    label: `Port inspection command ${args[0] || '<unknown>'}`,
+    terminate: () => killProcessTree(proc),
+  });
+  if (result.timedOut || result.error) throw new Error(result.error || 'Port inspection timed out');
+  return result;
+}
 
 /**
  * Resolve every running PID → image-name in ONE shell-out using tasklist.
@@ -12,12 +29,9 @@ import { jsonResponse } from '../utils';
 async function getProcessNamesByPidWindows(): Promise<Map<number, string>> {
   const map = new Map<number, string>();
   try {
-    const proc = Bun.spawn(['tasklist', '/FO', 'CSV', '/NH'], {
-      stdout: 'pipe',
-      stderr: 'pipe',
-    });
-    await proc.exited;
-    const out = await new Response(proc.stdout).text();
+    const result = await runPortCommand(['tasklist', '/FO', 'CSV', '/NH']);
+    if (result.exitCode !== 0) return map;
+    const out = result.stdout;
     for (const line of out.split('\n')) {
       // Format: "image.exe","pid","Console","1","12,345 K"
       const m = line.match(/^"([^"]+)","(\d+)"/);
@@ -60,9 +74,9 @@ export async function handleGetPorts(req: Request): Promise<Response> {
       // the number of listening ports on the machine.
       const [netstatOut, pidToName] = await Promise.all([
         (async () => {
-          const proc = Bun.spawn(['netstat', '-ano'], { stdout: 'pipe', stderr: 'pipe' });
-          await proc.exited;
-          return new Response(proc.stdout).text();
+          const result = await runPortCommand(['netstat', '-ano']);
+          if (result.exitCode !== 0) throw new Error(result.stderr || 'netstat failed');
+          return result.stdout;
         })(),
         getProcessNamesByPidWindows(),
       ]);
@@ -85,13 +99,9 @@ export async function handleGetPorts(req: Request): Promise<Response> {
         ports.push({ port, pid, command });
       }
     } else {
-      const proc = Bun.spawn(['lsof', '-iTCP', '-sTCP:LISTEN', '-nP'], {
-        stdout: 'pipe',
-        stderr: 'pipe',
-      });
-      const exitCode = await proc.exited;
-      const stdout = await new Response(proc.stdout).text();
-      if (exitCode !== 0) return jsonResponse({ ports: [] });
+      const result = await runPortCommand(['lsof', '-iTCP', '-sTCP:LISTEN', '-nP']);
+      if (result.exitCode !== 0) return jsonResponse({ ports: [] });
+      const stdout = result.stdout;
       const lines = stdout.trim().split('\n').slice(1);
       const SYSTEM_PROCESSES = new Set([
         'ControlCe', 'rapportd', 'AirPlayXPC', 'sharingd',
@@ -124,17 +134,26 @@ export async function handleGetPorts(req: Request): Promise<Response> {
 
 export async function handleKillPort(req: Request): Promise<Response> {
   try {
-    const body = (await req.json()) as { pid: number };
-    if (!body.pid) return jsonResponse({ error: 'Missing pid' }, 400);
+    const body = (await readJsonBody(req, 4_096)) as { pid?: unknown };
+    const pid = parseKillPid(body.pid);
+    if (pid === null) return jsonResponse({ error: 'Invalid or unsafe pid' }, 400);
     const isWindows = process.platform === 'win32';
     // taskkill is a native Win32 exe — same role as PowerShell's
     // Stop-Process but without paying PowerShell's ~1-2s cold-start tax.
-    const proc = isWindows
-      ? Bun.spawn(['taskkill', '/F', '/PID', String(body.pid)], { stdout: 'pipe', stderr: 'pipe' })
-      : Bun.spawn(['kill', '-9', String(body.pid)], { stdout: 'pipe', stderr: 'pipe' });
-    const exitCode = await proc.exited;
-    return jsonResponse({ ok: exitCode === 0 });
+    const result = await runPortCommand(isWindows
+      ? ['taskkill', '/F', '/PID', String(pid)]
+      : ['kill', '-9', String(pid)], 64_000);
+    return jsonResponse({
+      ok: result.exitCode === 0,
+      ...(result.exitCode === 0 ? {} : { error: (result.stderr || result.stdout || 'Process termination failed').slice(0, 500) }),
+    });
   } catch (e: any) {
     return jsonResponse({ ok: false, error: e.message }, 500);
   }
+}
+
+/** Reject values that could target a process group, this server, or PID 1. */
+export function parseKillPid(value: unknown): number | null {
+  if (!Number.isSafeInteger(value) || (value as number) <= 1 || value === process.pid) return null;
+  return value as number;
 }

@@ -1,6 +1,6 @@
 import { test, expect } from 'bun:test';
 import { resolveAgentModel, resolveAgentReasoningLevel } from './registry';
-import { stripModelTier } from './agent-kinds';
+import { isRealClaudeModelId, stripModelTier } from './agent-kinds';
 
 // Regression net for the "harness ran Opus while the UI said Fable" incident
 // (2026-07-01). The root cause was a client display fallback, but this function
@@ -53,4 +53,11 @@ test('stripModelTier removes only a trailing [tier] suffix', () => {
   expect(stripModelTier('claude-fable-5[1m]')).toBe('claude-fable-5');
   expect(stripModelTier('gpt-5.5')).toBe('gpt-5.5');
   expect(stripModelTier(stripModelTier('claude-opus-4-8[1m]'))).toBe('claude-opus-4-8');
+});
+
+test('Claude model identity rejects accounting-only pseudo-models', () => {
+  expect(isRealClaudeModelId('claude-opus-5[1m]')).toBe(true);
+  expect(isRealClaudeModelId('claude-fable-5')).toBe(true);
+  expect(isRealClaudeModelId('<synthetic>')).toBe(false);
+  expect(isRealClaudeModelId('')).toBe(false);
 });

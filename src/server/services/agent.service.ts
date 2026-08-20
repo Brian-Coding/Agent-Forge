@@ -2,15 +2,17 @@
 import { join } from 'path';
 import type { AgentInfo, AgentProvider, AgentStatus, AgentTurnOutcome, ChatImageAttachment, ChatMessage } from '../../shared/protocol';
 import type { ChatTurnOptions } from './chat.service';
-import { stripModelTier } from '../agents/agent-kinds';
+import { isChatAgentKind, isRealClaudeModelId, stripModelTier } from '../agents/agent-kinds';
 import { resolveAgentModel, resolveAgentReasoningLevel } from '../agents/registry';
-import { generateId } from '../utils';
+import { generateId, treeKill, type TreeKillResult } from '../utils';
 import { persistenceService } from './persistence.service';
 import { documentService } from './document.service';
 import { workspaceService } from './workspace.service';
 import { settingsService } from './settings.service';
 import { broadcast } from '../broadcast';
 import { normalizeSharedProjectContext } from './prompt-builder.service';
+import { observeProviderModel } from './model-catalog.service';
+import { runDurableMutation } from './durable-mutation';
 import {
   buildExhaustiveImagePrompt,
   storeChatImageBytes,
@@ -48,6 +50,40 @@ interface ManagedAgent {
   lastModelRan?: string;
 }
 
+export interface TrackedPidTerminationSummary {
+  succeeded: number[];
+  failed: Array<{ pid: number; result: TreeKillResult }>;
+}
+
+/** Terminate only PIDs that Agent Forge explicitly persisted as its own. */
+export async function terminateTrackedPids(
+  pids: Iterable<number>,
+  terminate: (pid: number) => Promise<TreeKillResult> = pid => treeKill(pid),
+): Promise<TrackedPidTerminationSummary> {
+  const safePids = [...new Set(pids)].filter(pid =>
+    Number.isSafeInteger(pid) && pid > 1 && pid !== process.pid);
+  const outcomes = await Promise.all(safePids.map(async pid => {
+    try {
+      return { pid, result: await terminate(pid) };
+    } catch (error) {
+      return {
+        pid,
+        result: {
+          attempted: true,
+          succeeded: false,
+          exitCode: null,
+          timedOut: false,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      };
+    }
+  }));
+  return {
+    succeeded: outcomes.filter(outcome => outcome.result.succeeded).map(outcome => outcome.pid),
+    failed: outcomes.filter(outcome => !outcome.result.succeeded),
+  };
+}
+
 export interface CreateAgentOptions {
   hideFromGrid?: boolean;
   provider?: AgentProvider;
@@ -59,7 +95,13 @@ export interface CreateAgentOptions {
 const agents: Map<string, ManagedAgent> = (globalThis as any).__agentsMap ??= new Map<string, ManagedAgent>();
 const messages: Map<string, ChatMessage[]> = (globalThis as any).__messagesMap ??= new Map<string, ChatMessage[]>();
 const sendLocks: Map<string, Promise<void>> = (globalThis as any).__sendLocks ??= new Map<string, Promise<void>>();
+const removalPromises: Map<string, Promise<boolean>> = (globalThis as any).__agentRemovalPromises ??= new Map<string, Promise<boolean>>();
 let sharedContext: string = (globalThis as any).__sharedContext ?? '';
+
+function restoreAgentInfo(target: AgentInfo, snapshot: AgentInfo): void {
+  for (const key of Object.keys(target) as Array<keyof AgentInfo>) delete (target as any)[key];
+  Object.assign(target, snapshot);
+}
 
 // --- Lifecycle bus ---
 // Other services (qa.service, atlas.service) subscribe to agent transitions
@@ -232,10 +274,20 @@ async function _killAgentImpl(agentId: string): Promise<boolean> {
 
   clearAgentTimeouts(agentId);
   await documentService.releaseLocksForAgent(agentId);
-  agent.info.status = 'stopped';
-  broadcast({ type: 'agent_updated', agent: agent.info });
-  await persistenceService.saveNow();
-  return true;
+  return runDurableMutation(async () => {
+    const current = agents.get(agentId);
+    if (!current) return false;
+    const previousStatus = current.info.status;
+    current.info.status = 'stopped';
+    try {
+      await persistenceService.saveNow();
+      broadcast({ type: 'agent_updated', agent: current.info });
+      return true;
+    } catch (error) {
+      current.info.status = previousStatus;
+      throw error;
+    }
+  });
 }
 
 export const agentService = {
@@ -364,22 +416,27 @@ export const agentService = {
   }): void {
     const agent = agents.get(agentId);
     if (!agent) return;
-    if (typeof usage.contextLimit === 'number' && usage.contextLimit > 0) {
-      agent.contextLimit = usage.contextLimit;
+    const finitePositive = (value: unknown): value is number =>
+      typeof value === 'number' && Number.isFinite(value) && value > 0;
+    if (finitePositive(usage.contextLimit)) {
+      agent.contextLimit = Math.min(Math.floor(usage.contextLimit), 10_000_000);
     }
-    if (typeof usage.contextTokens === 'number' && usage.contextTokens >= 0) {
+    if (typeof usage.contextTokens === 'number' && Number.isFinite(usage.contextTokens) && usage.contextTokens >= 0) {
       const limit = agent.contextLimit > 0 ? agent.contextLimit : 200000;
-      agent.contextTokens = Math.min(usage.contextTokens, limit);
+      agent.contextTokens = Math.min(Math.floor(usage.contextTokens), limit);
     }
-    const saneDeltaCeiling = Math.max(agent.contextLimit || 200000, 200000) * 2;
-    if (typeof usage.inputTokensDelta === 'number' && usage.inputTokensDelta > 0) {
-      agent.totalInputTokens += Math.min(usage.inputTokensDelta, saneDeltaCeiling);
+    // Aggregate per-turn usage can legitimately exceed the model context
+    // window because each tool round re-sends context. Keep a high fixed cap
+    // while rejecting NaN/Infinity outright.
+    const saneDeltaCeiling = 100_000_000;
+    if (finitePositive(usage.inputTokensDelta)) {
+      agent.totalInputTokens += Math.min(Math.floor(usage.inputTokensDelta), saneDeltaCeiling);
     }
-    if (typeof usage.outputTokensDelta === 'number' && usage.outputTokensDelta > 0) {
-      agent.totalOutputTokens += Math.min(usage.outputTokensDelta, saneDeltaCeiling);
+    if (finitePositive(usage.outputTokensDelta)) {
+      agent.totalOutputTokens += Math.min(Math.floor(usage.outputTokensDelta), saneDeltaCeiling);
     }
-    if (typeof usage.costUsdDelta === 'number' && usage.costUsdDelta > 0) agent.totalCostUsd += usage.costUsdDelta;
-    if (typeof usage.turnsDelta === 'number' && usage.turnsDelta > 0) agent.numTurns += usage.turnsDelta;
+    if (finitePositive(usage.costUsdDelta)) agent.totalCostUsd += Math.min(usage.costUsdDelta, 1_000_000);
+    if (finitePositive(usage.turnsDelta)) agent.numTurns += Math.min(Math.floor(usage.turnsDelta), 1_000_000);
     if (typeof usage.modelRan === 'string' && usage.modelRan) agent.lastModelRan = usage.modelRan;
     persistenceService.save();
   },
@@ -399,7 +456,7 @@ export const agentService = {
       wsId = Array.from(workspaceService.keys())[0];
     }
     if (!wsId) {
-      const ws = await workspaceService.create('Default');
+      const ws = await workspaceService.create('Default', cwd);
       wsId = ws.id;
     }
 
@@ -428,65 +485,128 @@ export const agentService = {
       throw new Error(`Unsupported ${provider} reasoning level requested for ${model || 'the selected model'}: ${opts.reasoningLevel}`);
     }
 
-    const id = generateId();
-    const info: AgentInfo = {
-      id,
-      name,
-      cwd,
-      referencePaths: finalRefPaths,
-      systemPrompt,
-      status: 'idle',
-      createdAt: Date.now(),
-      workspaceId: wsId,
-      provider,
-      model,
-      reasoningLevel,
-    };
-    if (opts.hideFromGrid) info.hideFromGrid = true;
+    const targetWorkspaceId = wsId;
+    return runDurableMutation(async () => {
+      const targetWorkspace = workspaceService.get(targetWorkspaceId);
+      if (!targetWorkspace) throw new Error(`Workspace no longer exists: ${targetWorkspaceId}`);
 
-    agents.set(id, {
-      info,
-      currentSessionId: null,
-      currentSessionProvider: null,
-      currentSessionModel: null,
-      watcher: null,
-      lastFileChange: [],
-      pendingTimeouts: [],
-      contextTokens: 0,
-      contextLimit: 200000,
-      totalInputTokens: 0,
-      totalOutputTokens: 0,
-      totalCostUsd: 0,
-      numTurns: 0,
+      const id = generateId();
+      const info: AgentInfo = {
+        id,
+        name,
+        cwd,
+        referencePaths: finalRefPaths,
+        systemPrompt,
+        status: 'idle',
+        createdAt: Date.now(),
+        workspaceId: targetWorkspaceId,
+        provider,
+        model,
+        reasoningLevel,
+      };
+      if (opts.hideFromGrid) info.hideFromGrid = true;
+
+      const previousSelectedAgentIds = [...targetWorkspace.selectedAgentIds];
+      agents.set(id, {
+        info,
+        currentSessionId: null,
+        currentSessionProvider: null,
+        currentSessionModel: null,
+        watcher: null,
+        lastFileChange: [],
+        pendingTimeouts: [],
+        contextTokens: 0,
+        contextLimit: 200000,
+        totalInputTokens: 0,
+        totalOutputTokens: 0,
+        totalCostUsd: 0,
+        numTurns: 0,
+      });
+
+      try {
+        workspaceService.addAgentToWorkspace(targetWorkspaceId, id, opts.hideFromGrid);
+        startFileWatcher(id);
+        documentService.startPlansWatcher(id, cwd);
+        await persistenceService.saveNow();
+        return agents.get(id)!.info;
+      } catch (error) {
+        stopFileWatcher(id);
+        documentService.stopPlansWatcher(id);
+        agents.delete(id);
+        messages.delete(id);
+        targetWorkspace.selectedAgentIds = previousSelectedAgentIds;
+        throw error;
+      }
     });
-
-    workspaceService.addAgentToWorkspace(wsId, id, opts.hideFromGrid);
-    startFileWatcher(id);
-    documentService.startPlansWatcher(id, cwd);
-    await persistenceService.saveNow();
-    return agents.get(id)!.info;
   },
 
   async removeAgent(agentId: string): Promise<boolean> {
-    const agent = agents.get(agentId);
-    if (!agent) return false;
+    const existing = removalPromises.get(agentId);
+    if (existing) return existing;
+    if (!agents.has(agentId)) return false;
 
-    // Interrupt any in-flight adapter handle. The kill is fire-and-forget;
-    // chat.service's normal cleanup path resolves once the subprocess dies.
-    const { chatService } = await import('./chat.service');
-    chatService.kill(agentId);
-    chatService.resetLock(agentId);
+    const removal = (async (): Promise<boolean> => {
+      // Interrupt any in-flight adapter handle. The kill is fire-and-forget;
+      // chat.service's normal cleanup path resolves once the subprocess dies.
+      const { chatService } = await import('./chat.service');
+      chatService.kill(agentId);
+      chatService.resetLock(agentId);
 
-    stopFileWatcher(agentId);
-    documentService.stopPlansWatcher(agentId);
-    await documentService.releaseLocksForAgent(agentId);
-    workspaceService.removeAgentFromAllWorkspaces(agentId);
+      // Do not delete the state underneath an adapter that is still
+      // unwinding. Its finally block may persist a partial result; deleting
+      // first lets that block recreate an orphan message bucket after the
+      // agent has disappeared. A bounded refusal is safer than false cleanup.
+      if (!(await chatService.waitForAgentTurn(agentId, 4_000))) {
+        throw new Error(`Cannot remove agent ${agentId}: its active turn did not stop within 4000ms`);
+      }
 
-    agents.delete(agentId);
-    messages.delete(agentId);
-    await notifyLifecycle('onRemoved', agentId);
-    await persistenceService.saveNow();
-    return true;
+      stopFileWatcher(agentId);
+      documentService.stopPlansWatcher(agentId);
+      try {
+        await documentService.releaseLocksForAgent(agentId);
+        const removed = await runDurableMutation(async () => {
+          const managed = agents.get(agentId);
+          if (!managed) return false;
+          const priorMessages = messages.get(agentId);
+          const workspaceMembership = new Map(
+            Array.from(workspaceService.values(), workspace => [workspace, {
+              selectedAgentIds: [...workspace.selectedAgentIds],
+              lockedAgentIds: [...workspace.lockedAgentIds],
+            }] as const),
+          );
+
+          workspaceService.removeAgentFromAllWorkspaces(agentId);
+          agents.delete(agentId);
+          messages.delete(agentId);
+          try {
+            await persistenceService.saveNow();
+            return true;
+          } catch (error) {
+            agents.set(agentId, managed);
+            if (priorMessages) messages.set(agentId, priorMessages);
+            for (const [workspace, membership] of workspaceMembership) {
+              workspace.selectedAgentIds = [...membership.selectedAgentIds];
+              workspace.lockedAgentIds = [...membership.lockedAgentIds];
+            }
+            throw error;
+          }
+        });
+        if (removed) await notifyLifecycle('onRemoved', agentId);
+        return removed;
+      } catch (error) {
+        if (agents.has(agentId)) {
+          startFileWatcher(agentId);
+          documentService.startPlansWatcher(agentId, agents.get(agentId)!.info.cwd);
+        }
+        throw error;
+      }
+    })();
+    removalPromises.set(agentId, removal);
+    try {
+      return await removal;
+    } finally {
+      if (removalPromises.get(agentId) === removal) removalPromises.delete(agentId);
+    }
   },
 
   async updateAgent(
@@ -501,67 +621,137 @@ export const agentService = {
       reasoningLevel?: string;
     },
   ): Promise<AgentInfo | null> {
-    const agent = agents.get(agentId);
-    if (!agent) return null;
-
-    if (updates.cwd !== undefined) {
-      if (!existsSync(updates.cwd)) {
+    return runDurableMutation(async () => {
+      const agent = agents.get(agentId);
+      if (!agent) return null;
+      if (updates.cwd !== undefined && !existsSync(updates.cwd)) {
         throw new Error(`Working directory does not exist: ${updates.cwd}`);
       }
-      const cwdChanged = updates.cwd !== agent.info.cwd;
-      agent.info.cwd = updates.cwd;
-      if (cwdChanged) {
-        stopFileWatcher(agentId);
-        startFileWatcher(agentId);
+
+      // Validate the complete next provider/model/reasoning tuple before
+      // touching metadata or moving watchers. Service callers are not always
+      // reached through the typed websocket boundary, and a provider-only
+      // switch must never retain a model that belongs to the old provider.
+      if (updates.provider !== undefined && !isChatAgentKind(updates.provider)) {
+        throw new Error(`Unsupported agent provider: ${String(updates.provider)}`);
       }
-    }
+      const currentProvider = isChatAgentKind(agent.info.provider) ? agent.info.provider : 'claude';
+      const nextProvider = updates.provider ?? currentProvider;
+      const providerChanged = nextProvider !== currentProvider;
+      let nextModel = agent.info.model;
+      if (updates.model !== undefined || providerChanged) {
+        nextModel = resolveAgentModel(nextProvider, updates.model);
+        if (updates.model !== undefined && nextModel !== updates.model) {
+          throw new Error(`Unsupported ${nextProvider} model requested for agent update: ${updates.model}`);
+        }
+      }
+      const modelChanged = nextModel !== agent.info.model;
+      let nextReasoningLevel = agent.info.reasoningLevel;
+      if (updates.reasoningLevel !== undefined || providerChanged || modelChanged) {
+        nextReasoningLevel = resolveAgentReasoningLevel(nextProvider, nextModel, updates.reasoningLevel);
+        const normalizedRequestedReasoning = updates.reasoningLevel === 'extra_high' ? 'xhigh' : updates.reasoningLevel;
+        if (normalizedRequestedReasoning && nextReasoningLevel !== normalizedRequestedReasoning) {
+          throw new Error(`Unsupported ${nextProvider} reasoning level requested for ${nextModel || 'the selected model'}: ${updates.reasoningLevel}`);
+        }
+      }
 
-    if (updates.name !== undefined) agent.info.name = updates.name;
-    if (updates.referencePaths !== undefined) agent.info.referencePaths = updates.referencePaths;
-    if (updates.systemPrompt !== undefined) agent.info.systemPrompt = updates.systemPrompt;
-    // Provider / model / reasoningLevel are hot-swappable per the inline
-    // dropdowns under each agent's chat input. Provider/model changes must
-    // invalidate the current session because provider CLIs may bind a resumed
-    // conversation to the model it started with and ignore a later --model.
-    const nextProvider = updates.provider !== undefined ? updates.provider : agent.info.provider;
-    const nextModel = updates.model !== undefined ? updates.model : agent.info.model;
-    const providerChanged = updates.provider !== undefined && updates.provider !== agent.info.provider;
-    const modelChanged = updates.model !== undefined && updates.model !== agent.info.model;
+      const previousInfo = structuredClone(agent.info);
+      const previousSessionId = agent.currentSessionId;
+      const previousSessionProvider = agent.currentSessionProvider;
+      const previousSessionModel = agent.currentSessionModel;
+      const cwdChanged = updates.cwd !== undefined && updates.cwd !== agent.info.cwd;
 
-    if (updates.provider !== undefined) agent.info.provider = updates.provider;
-    if (updates.model !== undefined) agent.info.model = updates.model;
-    if (updates.reasoningLevel !== undefined) agent.info.reasoningLevel = updates.reasoningLevel;
-    if ((providerChanged || modelChanged) && (agent.currentSessionId || agent.currentSessionProvider || agent.currentSessionModel)) {
-      agent.currentSessionId = null;
-      agent.currentSessionProvider = null;
-      agent.currentSessionModel = null;
-      console.log(`[agent] cleared session for ${agentId}: provider/model changed to ${nextProvider ?? 'unset'}/${nextModel ?? 'unset'}`);
-    }
-    // An explicit provider/model choice is an acknowledgment of any pending
-    // mismatch: the user has re-decided what should run, and the session was
-    // just invalidated so the next turn spawns fresh with exactly that model.
-    if ((providerChanged || modelChanged) && agent.info.modelMismatch) {
-      agent.info.modelMismatch = null;
-    }
+      try {
+        if (updates.cwd !== undefined) {
+          agent.info.cwd = updates.cwd;
+          if (cwdChanged) {
+            stopFileWatcher(agentId);
+            startFileWatcher(agentId);
+            documentService.stopPlansWatcher(agentId);
+            documentService.startPlansWatcher(agentId, updates.cwd);
+          }
+        }
 
-    await persistenceService.saveNow();
-    return agent.info;
+        if (updates.name !== undefined) agent.info.name = updates.name;
+        if (updates.referencePaths !== undefined) agent.info.referencePaths = [...updates.referencePaths];
+        if (updates.systemPrompt !== undefined) agent.info.systemPrompt = updates.systemPrompt;
+        // Provider / model / reasoningLevel are hot-swappable per the inline
+        // dropdowns under each agent's chat input. Provider/model changes must
+        // invalidate the current session because provider CLIs may bind a resumed
+        // conversation to the model it started with and ignore a later --model.
+        if (updates.provider !== undefined) agent.info.provider = updates.provider;
+        if (updates.model !== undefined || providerChanged) agent.info.model = nextModel;
+        if (updates.reasoningLevel !== undefined || providerChanged || modelChanged) {
+          if (nextReasoningLevel === undefined) delete agent.info.reasoningLevel;
+          else agent.info.reasoningLevel = nextReasoningLevel;
+        }
+        if ((providerChanged || modelChanged) && (agent.currentSessionId || agent.currentSessionProvider || agent.currentSessionModel)) {
+          agent.currentSessionId = null;
+          agent.currentSessionProvider = null;
+          agent.currentSessionModel = null;
+          console.log(`[agent] cleared session for ${agentId}: provider/model changed to ${nextProvider ?? 'unset'}/${nextModel ?? 'unset'}`);
+        }
+        // An explicit provider/model choice is an acknowledgment of any pending
+        // mismatch: the user has re-decided what should run, and the session was
+        // just invalidated so the next turn spawns fresh with exactly that model.
+        if ((providerChanged || modelChanged) && agent.info.modelMismatch) agent.info.modelMismatch = null;
+
+        await persistenceService.saveNow();
+        return agent.info;
+      } catch (error) {
+        if (cwdChanged) {
+          try {
+            stopFileWatcher(agentId);
+            documentService.stopPlansWatcher(agentId);
+          } catch (cleanupError) {
+            console.error(`Failed to stop replacement watchers for ${agentId}:`, cleanupError);
+          }
+        }
+        restoreAgentInfo(agent.info, previousInfo);
+        agent.currentSessionId = previousSessionId;
+        agent.currentSessionProvider = previousSessionProvider;
+        agent.currentSessionModel = previousSessionModel;
+        if (cwdChanged) {
+          startFileWatcher(agentId);
+          documentService.startPlansWatcher(agentId, previousInfo.cwd);
+        }
+        throw error;
+      }
+    });
   },
 
   async clearHistory(agentId: string): Promise<boolean> {
-    const agent = agents.get(agentId);
-    if (!agent) return false;
-    messages.set(agentId, []);
-    // "Clear History" fully resets the agent's memory.
-    agent.currentSessionId = null;
-    agent.currentSessionProvider = null;
-    agent.currentSessionModel = null;
-    // A fully reset agent has no session to be mismatched about.
-    agent.info.modelMismatch = null;
-    agent.info.lastTurnOutcome = null;
-    await persistenceService.saveNow();
-    broadcast({ type: 'agent_updated', agent: agent.info });
-    return true;
+    return runDurableMutation(async () => {
+      const agent = agents.get(agentId);
+      if (!agent) return false;
+      const hadMessages = messages.has(agentId);
+      const previousMessages = messages.get(agentId);
+      const previousInfo = structuredClone(agent.info);
+      const previousSessionId = agent.currentSessionId;
+      const previousSessionProvider = agent.currentSessionProvider;
+      const previousSessionModel = agent.currentSessionModel;
+      messages.set(agentId, []);
+      // "Clear History" fully resets the agent's memory.
+      agent.currentSessionId = null;
+      agent.currentSessionProvider = null;
+      agent.currentSessionModel = null;
+      // A fully reset agent has no session to be mismatched about.
+      agent.info.modelMismatch = null;
+      agent.info.lastTurnOutcome = null;
+      try {
+        await persistenceService.saveNow();
+        broadcast({ type: 'agent_updated', agent: agent.info });
+        return true;
+      } catch (error) {
+        if (hadMessages) messages.set(agentId, previousMessages!);
+        else messages.delete(agentId);
+        restoreAgentInfo(agent.info, previousInfo);
+        agent.currentSessionId = previousSessionId;
+        agent.currentSessionProvider = previousSessionProvider;
+        agent.currentSessionModel = previousSessionModel;
+        throw error;
+      }
+    });
   },
 
   // --- Model-mismatch guard ---------------------------------------------------
@@ -576,6 +766,7 @@ export const agentService = {
   setModelMismatch(agentId: string, requested: string, ran: string): void {
     const agent = agents.get(agentId);
     if (!agent) return;
+    if (agent.info.provider === 'claude' && !isRealClaudeModelId(ran)) return;
     const prev = agent.info.modelMismatch;
     if (prev && prev.requested === requested && prev.ran === ran) return;
     agent.info.modelMismatch = { requested, ran, at: Date.now() };
@@ -591,26 +782,42 @@ export const agentService = {
    *    the next turn spawns fresh (fresh spawns honor --model).
    */
   async resolveModelMismatch(agentId: string, action: 'continue-actual' | 'fresh-requested'): Promise<AgentInfo | null> {
-    const agent = agents.get(agentId);
-    if (!agent) return null;
-    const mm = agent.info.modelMismatch;
-    if (!mm) return agent.info;
+    return runDurableMutation(async () => {
+      const agent = agents.get(agentId);
+      if (!agent) return null;
+      const mm = agent.info.modelMismatch;
+      if (!mm) return agent.info;
+      const previousInfo = structuredClone(agent.info);
+      const previousSessionId = agent.currentSessionId;
+      const previousSessionProvider = agent.currentSessionProvider;
+      const previousSessionModel = agent.currentSessionModel;
 
-    if (action === 'continue-actual') {
-      // Deliberately NOT updateAgent(): that would invalidate the session, but
-      // the session genuinely belongs to `ran` — adopt it, don't discard it.
-      const actualModel = stripModelTier(mm.ran);
-      agent.info.model = actualModel;
-      agent.currentSessionModel = agent.currentSessionId ? actualModel : null;
-    } else {
-      agent.currentSessionId = null;
-      agent.currentSessionProvider = null;
-      agent.currentSessionModel = null;
-    }
-    agent.info.modelMismatch = null;
-    await persistenceService.saveNow();
-    broadcast({ type: 'agent_updated', agent: agent.info });
-    return agent.info;
+      if (action === 'continue-actual') {
+        // Deliberately NOT updateAgent(): that would invalidate the session, but
+        // the session genuinely belongs to `ran` — adopt it, don't discard it.
+        const actualModel = stripModelTier(mm.ran);
+        if (agent.info.provider !== 'claude' || isRealClaudeModelId(actualModel)) {
+          agent.info.model = actualModel;
+          agent.currentSessionModel = agent.currentSessionId ? actualModel : null;
+        }
+      } else {
+        agent.currentSessionId = null;
+        agent.currentSessionProvider = null;
+        agent.currentSessionModel = null;
+      }
+      agent.info.modelMismatch = null;
+      try {
+        await persistenceService.saveNow();
+        broadcast({ type: 'agent_updated', agent: agent.info });
+        return agent.info;
+      } catch (error) {
+        restoreAgentInfo(agent.info, previousInfo);
+        agent.currentSessionId = previousSessionId;
+        agent.currentSessionProvider = previousSessionProvider;
+        agent.currentSessionModel = previousSessionModel;
+        throw error;
+      }
+    });
   },
 
   // --- Current session (read by chat.service to decide --resume vs fresh) ---
@@ -692,9 +899,18 @@ export const agentService = {
   // --- Shared Context ---
 
   async updateSharedContext(content: string): Promise<void> {
-    sharedContext = content;
-    (globalThis as any).__sharedContext = content;
-    await persistenceService.saveNow();
+    return runDurableMutation(async () => {
+      const previous = sharedContext;
+      sharedContext = content;
+      (globalThis as any).__sharedContext = content;
+      try {
+        await persistenceService.saveNow();
+      } catch (error) {
+        sharedContext = previous;
+        (globalThis as any).__sharedContext = previous;
+        throw error;
+      }
+    });
   },
 
   // --- Image handling ---
@@ -771,31 +987,17 @@ export const agentService = {
   },
 
   async killAllProcesses(): Promise<{ success: boolean; message: string }> {
-    // "Kill All" is the emergency button — taskkill every spawned CLI by
-    // image name. Currently covers Claude; once Codex is wired (Phase 3) the
-    // adapter map below will grow.
-    console.log('KILL ALL: Killing all claude.exe / codex.exe processes machine-wide...');
-    const images = ['claude.exe', 'codex.exe'];
+    // "Kill All" is scoped to child PIDs recorded by this Agent Forge run.
+    // Never kill unrelated machine-wide Claude/Codex sessions by image name.
+    console.log('KILL ALL: terminating Agent Forge tracked child processes...');
     try {
-      if (process.platform === 'win32') {
-        for (const img of images) {
-          try {
-            const proc = Bun.spawn(['taskkill', '/F', '/IM', img, '/T'], { stdout: 'pipe', stderr: 'pipe' });
-            await proc.exited;
-          } catch {
-            // image not present — fine
-          }
-        }
-      } else {
-        // POSIX fallback. pkill returns non-zero if no match — ignored.
-        for (const img of images) {
-          try {
-            const name = img.replace(/\.exe$/, '');
-            const proc = Bun.spawn(['pkill', '-9', '-f', name], { stdout: 'pipe', stderr: 'pipe' });
-            await proc.exited;
-          } catch {}
-        }
+      const { chatService } = await import('./chat.service');
+      for (const agentId of agents.keys()) {
+        chatService.resetLock(agentId);
+        chatService.kill(agentId);
       }
+      const termination = await terminateTrackedPids(persistenceService.getActivePids());
+      for (const pid of termination.succeeded) persistenceService.untrackPid(pid);
 
       for (const agent of agents.values()) {
         agent.info.status = 'stopped';
@@ -803,11 +1005,17 @@ export const agentService = {
         await documentService.releaseLocksForAgent(agent.info.id);
       }
 
-      persistenceService.clearAllPids();
       await persistenceService.savePidsNow();
       await persistenceService.saveNow();
 
-      return { success: true, message: 'All agent CLI processes killed.' };
+      if (termination.failed.length > 0) {
+        const failedPids = termination.failed.map(entry => entry.pid).join(', ');
+        return {
+          success: false,
+          message: `Could not confirm termination of tracked PID(s): ${failedPids}. They remain recorded for startup recovery.`,
+        };
+      }
+      return { success: true, message: 'All tracked Agent Forge child processes were terminated.' };
     } catch (e: any) {
       console.error('killAllProcesses failed:', e);
       return { success: false, message: e.message || 'Failed to kill processes' };
@@ -852,6 +1060,12 @@ export const agentService = {
         provider: (agentData.provider === 'claude' || agentData.provider === 'codex') ? agentData.provider : 'claude',
         model: typeof agentData.model === 'string' && agentData.model ? agentData.model : undefined,
       };
+      if (info.provider === 'claude') {
+        if (info.model && !isRealClaudeModelId(info.model)) info.model = undefined;
+        if (info.modelMismatch && !isRealClaudeModelId(info.modelMismatch.ran)) info.modelMismatch = null;
+        if (info.model) observeProviderModel('claude', info.model);
+        if (info.modelMismatch?.ran) observeProviderModel('claude', info.modelMismatch.ran);
+      }
       // The persisted record carries session/accounting fields that live on
       // ManagedAgent, not AgentInfo. Strip them from the spread so `info`
       // (which gets broadcast verbatim) can never carry a stale copy of the
@@ -870,7 +1084,9 @@ export const agentService = {
         info,
         currentSessionId,
         currentSessionProvider,
-        currentSessionModel,
+        currentSessionModel: currentSessionProvider === 'claude' && currentSessionModel && !isRealClaudeModelId(currentSessionModel)
+          ? null
+          : currentSessionModel,
         watcher: null,
         lastFileChange: [],
         pendingTimeouts: [],
@@ -901,12 +1117,19 @@ export const agentService = {
   },
 
   /** Reassign agents from one workspace to another */
-  reassignAgents(fromWsId: string, toWsId: string): void {
+  reassignAgents(fromWsId: string, toWsId: string): () => void {
+    const changed: ManagedAgent[] = [];
     for (const managed of agents.values()) {
       if (managed.info.workspaceId === fromWsId) {
+        changed.push(managed);
         managed.info.workspaceId = toWsId;
       }
     }
+    return () => {
+      for (const managed of changed) {
+        if (managed.info.workspaceId === toWsId) managed.info.workspaceId = fromWsId;
+      }
+    };
   },
 
   /** Build persisted agent data for persistence service */

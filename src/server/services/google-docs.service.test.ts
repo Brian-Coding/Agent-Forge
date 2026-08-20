@@ -3,6 +3,9 @@ import {
   buildGoogleDocsAgentInstructions,
   extractGoogleDocument,
   parseGoogleDocumentUrl,
+  validateGoogleBatchUpdatePayload,
+  validateGoogleDocumentPayload,
+  validateServiceAccountCredential,
 } from './google-docs.service';
 
 describe('Google Docs service', () => {
@@ -62,5 +65,33 @@ describe('Google Docs service', () => {
     expect(instructions).toContain('To move an item');
     expect(instructions).toContain('revision conflict');
     expect(instructions).not.toContain('private_key');
+  });
+
+  test('rejects empty or partial HTTP 200 payloads instead of reporting a connection or write success', () => {
+    expect(() => validateGoogleDocumentPayload({})).toThrow('incomplete document response');
+    expect(() => validateGoogleDocumentPayload({
+      documentId: 'doc',
+      title: 'Tracker',
+      revisionId: 'rev',
+      tabs: [],
+    })).not.toThrow();
+    expect(() => validateGoogleBatchUpdatePayload({})).toThrow('malformed write response');
+    expect(() => validateGoogleBatchUpdatePayload({ documentId: 'doc', replies: [] })).not.toThrow();
+  });
+
+  test('service-account token endpoints cannot redirect credential assertions to arbitrary hosts', () => {
+    const base = {
+      type: 'service_account',
+      client_email: 'fixture@example.iam.gserviceaccount.com',
+      private_key: 'private-key-fixture',
+    };
+    expect(() => validateServiceAccountCredential({
+      ...base,
+      token_uri: 'http://127.0.0.1/collect',
+    })).toThrow('HTTPS Google API endpoint');
+    expect(() => validateServiceAccountCredential({
+      ...base,
+      token_uri: 'https://oauth2.googleapis.com/token',
+    })).not.toThrow();
   });
 });

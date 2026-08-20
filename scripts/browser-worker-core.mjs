@@ -49,3 +49,37 @@ export function compileEvaluationScript(script) {
   }
 }
 
+/**
+ * Share one in-flight operation per key. Rejections are visible to every
+ * waiter but never poison a later retry, and unrelated keys remain parallel.
+ */
+export function singleFlight(inFlight, key, operation) {
+  const existing = inFlight.get(key);
+  if (existing) return existing;
+  const pending = Promise.resolve().then(operation);
+  inFlight.set(key, pending);
+  void pending.finally(() => {
+    if (inFlight.get(key) === pending) inFlight.delete(key);
+  }).catch(() => {});
+  return pending;
+}
+
+/** Reject on schedule even when timeout cleanup itself hangs. */
+export async function withOperationTimeout(operation, timeoutMs, label, onTimeout) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      try {
+        Promise.resolve(onTimeout?.()).catch(() => {});
+      } finally {
+        reject(new Error(`${label} timed out after ${timeoutMs}ms`));
+      }
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([operation, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+

@@ -7,15 +7,25 @@ import {
   readFile,
   readdir,
   realpath,
-  rename,
-  rm,
   stat,
   writeFile,
 } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { safeMoveDirectory, safeRemoveTree } from './safe-filesystem.mjs';
 
 export const ATLAS_SCHEMA_VERSION = 1;
 export const ATLAS_CANDIDATES_DIR = 'docs/.agent-forge-atlas-candidates';
+const ATLAS_CLEANUP_MAX_ENTRIES = 100_000;
+const ATLAS_BUNDLE_TOP_LEVEL_NAMES = [
+  '.history',
+  'atlas.md',
+  'atlas.json',
+  'manifest.json',
+  'checkpoint.json',
+  'changelog.md',
+  'README.md',
+  'shots',
+] as const;
 
 interface AtlasSurfaceRecord {
   id: string;
@@ -389,6 +399,44 @@ async function copyCurrentIntoHistory(canonicalRoot: string, candidateRoot: stri
   }
 }
 
+async function removeGeneratedAtlasDirectory(
+  projectRoot: string,
+  allowedRoot: string,
+  targetPath: string,
+  reason: string,
+): Promise<void> {
+  await safeRemoveTree({
+    targetPath,
+    allowedRoot,
+    reason,
+    mode: 'delete',
+    permanent: true,
+    allowNonEmpty: true,
+    allowedTopLevelNames: ATLAS_BUNDLE_TOP_LEVEL_NAMES,
+    maxEntries: ATLAS_CLEANUP_MAX_ENTRIES,
+    protectedPaths: [projectRoot],
+  });
+}
+
+async function moveGeneratedAtlasDirectory(
+  projectRoot: string,
+  docsRoot: string,
+  sourcePath: string,
+  destinationPath: string,
+  reason: string,
+): Promise<void> {
+  await safeMoveDirectory({
+    targetPath: sourcePath,
+    destinationPath,
+    allowedRoot: docsRoot,
+    reason,
+    allowNonEmpty: true,
+    allowedTopLevelNames: ATLAS_BUNDLE_TOP_LEVEL_NAMES,
+    maxEntries: ATLAS_CLEANUP_MAX_ENTRIES,
+    protectedPaths: [projectRoot],
+  });
+}
+
 /** Validate first, then swap whole directories with an automatic rollback. */
 export async function promoteAtlasCandidate(projectRoot: string, runId: string): Promise<AtlasValidationResult> {
   const validation = await validateAtlasCandidate(projectRoot, runId);
@@ -404,7 +452,13 @@ export async function promoteAtlasCandidate(projectRoot: string, runId: string):
 
   // Recover an interrupted prior promotion before touching the last-good Atlas.
   if (existsSync(rollbackRoot) && !existsSync(paths.canonicalRoot)) {
-    await rename(rollbackRoot, paths.canonicalRoot);
+    await moveGeneratedAtlasDirectory(
+      paths.projectRoot,
+      paths.docsRoot,
+      rollbackRoot,
+      paths.canonicalRoot,
+      'Recover the last-good Atlas after an interrupted publication',
+    );
   }
 
   // If the canonical bundle already carries this run ID, publication succeeded
@@ -413,41 +467,112 @@ export async function promoteAtlasCandidate(projectRoot: string, runId: string):
     try {
       const currentManifest = JSON.parse(await readFile(join(paths.canonicalRoot, 'manifest.json'), 'utf8')) as AtlasManifest;
       if (currentManifest.runId === runId && currentManifest.status === 'complete') {
-        if (existsSync(rollbackRoot)) await rm(rollbackRoot, { recursive: true, force: true }).catch(() => {});
-        if (existsSync(publishRoot)) await rm(publishRoot, { recursive: true, force: true }).catch(() => {});
+        if (existsSync(rollbackRoot)) {
+          await removeGeneratedAtlasDirectory(
+            paths.projectRoot,
+            paths.docsRoot,
+            rollbackRoot,
+            'Remove generated Atlas rollback staging after an idempotent publication retry',
+          ).catch(() => {});
+        }
+        if (existsSync(publishRoot)) {
+          await removeGeneratedAtlasDirectory(
+            paths.projectRoot,
+            paths.docsRoot,
+            publishRoot,
+            'Remove generated Atlas publication staging after an idempotent publication retry',
+          ).catch(() => {});
+        }
         return validation;
       }
     } catch {}
   }
 
-  if (existsSync(rollbackRoot)) await rm(rollbackRoot, { recursive: true, force: true });
-  if (existsSync(publishRoot)) await rm(publishRoot, { recursive: true, force: true });
+  if (existsSync(rollbackRoot)) {
+    await removeGeneratedAtlasDirectory(
+      paths.projectRoot,
+      paths.docsRoot,
+      rollbackRoot,
+      'Remove stale generated Atlas rollback staging before publication',
+    );
+  }
+  if (existsSync(publishRoot)) {
+    await removeGeneratedAtlasDirectory(
+      paths.projectRoot,
+      paths.docsRoot,
+      publishRoot,
+      'Remove stale generated Atlas publication staging before publication',
+    );
+  }
   await copyCurrentIntoHistory(paths.canonicalRoot, paths.candidateRoot);
   await cp(paths.candidateRoot, publishRoot, { recursive: true, force: true });
 
   const hadCurrent = existsSync(paths.canonicalRoot);
-  if (hadCurrent) await rename(paths.canonicalRoot, rollbackRoot);
+  if (hadCurrent) {
+    await moveGeneratedAtlasDirectory(
+      paths.projectRoot,
+      paths.docsRoot,
+      paths.canonicalRoot,
+      rollbackRoot,
+      'Move the last-good Atlas into rollback staging before publication',
+    );
+  }
   try {
-    await rename(publishRoot, paths.canonicalRoot);
+    await moveGeneratedAtlasDirectory(
+      paths.projectRoot,
+      paths.docsRoot,
+      publishRoot,
+      paths.canonicalRoot,
+      'Atomically publish the validated generated Atlas bundle',
+    );
   } catch (error) {
     if (hadCurrent && existsSync(rollbackRoot) && !existsSync(paths.canonicalRoot)) {
-      await rename(rollbackRoot, paths.canonicalRoot).catch(() => {});
+      await moveGeneratedAtlasDirectory(
+        paths.projectRoot,
+        paths.docsRoot,
+        rollbackRoot,
+        paths.canonicalRoot,
+        'Restore the last-good Atlas after publication failed',
+      ).catch(() => {});
     }
     throw error;
   }
 
   // Publication is already successful. Cleanup is best-effort and must never
   // convert a published run into a reported failure.
-  if (existsSync(rollbackRoot)) await rm(rollbackRoot, { recursive: true, force: true }).catch(() => {});
+  if (existsSync(rollbackRoot)) {
+    await removeGeneratedAtlasDirectory(
+      paths.projectRoot,
+      paths.docsRoot,
+      rollbackRoot,
+      'Remove generated Atlas rollback staging after successful publication',
+    ).catch(() => {});
+  }
   return validation;
 }
 
 export async function discardAtlasCandidate(projectRoot: string, runId: string): Promise<void> {
   const paths = atlasCandidatePaths(projectRoot, runId);
   assertInside(paths.candidatesRoot, paths.candidateRoot, 'Atlas candidate');
-  if (existsSync(paths.candidateRoot)) await rm(paths.candidateRoot, { recursive: true, force: true });
+  if (existsSync(paths.candidateRoot)) {
+    await removeGeneratedAtlasDirectory(
+      paths.projectRoot,
+      paths.candidatesRoot,
+      paths.candidateRoot,
+      'Discard the generated Atlas candidate requested by Agent Forge',
+    );
+  }
   try {
     const remaining = await readdir(paths.candidatesRoot);
-    if (remaining.length === 0) await rm(paths.candidatesRoot, { recursive: false, force: true });
+    if (remaining.length === 0) {
+      await safeRemoveTree({
+        targetPath: paths.candidatesRoot,
+        allowedRoot: paths.docsRoot,
+        reason: 'Remove the empty generated Atlas candidate container',
+        mode: 'delete',
+        permanent: true,
+        protectedPaths: [paths.projectRoot],
+      });
+    }
   } catch {}
 }

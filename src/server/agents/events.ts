@@ -14,7 +14,7 @@ export type AgentEvent =
       label?: string;
     }
   | { type: 'text-delta'; text: string; messageId?: string }
-  | { type: 'thinking-delta'; text: string; messageId?: string }
+  | { type: 'thinking-delta'; text: string; messageId?: string; streaming?: boolean }
   | {
       /**
        * A complete provider-authored assistant message that is not durable

@@ -61,17 +61,40 @@ export function compactThinkingText(text: string, maxChars = 700): string {
 export async function drainStreamToString(
   stream: ReadableStream<Uint8Array>,
   maxChars = MAX_STREAM_CHARS,
+  signal?: AbortSignal,
+  retain: 'head' | 'tail' = 'tail',
 ): Promise<string> {
   const reader = stream.getReader();
   const decoder = new TextDecoder();
   let text = '';
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    text += decoder.decode(value, { stream: true });
-    if (text.length > maxChars) text = text.slice(-maxChars);
+  const cancel = () => {
+    void reader.cancel(signal?.reason).catch(() => {});
+  };
+  if (signal?.aborted) cancel();
+  else signal?.addEventListener('abort', cancel, { once: true });
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const decoded = decoder.decode(value, { stream: true });
+      if (retain === 'head') {
+        if (text.length < maxChars) text += decoded.slice(0, maxChars - text.length);
+      } else {
+        text += decoded;
+        if (text.length > maxChars) text = text.slice(-maxChars);
+      }
+    }
+    const final = decoder.decode();
+    if (retain === 'head') {
+      if (text.length < maxChars) text += final.slice(0, maxChars - text.length);
+      return text;
+    }
+    text += final;
+    return text.length > maxChars ? text.slice(-maxChars) : text;
+  } finally {
+    signal?.removeEventListener('abort', cancel);
+    try { reader.releaseLock(); } catch {}
   }
-  return text + decoder.decode();
 }
 
 /**

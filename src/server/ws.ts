@@ -13,10 +13,17 @@ import { atlasService } from './services/atlas.service';
 import { chatService } from './services/chat.service';
 import { usageService } from './services/usage.service';
 import { limitsService } from './services/limits.service';
+import { liveTurnStateService } from './services/live-turn-state.service';
+import {
+  ClientMessageValidationError,
+  MAX_WEBSOCKET_MESSAGE_BYTES,
+  parseClientMessage,
+} from './client-message';
 
-// WebSocket heartbeat — ping every 30s, close stale clients after 40s
-setInterval(() => {
-  const now = Date.now();
+// WebSocket heartbeat — ping every 30s, close stale clients after 40s.
+// Keep one timer across module reloads; its proxy invokes the newest callback
+// so HMR cannot accumulate duplicate pings and cleanup attempts.
+export function runWebSocketHeartbeat(now = Date.now()): void {
   for (const client of clients) {
     const lastPong = clientLastPong.get(client) ?? now;
     if (now - lastPong > 40_000) {
@@ -28,7 +35,14 @@ setInterval(() => {
     }
     try { client.ping(); } catch {}
   }
-}, 30_000);
+}
+
+(globalThis as any).__websocketHeartbeatTick = runWebSocketHeartbeat;
+if (!(globalThis as any).__websocketHeartbeatTimer) {
+  const timer = setInterval(() => (globalThis as any).__websocketHeartbeatTick(), 30_000);
+  timer.unref?.();
+  (globalThis as any).__websocketHeartbeatTimer = timer;
+}
 
 // Handle incoming WebSocket messages
 async function handleMessage(ws: ServerWebSocket<unknown>, message: ClientMessage) {
@@ -83,7 +97,15 @@ async function handleMessage(ws: ServerWebSocket<unknown>, message: ClientMessag
     }
 
     case 'send_message': {
-      await chatService.sendMessage(message.agentId, message.content);
+      try {
+        await chatService.sendMessage(message.agentId, message.content);
+      } catch (e: any) {
+        sendTo(ws, {
+          type: 'error',
+          message: e?.message || 'Message could not be completed or persisted',
+          agentId: message.agentId,
+        });
+      }
       break;
     }
 
@@ -192,6 +214,7 @@ async function handleMessage(ws: ServerWebSocket<unknown>, message: ClientMessag
     case 'remove_agent': {
       const success = await agentService.removeAgent(message.agentId);
       if (success) {
+        liveTurnStateService.clear(message.agentId);
         broadcast({ type: 'agent_removed', agentId: message.agentId });
         broadcast({ type: 'workspaces_list', workspaces: workspaceService.getAll() });
       } else {
@@ -203,6 +226,9 @@ async function handleMessage(ws: ServerWebSocket<unknown>, message: ClientMessag
     case 'clear_history': {
       const success = await agentService.clearHistory(message.agentId);
       if (success) {
+        if (!liveTurnStateService.get(message.agentId)?.active) {
+          liveTurnStateService.clear(message.agentId);
+        }
         broadcast({ type: 'history_cleared', agentId: message.agentId });
       }
       break;
@@ -229,6 +255,8 @@ async function handleMessage(ws: ServerWebSocket<unknown>, message: ClientMessag
     case 'get_history': {
       const messages = agentService.getMessages(message.agentId);
       sendTo(ws, { type: 'history', agentId: message.agentId, messages });
+      const liveState = liveTurnStateService.get(message.agentId);
+      if (liveState) sendTo(ws, { type: 'live_turn_state', state: liveState });
       break;
     }
 
@@ -267,7 +295,7 @@ async function handleMessage(ws: ServerWebSocket<unknown>, message: ClientMessag
     }
 
     case 'create_workspace': {
-      const workspace = await workspaceService.create(message.name);
+      const workspace = await workspaceService.create(message.name, message.cwd);
       broadcast({ type: 'workspace_created', workspace });
       break;
     }
@@ -348,7 +376,7 @@ async function handleMessage(ws: ServerWebSocket<unknown>, message: ClientMessag
 
     case 'kill_all': {
       await agentService.killAllProcesses();
-      terminalService.clearAll();
+      await terminalService.killAll();
       broadcast({ type: 'agents_list', agents: agentService.getAgents() });
       broadcast({ type: 'terminals_list', terminals: terminalService.getAll() });
       break;
@@ -361,6 +389,8 @@ async function handleMessage(ws: ServerWebSocket<unknown>, message: ClientMessag
 
 /** WebSocket handlers for Bun.serve */
 export const websocketHandlers = {
+  maxPayloadLength: MAX_WEBSOCKET_MESSAGE_BYTES,
+
   open(ws: ServerWebSocket<unknown>) {
     clients.add(ws);
     clientLastPong.set(ws, Date.now());
@@ -376,6 +406,9 @@ export const websocketHandlers = {
     // Provider limits — cached snapshot on connect (the one-minute loop keeps it fresh).
     const limitsSnapshot = limitsService.getSnapshot();
     if (limitsSnapshot) sendTo(ws, { type: 'limits_snapshot', snapshot: limitsSnapshot });
+    for (const state of liveTurnStateService.getAll()) {
+      sendTo(ws, { type: 'live_turn_state', state });
+    }
 
     // Send token usage for each agent
     for (const agent of agentService.getAgents()) {
@@ -392,13 +425,18 @@ export const websocketHandlers = {
 
   message(ws: ServerWebSocket<unknown>, message: string | Buffer) {
     try {
-      const data = JSON.parse(message.toString()) as ClientMessage;
+      const data = parseClientMessage(message);
       handleMessage(ws, data).catch(e => {
         console.error('handleMessage error:', e);
+        sendTo(ws, {
+          type: 'error',
+          message: e instanceof Error ? e.message : 'WebSocket request failed',
+        });
       });
     } catch (e) {
-      console.error('Failed to parse message:', e);
-      sendTo(ws, { type: 'error', message: 'Invalid JSON' });
+      const detail = e instanceof ClientMessageValidationError ? e.message : 'Invalid WebSocket message';
+      console.error('Rejected WebSocket message:', detail);
+      sendTo(ws, { type: 'error', message: detail });
     }
   },
 

@@ -1,4 +1,7 @@
 import { createCliEnv, killProcessTree, resolveCliBinary, safeSpawn } from '../utils';
+import { resolveClaudeLaunchCommand } from '../agents/adapters/claude';
+import { resolveCodexLaunchCommand } from '../agents/adapters/codex';
+import { collectBoundedProcess } from './bounded-subprocess';
 
 export const VERCEL_MCP_URL = 'https://mcp.vercel.com';
 const COMMAND_TIMEOUT_MS = 10_000;
@@ -40,10 +43,12 @@ export function vercelMcpCommands() {
 }
 
 async function runCli(binary: 'codex' | 'claude', args: readonly string[]): Promise<CommandResult> {
-  let proc: ReturnType<typeof safeSpawn> | null = null;
-  let timer: ReturnType<typeof setTimeout> | null = null;
   try {
-    proc = safeSpawn([resolveCliBinary(binary), ...args], {
+    const resolved = resolveCliBinary(binary);
+    const command = binary === 'codex'
+      ? resolveCodexLaunchCommand(resolved)
+      : resolveClaudeLaunchCommand(resolved);
+    const proc = safeSpawn([...command, ...args], {
       cwd: process.cwd(),
       env: createCliEnv(),
       stdin: 'pipe',
@@ -51,24 +56,18 @@ async function runCli(binary: 'codex' | 'claude', args: readonly string[]): Prom
       stderr: 'pipe',
     });
     proc.stdin.end();
-    const stdoutPromise = new Response(proc.stdout).text();
-    const stderrPromise = new Response(proc.stderr).text();
-    const exitCode = await Promise.race([
-      proc.exited,
-      new Promise<number>(resolve => {
-        timer = setTimeout(async () => {
-          if (proc) await killProcessTree(proc);
-          resolve(-1);
-        }, COMMAND_TIMEOUT_MS);
-      }),
-    ]);
-    const output = `${await stdoutPromise}\n${await stderrPromise}`.trim().slice(0, 2_000);
-    return { ok: exitCode === 0, output, unavailable: false };
+    const result = await collectBoundedProcess(proc, {
+      timeoutMs: COMMAND_TIMEOUT_MS,
+      terminationTimeoutMs: 3_000,
+      maxChars: 64_000,
+      label: `${binary} MCP command`,
+      terminate: () => killProcessTree(proc),
+    });
+    const output = (result.error || `${result.stdout}\n${result.stderr}`.trim()).slice(0, 2_000);
+    return { ok: !result.timedOut && !result.error && result.exitCode === 0, output, unavailable: false };
   } catch (error: any) {
     const message = String(error?.message || error || 'CLI unavailable');
     return { ok: false, output: message.slice(0, 2_000), unavailable: /ENOENT|not found|cannot find/i.test(message) };
-  } finally {
-    if (timer) clearTimeout(timer);
   }
 }
 

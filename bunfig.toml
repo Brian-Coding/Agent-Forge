@@ -1,0 +1,6 @@
+[test]
+# Coverage should measure production code, not inflate the total with tests.
+coverageSkipTestFiles = true
+# Aggregate coverage is enforced from LCOV by scripts/check-coverage.ts.
+# Bun's built-in detailed threshold is per-file and is skipped by its LCOV-only
+# reporter, so it cannot express the repository-wide reliability ratchet.

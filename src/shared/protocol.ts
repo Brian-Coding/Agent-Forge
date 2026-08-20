@@ -93,6 +93,7 @@ export interface QaRunInfo {
 export interface WorkspaceInfo {
   id: string;
   name: string;
+  cwd?: string;                 // Primary project directory inherited by new agents. Optional only for legacy persisted workspaces.
   sortOrder: number;            // User-controlled order in the Workspaces sidebar
   gridColumns: number;
   gridRows: number;
@@ -237,7 +238,11 @@ export function migrateAgentRecord(raw: any): PersistedAgentRecord {
       || typeof mm.ran !== 'string' || !mm.ran) {
     record.modelMismatch = null;
   } else {
-    record.modelMismatch = { requested: mm.requested, ran: mm.ran, at: typeof mm.at === 'number' ? mm.at : Date.now() };
+    record.modelMismatch = {
+      requested: mm.requested,
+      ran: mm.ran,
+      at: typeof mm.at === 'number' && Number.isFinite(mm.at) ? mm.at : Date.now(),
+    };
   }
 
   const outcome = record.lastTurnOutcome;
@@ -254,7 +259,9 @@ export function migrateAgentRecord(raw: any): PersistedAgentRecord {
   }
 
   // Normalize empty session marker to null instead of undefined.
-  if (!record.currentSessionId) {
+  const hasValidSessionId = typeof record.currentSessionId === 'string' && record.currentSessionId.length > 0;
+  const hasValidSessionProvider = record.currentSessionProvider === 'claude' || record.currentSessionProvider === 'codex';
+  if (!hasValidSessionId || !hasValidSessionProvider) {
     record.currentSessionId = null;
     record.currentSessionProvider = null;
     record.currentSessionModel = null;
@@ -514,6 +521,8 @@ export interface ProviderLimitsSnapshot {
   contextUsedPercent: number | null;
   fiveHour: LimitsWindow;
   weekly: LimitsWindow;
+  /** Provider-specific weekly model allowance. Claude reports this under the legacy `seven_day_sonnet` key (currently Fable). */
+  modelWeekly: LimitsWindow;
   /** Human-readable description of where the data came from. */
   source: string;
   /** Error text or setup hint when status is unavailable/error. */
@@ -524,6 +533,28 @@ export interface LimitsSnapshot {
   providers: { claude: ProviderLimitsSnapshot; codex: ProviderLimitsSnapshot };
   refreshIntervalMs: number;
   nextRefreshAt: number;
+}
+
+export type LiveTurnPhase = 'starting' | 'working' | 'thinking' | 'tool' | 'responding' | 'transport' | 'idle';
+
+export interface LiveTurnStateSnapshot {
+  agentId: string;
+  turnId: string;
+  provider: AgentProvider;
+  active: boolean;
+  phase: LiveTurnPhase;
+  thought: string;
+  response: string;
+  activity: {
+    label: string;
+    timestamp: number;
+    kind: 'tool' | 'transport' | 'status';
+    detail?: string;
+  } | null;
+  startedAt: number;
+  lastProviderEventAt: number;
+  lastVisibleProgressAt: number;
+  revision: number;
 }
 
 // Client -> Server messages
@@ -549,7 +580,7 @@ export type ClientMessage =
   | { type: 'send_uploaded_images'; agentId: string; images: ChatImageAttachment[]; prompt?: string }
   // Workspaces
   | { type: 'get_workspaces' }
-  | { type: 'create_workspace'; name: string }
+  | { type: 'create_workspace'; name: string; cwd: string }
   | { type: 'update_workspace'; id: string; name?: string; gridColumns?: number; gridRows?: number; selectedAgentIds?: string[]; lockedAgentIds?: string[]; testUrl?: string; googleDocsTrackerEnabled?: boolean }
   | { type: 'reorder_workspaces'; orderedIds: string[] }
   | { type: 'delete_workspace'; id: string }
@@ -592,6 +623,7 @@ export type ServerMessage =
       clear?: boolean;
     }
   | { type: 'thinking_output'; agentId: string; content: string }
+  | { type: 'live_turn_state'; state: LiveTurnStateSnapshot }
   | { type: 'message'; message: ChatMessage }
   | { type: 'history'; agentId: string; messages: ChatMessage[] }
   | { type: 'history_cleared'; agentId: string }
@@ -625,6 +657,8 @@ export type ServerMessage =
 
 // Persistence types
 export interface PersistedData {
+  /** Explicit on new writes; absent only in legacy pre-versioned files. */
+  schemaVersion?: number;
   agents: AgentInfo[];
   messages: ChatMessage[];
   sharedContext: string;

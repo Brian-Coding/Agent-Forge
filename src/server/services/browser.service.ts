@@ -9,6 +9,8 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import * as path from 'node:path';
 import { persistenceService } from './persistence.service';
 import { getArtifactRoot } from './artifact-paths';
+import { terminateNodeChildProcess, waitForNodeChildExit } from './node-child-process';
+import { fetchWithTimeout, readJsonResponseWithTimeout } from './external-io';
 
 interface ConsoleEntry {
   level: 'log' | 'info' | 'warn' | 'error' | 'debug';
@@ -34,6 +36,35 @@ interface WorkerState {
   proc: ChildProcess | null;
   port: number | null;
   ready: Promise<void> | null;
+  closing: Promise<void> | null;
+}
+
+const BROWSER_WORKER_ENV_KEYS = new Set([
+  'path', 'pathext', 'systemroot', 'windir', 'comspec', 'temp', 'tmp', 'tmpdir',
+  'home', 'userprofile', 'localappdata', 'appdata', 'lang', 'display',
+  'wayland_display', 'xauthority', 'dbus_session_bus_address',
+  'playwright_browsers_path', 'playwright_skip_browser_download',
+  'browser_headless', 'browser_slowmo', 'http_proxy', 'https_proxy', 'no_proxy',
+  'node_extra_ca_certs', 'agent_forge_safe_fs_dry_run',
+]);
+
+/** The browser worker needs OS/Playwright settings, not provider/API secrets. */
+export function buildBrowserWorkerEnv(
+  source: NodeJS.ProcessEnv,
+  artifactRoot = getArtifactRoot(),
+): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  for (const [key, value] of Object.entries(source)) {
+    const normalized = key.toLowerCase();
+    if (typeof value === 'string'
+      && (BROWSER_WORKER_ENV_KEYS.has(normalized)
+        || normalized.startsWith('lc_')
+        || normalized.startsWith('xdg_'))) {
+      env[key] = value;
+    }
+  }
+  env.AGENT_FORGE_ARTIFACT_ROOT = artifactRoot;
+  return env;
 }
 
 // HMR-safe state — survives `bun --hot` reloads
@@ -41,6 +72,7 @@ const state: WorkerState = (globalThis as any).__browserWorkerState ??= {
   proc: null,
   port: null,
   ready: null,
+  closing: null,
 };
 
 function workerUrl(pathname: string): string {
@@ -56,50 +88,64 @@ async function workerFetch(
 ): Promise<any> {
   if (state.ready) await state.ready;
   if (state.port == null) throw new Error('Browser worker is not running');
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  const init: RequestInit = { method, signal: controller.signal };
+  const init: RequestInit = { method };
   if (method === 'POST') {
     init.headers = { 'content-type': 'application/json' };
     init.body = JSON.stringify(body ?? {});
   }
+  const label = `Browser worker ${method} ${pathname.split('?')[0]}`;
+  const startedAt = Date.now();
   try {
-    const res = await fetch(workerUrl(pathname), init);
-    const json = await res.json().catch(() => ({}));
+    const res = await fetchWithTimeout(workerUrl(pathname), init, timeoutMs, label);
+    const remainingMs = Math.max(0, timeoutMs - (Date.now() - startedAt));
+    const json = await readJsonResponseWithTimeout(res, 4 * 1024 * 1024, remainingMs, label);
     if (!res.ok || (json && typeof json === 'object' && 'ok' in json && (json as any).ok === false)) {
       const msg = (json as any)?.error || `worker returned HTTP ${res.status}`;
       throw new Error(msg);
     }
     return json;
   } catch (error) {
-    if (controller.signal.aborted) {
-      throw new Error(`Browser worker ${method} ${pathname.split('?')[0]} timed out after ${timeoutMs}ms`);
-    }
     throw error;
-  } finally {
-    clearTimeout(timeout);
   }
 }
 
-function spawnWorker(): Promise<void> {
+export function parseWorkerReadyPort(output: string): number | null {
+  const match = output.match(/(?:^|\r?\n)READY:(\d+)(?:\r?\n|$)/);
+  if (!match) return null;
+  const port = Number(match[1]);
+  return Number.isSafeInteger(port) && port >= 1 && port <= 65_535 ? port : null;
+}
+
+async function spawnWorker(): Promise<void> {
+  if (state.closing) await state.closing;
   if (state.ready) return state.ready;
 
   state.ready = new Promise<void>((resolve, reject) => {
     const proc = spawn('node', [WORKER_SCRIPT], {
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
-      env: { ...process.env, AGENT_FORGE_ARTIFACT_ROOT: getArtifactRoot() },
+      detached: process.platform !== 'win32',
+      env: buildBrowserWorkerEnv(process.env),
     });
     state.proc = proc;
+    let pidTracked = false;
+    if (proc.pid) {
+      pidTracked = true;
+      persistenceService.trackPid(proc.pid);
+    }
 
     let resolved = false;
     const timeout = setTimeout(() => {
       if (!resolved) {
         resolved = true;
-        proc.kill();
-        state.proc = null;
-        state.ready = null;
-        reject(new Error(`Browser worker did not become ready within ${WORKER_READY_TIMEOUT_MS}ms`));
+        void terminateNodeChildProcess(proc).finally(() => {
+          if (state.proc === proc) {
+            state.proc = null;
+            state.port = null;
+            state.ready = null;
+          }
+          reject(new Error(`Browser worker did not become ready within ${WORKER_READY_TIMEOUT_MS}ms`));
+        });
       }
     }, WORKER_READY_TIMEOUT_MS);
 
@@ -107,14 +153,14 @@ function spawnWorker(): Promise<void> {
     proc.stdout?.on('data', (chunk: Buffer) => {
       stdoutBuf += chunk.toString('utf8');
       // Look for READY:<port>\n
-      const m = stdoutBuf.match(/READY:(\d+)/);
-      if (m && !resolved) {
+      const readyPort = parseWorkerReadyPort(stdoutBuf);
+      if (readyPort !== null && !resolved) {
         resolved = true;
         clearTimeout(timeout);
-        state.port = parseInt(m[1]!, 10);
-        if (proc.pid) persistenceService.trackPid(proc.pid);
+        state.port = readyPort;
         resolve();
       }
+      if (stdoutBuf.length > 64_000) stdoutBuf = stdoutBuf.slice(-64_000);
     });
 
     proc.stderr?.on('data', (chunk: Buffer) => {
@@ -124,11 +170,16 @@ function spawnWorker(): Promise<void> {
     });
 
     proc.on('exit', (code, signal) => {
-      if (proc.pid) persistenceService.untrackPid(proc.pid);
+      if (proc.pid && pidTracked) {
+        pidTracked = false;
+        persistenceService.untrackPid(proc.pid);
+      }
       const wasRunning = state.proc === proc;
-      state.proc = null;
-      state.port = null;
-      state.ready = null;
+      if (wasRunning) {
+        state.proc = null;
+        state.port = null;
+        state.ready = null;
+      }
       if (wasRunning && !resolved) {
         resolved = true;
         clearTimeout(timeout);
@@ -142,10 +193,14 @@ function spawnWorker(): Promise<void> {
       if (!resolved) {
         resolved = true;
         clearTimeout(timeout);
-        state.proc = null;
-        state.port = null;
-        state.ready = null;
+        if (state.proc === proc) {
+          state.proc = null;
+          state.port = null;
+          state.ready = null;
+        }
         reject(err);
+      } else {
+        console.error('[browser-worker] process error:', err);
       }
     });
   });
@@ -161,24 +216,37 @@ export const browserService = {
   },
 
   async close(): Promise<void> {
+    if (state.closing) return state.closing;
     const proc = state.proc;
     if (!proc) return;
-    // Ask the worker to shut down cleanly; if it doesn't exit in 3s, kill it.
+    const closing = (async () => {
+      // Ask the worker to shut down cleanly, verify its root exited, then
+      // terminate the entire process tree if graceful cleanup stalls.
+      try {
+        await workerFetch('POST', '/shutdown', undefined, 3000);
+      } catch { /* worker may already be down */ }
+      if (state.proc !== proc) return;
+      if (!await waitForNodeChildExit(proc, 1000)) {
+        await terminateNodeChildProcess(proc);
+      }
+      if (state.proc === proc) {
+        // An unconfirmed process remains in pids.json for startup recovery,
+        // but must not block a replacement worker or receive new requests.
+        state.proc = null;
+        state.port = null;
+        state.ready = null;
+      }
+    })();
+    state.closing = closing;
     try {
-      await workerFetch('POST', '/shutdown', undefined, 3000);
-    } catch { /* ignore — worker may already be down */ }
-    if (state.proc !== proc) return;
-    await new Promise<void>((resolve) => {
-      const t = setTimeout(() => {
-        try { proc.kill('SIGTERM'); } catch {}
-        resolve();
-      }, 3000);
-      proc.once('exit', () => { clearTimeout(t); resolve(); });
-    });
+      await closing;
+    } finally {
+      if (state.closing === closing) state.closing = null;
+    }
   },
 
   isRunning(): boolean {
-    return state.proc !== null && state.port !== null;
+    return state.proc !== null && state.proc.exitCode === null && state.port !== null;
   },
 
   /**

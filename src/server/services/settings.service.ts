@@ -1,5 +1,6 @@
 import type { AppSettings } from '../../shared/protocol';
 import { persistenceService } from './persistence.service';
+import { runDurableMutation } from './durable-mutation';
 
 // HMR-safe state
 const state: { settings: AppSettings } = (globalThis as any).__settingsState ??= { settings: {} };
@@ -14,9 +15,17 @@ export const settingsService = {
   },
 
   async update(updates: Partial<AppSettings>): Promise<AppSettings> {
-    state.settings = { ...state.settings, ...updates };
-    await persistenceService.saveNow();
-    return state.settings;
+    return runDurableMutation(async () => {
+      const previous = state.settings;
+      state.settings = { ...state.settings, ...updates };
+      try {
+        await persistenceService.saveNow();
+        return state.settings;
+      } catch (error) {
+        state.settings = previous;
+        throw error;
+      }
+    });
   },
 
   /** Load settings from persisted data */

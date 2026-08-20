@@ -31,6 +31,18 @@ try {
 const rate = data?.rate_limits ?? {};
 const five = rate?.five_hour ?? {};
 const week = rate?.seven_day ?? {};
+// The model-specific weekly allowance (presented as Fable in the usage UI) was
+// historically the flat `seven_day_sonnet` key. Anthropic moved it into a
+// `limits[]` array of scoped windows; prefer that and fall back to the old key
+// so both CLI generations map. Mirrors selectClaudeModelWeekly in
+// src/server/services/limits.service.ts.
+const scopedWeek = (Array.isArray(rate?.limits) ? rate.limits : []).find((entry: any) =>
+  entry && typeof entry === 'object'
+  && (entry.kind === 'weekly_scoped' || (entry.group === 'weekly' && entry.scope?.model))
+  && typeof (entry.percent ?? entry.used_percentage) === 'number');
+const modelWeek = scopedWeek
+  ? { used_percentage: scopedWeek.percent ?? scopedWeek.used_percentage, resets_at: scopedWeek.resets_at }
+  : (rate?.seven_day_sonnet ?? {});
 
 const out = {
   updated_at: Date.now(),
@@ -40,6 +52,8 @@ const out = {
   five_hour_resets_at: five?.resets_at ?? null,
   seven_day_used_percentage: week?.used_percentage ?? null,
   seven_day_resets_at: week?.resets_at ?? null,
+  seven_day_sonnet_used_percentage: modelWeek?.used_percentage ?? null,
+  seven_day_sonnet_resets_at: modelWeek?.resets_at ?? null,
 };
 
 const path = process.env.AI_HARNESS_CLAUDE_LIMITS_JSON || join(homedir(), '.claude', 'claude-code-limits.json');
@@ -57,5 +71,6 @@ const parts: string[] = [];
 if (out.model) parts.push(String(out.model));
 if (typeof out.five_hour_used_percentage === 'number') parts.push(`5h ${Math.round(out.five_hour_used_percentage)}%`);
 if (typeof out.seven_day_used_percentage === 'number') parts.push(`7d ${Math.round(out.seven_day_used_percentage)}%`);
+if (typeof out.seven_day_sonnet_used_percentage === 'number') parts.push(`Fable 7d ${Math.round(out.seven_day_sonnet_used_percentage)}%`);
 if (typeof out.context_used_percentage === 'number') parts.push(`ctx ${Math.round(out.context_used_percentage)}%`);
 console.log(parts.length ? parts.join(' | ') : 'limits pending');

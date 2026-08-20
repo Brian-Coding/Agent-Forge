@@ -7,7 +7,7 @@
 // Bun on Windows due to child_process/IPC compat. Node runs it cleanly.
 
 import { createServer } from 'node:http';
-import { mkdir, readdir, rm, stat, unlink } from 'node:fs/promises';
+import { mkdir, readdir, stat } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
@@ -16,7 +16,10 @@ import {
   browserSessionKey,
   compileEvaluationScript,
   normalizeBrowserSessionId,
+  singleFlight,
+  withOperationTimeout,
 } from './browser-worker-core.mjs';
+import { safeRemoveFile, safeRemoveTree } from '../src/server/services/safe-filesystem.mjs';
 
 const CONSOLE_LIMIT = 100;
 const NETWORK_LIMIT = 200;
@@ -36,8 +39,14 @@ const MEMORY_WARN_RSS_MB = 2048;             // warn if worker RSS exceeds 2 GB
 const MEMORY_CHECK_INTERVAL_MS = 60 * 1000;
 
 let browser = null;
+let browserGeneration = 0;
+let shuttingDown = false;
+let shutdownPromise = null;
+const browserCreations = new Map();
 // JSON([workspaceId, browserSessionId]) -> isolated Playwright state.
 const contexts = new Map();
+const contextCreations = new Map();
+const contextGenerations = new Map();
 
 const artifactRoot = path.resolve(
   process.env.AGENT_FORGE_ARTIFACT_ROOT
@@ -75,7 +84,16 @@ async function pruneOldScreenshots(dir) {
       try {
         const full = path.join(dir, f);
         const s = await stat(full);
-        if (now - s.mtimeMs > SCREENSHOT_TTL_MS) await unlink(full);
+        if (now - s.mtimeMs > SCREENSHOT_TTL_MS) {
+          await safeRemoveFile({
+            targetPath: full,
+            allowedRoot: dir,
+            reason: 'Remove an expired Agent Forge QA screenshot',
+            mode: 'delete',
+            permanent: true,
+            expectedTargetName: /\.png$/i,
+          });
+        }
       } catch {}
     }));
   } catch {}
@@ -95,12 +113,24 @@ async function pruneOldQaRunDirectories(workspaceRoot, currentRunRoot) {
     const entries = await readdir(workspaceRoot, { withFileTypes: true });
     await Promise.all(entries.map(async (entry) => {
       if (!entry.isDirectory()) return;
+      if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,95}$/.test(entry.name)) return;
       const full = path.join(workspaceRoot, entry.name);
       if (path.resolve(full) === path.resolve(currentRunRoot)) return;
       try {
         const info = await stat(full);
         if (now - info.mtimeMs > SCREENSHOT_TTL_MS) {
-          await rm(full, { recursive: true, force: true });
+          await safeRemoveTree({
+            targetPath: full,
+            allowedRoot: workspaceRoot,
+            reason: 'Remove an expired generated Agent Forge QA run artifact directory',
+            mode: 'delete',
+            permanent: true,
+            allowNonEmpty: true,
+            allowedTopLevelNames: ['screenshots'],
+            maxEntries: 50_000,
+            expectedTargetName: /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,95}$/,
+            protectedPaths: [artifactRoot],
+          });
         }
       } catch {}
     }));
@@ -115,7 +145,8 @@ function recordNetwork(wsCtx, entry) {
 }
 
 async function ensureBrowser() {
-  if (browser) return;
+  if (shuttingDown) throw new Error('Browser worker is shutting down');
+  if (browser) return browser;
   // Headed by default so the user can watch the QA agent click around in
   // real time. slowMo paces each action enough to follow visually without
   // making tests painfully slow. Set BROWSER_HEADLESS=1 to suppress the
@@ -123,7 +154,25 @@ async function ensureBrowser() {
   const headless = process.env.BROWSER_HEADLESS === '1';
   const parsedSlowMo = process.env.BROWSER_SLOWMO != null ? parseInt(process.env.BROWSER_SLOWMO, 10) : 250;
   const slowMo = Number.isFinite(parsedSlowMo) && parsedSlowMo >= 0 ? Math.min(parsedSlowMo, 10_000) : 250;
-  browser = await chromium.launch({ headless, slowMo });
+  return singleFlight(browserCreations, 'browser', async () => {
+    if (browser) return browser;
+    const generation = browserGeneration;
+    const launched = await chromium.launch({ headless, slowMo });
+    if (shuttingDown || generation !== browserGeneration) {
+      await launched.close().catch(() => {});
+      throw new Error('Browser launch was cancelled by shutdown');
+    }
+    browser = launched;
+    launched.on('disconnected', () => {
+      if (browser !== launched) return;
+      browser = null;
+      for (const key of contexts.keys()) {
+        contextGenerations.set(key, (contextGenerations.get(key) ?? 0) + 1);
+      }
+      contexts.clear();
+    });
+    return launched;
+  });
 }
 
 function getContext(workspaceId, browserSessionId) {
@@ -133,6 +182,7 @@ function getContext(workspaceId, browserSessionId) {
 }
 
 async function ensureContext(workspaceId, browserSessionId) {
+  if (shuttingDown) throw new Error('Browser worker is shutting down');
   const normalizedSessionId = normalizeBrowserSessionId(browserSessionId);
   const key = browserSessionKey(workspaceId, normalizedSessionId);
   const existing = contexts.get(key);
@@ -140,42 +190,53 @@ async function ensureContext(workspaceId, browserSessionId) {
     existing.lastUsedAt = Date.now();
     return existing;
   }
-  await ensureBrowser();
-  const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
-  const page = await context.newPage();
-  const wsCtx = {
-    workspaceId,
-    browserSessionId: normalizedSessionId,
-    context,
-    page,
-    consoleEntries: [],
-    networkEntries: [],
-    lastFileChangeAt: 0,
-    lastUsedAt: Date.now(),
-  };
-  page.on('console', (msg) => recordConsole(wsCtx, msg.type() || 'log', msg.text()));
-  page.on('pageerror', (err) => recordConsole(wsCtx, 'error', err.message));
-  page.on('response', (response) => {
-    recordNetwork(wsCtx, {
-      kind: 'response',
-      url: response.url(),
-      method: response.request().method(),
-      status: response.status(),
-      ok: response.ok(),
-    });
+  const generation = contextGenerations.get(key) ?? 0;
+  return singleFlight(contextCreations, key, async () => {
+    const browserInstance = await ensureBrowser();
+    const context = await browserInstance.newContext({ viewport: { width: 1280, height: 800 } });
+    try {
+      const page = await context.newPage();
+      if (shuttingDown || generation !== (contextGenerations.get(key) ?? 0)) {
+        throw new Error('Browser context creation was cancelled');
+      }
+      const wsCtx = {
+        workspaceId,
+        browserSessionId: normalizedSessionId,
+        context,
+        page,
+        consoleEntries: [],
+        networkEntries: [],
+        lastFileChangeAt: 0,
+        lastUsedAt: Date.now(),
+      };
+      page.on('console', (msg) => recordConsole(wsCtx, msg.type() || 'log', msg.text()));
+      page.on('pageerror', (err) => recordConsole(wsCtx, 'error', err.message));
+      page.on('response', (response) => {
+        recordNetwork(wsCtx, {
+          kind: 'response',
+          url: response.url(),
+          method: response.request().method(),
+          status: response.status(),
+          ok: response.ok(),
+        });
+      });
+      page.on('requestfailed', (request) => {
+        recordNetwork(wsCtx, {
+          kind: 'requestfailed',
+          url: request.url(),
+          method: request.method(),
+          status: null,
+          ok: false,
+          error: request.failure()?.errorText || 'request failed',
+        });
+      });
+      contexts.set(key, wsCtx);
+      return wsCtx;
+    } catch (error) {
+      await context.close().catch(() => {});
+      throw error;
+    }
   });
-  page.on('requestfailed', (request) => {
-    recordNetwork(wsCtx, {
-      kind: 'requestfailed',
-      url: request.url(),
-      method: request.method(),
-      status: null,
-      ok: false,
-      error: request.failure()?.errorText || 'request failed',
-    });
-  });
-  contexts.set(key, wsCtx);
-  return wsCtx;
 }
 
 // Periodic sweep: close contexts that haven't been used in a while. Prevents
@@ -186,8 +247,9 @@ const idleSweepTimer = setInterval(async () => {
   for (const [key, wsCtx] of contexts.entries()) {
     if (now - wsCtx.lastUsedAt > CONTEXT_IDLE_MS) {
       console.warn(`[browser-worker] closing idle context for ${wsCtx.workspaceId}/${wsCtx.browserSessionId} (idle ${Math.round((now - wsCtx.lastUsedAt) / 60000)}m)`);
-      try { await wsCtx.context.close(); } catch {}
+      contextGenerations.set(key, (contextGenerations.get(key) ?? 0) + 1);
       contexts.delete(key);
+      try { await wsCtx.context.close(); } catch {}
     }
   }
 }, CONTEXT_SWEEP_INTERVAL_MS);
@@ -208,29 +270,50 @@ memoryCheckTimer.unref?.();
 async function closeContext(workspaceId, browserSessionId) {
   if (browserSessionId != null && browserSessionId !== '') {
     const key = browserSessionKey(workspaceId, browserSessionId);
+    contextGenerations.set(key, (contextGenerations.get(key) ?? 0) + 1);
     const wsCtx = contexts.get(key);
     if (!wsCtx) return;
-    try { await wsCtx.context.close(); } catch {}
     contexts.delete(key);
+    try { await wsCtx.context.close(); } catch {}
     return;
   }
 
-  for (const [key, wsCtx] of [...contexts.entries()]) {
-    if (wsCtx.workspaceId !== workspaceId) continue;
-    try { await wsCtx.context.close(); } catch {}
+  const keys = new Set([...contexts.keys(), ...contextCreations.keys()]);
+  for (const key of keys) {
+    let owner;
+    try { owner = JSON.parse(key)?.[0]; } catch { continue; }
+    if (owner !== workspaceId) continue;
+    contextGenerations.set(key, (contextGenerations.get(key) ?? 0) + 1);
+    const wsCtx = contexts.get(key);
     contexts.delete(key);
+    if (!wsCtx) continue;
+    try { await wsCtx.context.close(); } catch {}
   }
 }
 
 async function shutdown() {
-  for (const [key, wsCtx] of [...contexts.entries()]) {
-    try { await wsCtx.context.close(); } catch {}
-    contexts.delete(key);
+  if (shutdownPromise) return shutdownPromise;
+  shuttingDown = true;
+  browserGeneration++;
+  for (const key of new Set([...contexts.keys(), ...contextCreations.keys()])) {
+    contextGenerations.set(key, (contextGenerations.get(key) ?? 0) + 1);
   }
-  if (browser) {
-    try { await browser.close(); } catch {}
+  shutdownPromise = (async () => {
+    const activeContexts = [...contexts.values()];
+    contexts.clear();
+    await Promise.allSettled(activeContexts.map(wsCtx => wsCtx.context.close()));
+    const pending = [...contextCreations.values(), ...browserCreations.values()];
+    if (pending.length > 0) {
+      await Promise.race([
+        Promise.allSettled(pending),
+        new Promise(resolve => setTimeout(resolve, 1000)),
+      ]);
+    }
+    const activeBrowser = browser;
     browser = null;
-  }
+    if (activeBrowser) await activeBrowser.close().catch(() => {});
+  })();
+  return shutdownPromise;
 }
 
 // ============== HTTP handler ==============
@@ -260,22 +343,6 @@ async function readJson(req) {
     });
     req.on('error', reject);
   });
-}
-
-async function withOperationTimeout(promise, timeoutMs, label, onTimeout) {
-  let timer;
-  const timeout = new Promise((_, reject) => {
-    timer = setTimeout(() => {
-      Promise.resolve(onTimeout?.())
-        .catch(() => {})
-        .finally(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)));
-    }, timeoutMs);
-  });
-  try {
-    return await Promise.race([promise, timeout]);
-  } finally {
-    clearTimeout(timer);
-  }
 }
 
 function send(res, status, obj) {

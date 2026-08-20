@@ -8,6 +8,7 @@ import {
   assertChatImageBatchLimits,
   buildExhaustiveImagePrompt,
   storeChatImageBytes,
+  storeChatImageRequest,
   validateChatImageAttachments,
 } from './chat-image.service';
 
@@ -56,6 +57,27 @@ test('rejects paths outside managed chat-image storage and batches over 512 MiB'
   } finally {
     rmSync(outside, { force: true });
   }
+});
+
+test('streamed image uploads abort when bytes exceed the limit despite a missing Content-Length', async () => {
+  const chunk = new Uint8Array(1024 * 1024);
+  let pulls = 0;
+  let cancelled = false;
+  const stream = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      pulls++;
+      controller.enqueue(chunk);
+    },
+    cancel() { cancelled = true; },
+  });
+  const req = {
+    headers: new Headers({ 'content-type': 'image/png' }),
+    body: stream,
+  } as Request;
+
+  await expect(storeChatImageRequest(req, 'agent-stream', 'oversized.png')).rejects.toThrow('512 MiB');
+  expect(pulls).toBe(MAX_CHAT_IMAGE_TOTAL_BYTES / chunk.byteLength + 1);
+  expect(cancelled).toBe(true);
 });
 
 test('image-analysis prompt requires exhaustive, auditable coverage', () => {

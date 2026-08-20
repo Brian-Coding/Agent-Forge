@@ -1,0 +1,244 @@
+import { afterAll, beforeAll, beforeEach, expect, test } from 'bun:test';
+import { randomUUID } from 'node:crypto';
+import { chmod, mkdir, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import type { AgentEvent } from '../events';
+import type { AgentRunContext } from '../types';
+import { persistenceService } from '../../services/persistence.service';
+import { claudeAdapter } from './claude';
+import { codexAdapter } from './codex';
+
+interface ContextFixture {
+  ctx: AgentRunContext;
+  events: AgentEvent[];
+  chatEvents: unknown[];
+  systemMessages: string[];
+  getSession(): string | null;
+}
+
+let root = '';
+let originalPath: string | undefined;
+let originalSkipAuth: string | undefined;
+let originalFakeProvider: string | undefined;
+let originalTrackPid: typeof persistenceService.trackPid;
+let originalUntrackPid: typeof persistenceService.untrackPid;
+let originalBinaryCache: Map<string, string>;
+const tracked: number[] = [];
+const untracked: number[] = [];
+
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", `'\\''`)}'`;
+}
+
+async function writeFakeCli(name: 'claude' | 'codex', scriptPath: string): Promise<void> {
+  if (process.platform === 'win32') {
+    await Bun.write(join(root, `${name}.cmd`), `@echo off\r\n"${process.execPath}" "${scriptPath}" %*\r\n`);
+    return;
+  }
+  const path = join(root, name);
+  await Bun.write(path, `#!/bin/sh\nexec ${shellQuote(process.execPath)} ${shellQuote(scriptPath)} "$@"\n`);
+  await chmod(path, 0o755);
+}
+
+function makeContext(provider: 'claude' | 'codex', sessionId: string | null = null): ContextFixture {
+  process.env.AGENT_FORGE_FAKE_PROVIDER = provider;
+  const events: AgentEvent[] = [];
+  const chatEvents: unknown[] = [];
+  const systemMessages: string[] = [];
+  let session = sessionId;
+  const ctx: AgentRunContext = {
+    paneId: `${provider}-${randomUUID()}`,
+    cwd: root,
+    referencePaths: [],
+    systemPrompt: 'Test guardrail context.',
+    model: provider === 'claude' ? 'claude-opus-5' : 'gpt-5.6-sol',
+    reasoningLevel: provider === 'codex' ? 'high' : undefined,
+    getSessionId: () => session,
+    updateSessionId: next => { session = next; },
+    emitChatEvent: event => { chatEvents.push(event); },
+    emitAgentEvent: event => { events.push(event); },
+    emitStatus: () => {},
+    emitActivity: () => {},
+    emitSystemMessage: message => { systemMessages.push(message); },
+  };
+  return { ctx, events, chatEvents, systemMessages, getSession: () => session };
+}
+
+async function waitFor(predicate: () => boolean, timeoutMs = 2_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() >= deadline) throw new Error('Timed out waiting for fake CLI event');
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+}
+
+beforeAll(async () => {
+  root = join(tmpdir(), `agent forge fake cli ${randomUUID()}`);
+  await mkdir(root, { recursive: true });
+  const scriptSource = `
+const fs = require('node:fs');
+const provider = process.env.AGENT_FORGE_FAKE_PROVIDER;
+const args = process.argv.slice(2);
+let prompt = '';
+process.stdin.setEncoding('utf8');
+process.stdin.on('data', chunk => { prompt += chunk; });
+process.stdin.on('end', () => {
+  const emit = value => process.stdout.write(JSON.stringify(value) + '\\n');
+  if (prompt.includes('HANG')) {
+    if (provider === 'claude') emit({ type: 'system', subtype: 'init', session_id: 'claude-hanging-session' });
+    else emit({ type: 'thread.started', thread_id: 'codex-hanging-session' });
+    setInterval(() => {}, 60_000);
+    return;
+  }
+
+  if (prompt.includes('STALE')) {
+    process.stderr.write('No conversation found with session ID stale-session\\n');
+    process.exitCode = 17;
+  } else if (prompt.includes('NONZERO')) {
+    process.exitCode = 23;
+  } else if (provider === 'claude') {
+    emit({ type: 'system', subtype: 'init', session_id: 'claude-fake-session' });
+    process.stdout.write('{malformed json line}\\n');
+    emit({
+      type: 'assistant',
+      message: {
+        id: 'message-1',
+        model: 'claude-opus-5',
+        usage: { input_tokens: 12, output_tokens: 4 },
+        content: [{ type: 'text', text: 'Claude fake result.' }],
+      },
+    });
+    emit({
+      type: 'result',
+      result: 'Claude fake result.',
+      total_cost_usd: 0.01,
+      num_turns: 1,
+      modelUsage: { 'claude-opus-5': { inputTokens: 12, outputTokens: 4, contextWindow: 200000 } },
+    });
+    process.stderr.write('claude diagnostic\\n');
+  } else {
+    const outputIndex = args.indexOf('--output-last-message');
+    if (outputIndex >= 0 && args[outputIndex + 1]) fs.writeFileSync(args[outputIndex + 1], 'Codex fake result.');
+    emit({ type: 'thread.started', thread_id: 'codex-fake-session' });
+    process.stdout.write('{malformed json line}\\n');
+    emit({ type: 'turn.started' });
+    emit({ type: 'item.started', item: { id: 'command-1', type: 'command_execution', command: 'echo ok' } });
+    emit({ type: 'item.updated', item: { id: 'command-1', type: 'command_execution', aggregated_output: 'ok\\n' } });
+    emit({ type: 'item.completed', item: { id: 'command-1', type: 'command_execution', aggregated_output: 'ok\\n' } });
+    emit({ type: 'item.completed', item: { id: 'message-1', type: 'agent_message', text: 'Codex fake result.' } });
+    emit({ type: 'turn.completed', usage: { input_tokens: 20, output_tokens: 5, reasoning_output_tokens: 2 } });
+    process.stderr.write('codex diagnostic\\n');
+  }
+});
+`;
+  const claudePackageDir = join(root, 'node_modules', '@anthropic-ai', 'claude-code');
+  const codexPackageDir = join(root, 'node_modules', '@openai', 'codex', 'bin');
+  await mkdir(claudePackageDir, { recursive: true });
+  await mkdir(codexPackageDir, { recursive: true });
+  const claudeScript = join(claudePackageDir, 'cli.js');
+  const codexScript = join(codexPackageDir, 'codex.js');
+  await Bun.write(claudeScript, scriptSource);
+  await Bun.write(codexScript, scriptSource);
+  await writeFakeCli('claude', claudeScript);
+  await writeFakeCli('codex', codexScript);
+
+  originalPath = process.env.PATH;
+  originalSkipAuth = process.env.AGENT_FORGE_SKIP_CLAUDE_AUTH_CHECK;
+  originalFakeProvider = process.env.AGENT_FORGE_FAKE_PROVIDER;
+  process.env.PATH = `${root}${process.platform === 'win32' ? ';' : ':'}${originalPath ?? ''}`;
+  process.env.AGENT_FORGE_SKIP_CLAUDE_AUTH_CHECK = '1';
+  originalBinaryCache = new Map((globalThis as any).__cliBinaryCache as Map<string, string>);
+  const cache = (globalThis as any).__cliBinaryCache as Map<string, string>;
+  cache.delete('claude');
+  cache.delete('codex');
+
+  originalTrackPid = persistenceService.trackPid;
+  originalUntrackPid = persistenceService.untrackPid;
+  persistenceService.trackPid = pid => { tracked.push(pid); };
+  persistenceService.untrackPid = pid => { untracked.push(pid); };
+});
+
+beforeEach(() => {
+  tracked.length = 0;
+  untracked.length = 0;
+});
+
+afterAll(async () => {
+  persistenceService.trackPid = originalTrackPid;
+  persistenceService.untrackPid = originalUntrackPid;
+  if (originalPath === undefined) delete process.env.PATH;
+  else process.env.PATH = originalPath;
+  if (originalSkipAuth === undefined) delete process.env.AGENT_FORGE_SKIP_CLAUDE_AUTH_CHECK;
+  else process.env.AGENT_FORGE_SKIP_CLAUDE_AUTH_CHECK = originalSkipAuth;
+  if (originalFakeProvider === undefined) delete process.env.AGENT_FORGE_FAKE_PROVIDER;
+  else process.env.AGENT_FORGE_FAKE_PROVIDER = originalFakeProvider;
+  const cache = (globalThis as any).__cliBinaryCache as Map<string, string>;
+  cache.clear();
+  for (const [name, path] of originalBinaryCache) cache.set(name, path);
+  await rm(root, { recursive: true, force: true });
+});
+
+test('Claude adapter exercises real stdin, malformed JSONL, stderr, result, exit, and PID cleanup', async () => {
+  const fixture = makeContext('claude');
+  const state = claudeAdapter.createState(fixture.ctx);
+  const result = await claudeAdapter.createHandle('SUCCESS', fixture.ctx, state).run();
+
+  expect({ result, events: fixture.events, systemMessages: fixture.systemMessages }).toMatchObject({
+    result: { lastAssistantMessage: 'Claude fake result.' },
+  });
+  expect(fixture.getSession()).toBe('claude-fake-session');
+  expect(fixture.events).toContainEqual({ type: 'finish', reason: 'completed' });
+  expect(fixture.events.some(event => event.type === 'stderr' && event.text.includes('claude diagnostic'))).toBe(true);
+  expect(fixture.chatEvents).toHaveLength(3);
+  expect(tracked).toHaveLength(1);
+  expect(untracked).toEqual(tracked);
+});
+
+test('both adapters surface nonzero empty output and classify stale resumed sessions without success', async () => {
+  for (const provider of ['claude', 'codex'] as const) {
+    const nonzero = makeContext(provider);
+    const adapter = provider === 'claude' ? claudeAdapter : codexAdapter;
+    const nonzeroResult = await adapter.createHandle('NONZERO', nonzero.ctx, adapter.createState(nonzero.ctx) as any).run();
+    expect(nonzeroResult).toBeUndefined();
+    expect(nonzero.events.some(event => event.type === 'error' && event.message.includes('23'))).toBe(true);
+    expect(nonzero.events).toContainEqual({ type: 'finish', reason: 'exit:23' });
+
+    const stale = makeContext(provider, 'stale-session');
+    const staleResult = await adapter.createHandle('STALE', stale.ctx, adapter.createState(stale.ctx) as any).run();
+    expect(staleResult).toMatchObject({ recoverableError: 'stale-session' });
+    expect(stale.events).toContainEqual({ type: 'finish', reason: 'stale-session' });
+    expect(stale.events.some(event => event.type === 'error')).toBe(false);
+  }
+});
+
+test('Codex adapter exercises real tool streaming, final-file recovery, usage, and session ownership', async () => {
+  const fixture = makeContext('codex');
+  const state = codexAdapter.createState(fixture.ctx);
+  const result = await codexAdapter.createHandle('SUCCESS', fixture.ctx, state).run();
+
+  expect({ result, events: fixture.events, systemMessages: fixture.systemMessages }).toMatchObject({
+    result: { lastAssistantMessage: 'Codex fake result.' },
+  });
+  expect(fixture.getSession()).toBe('codex-fake-session');
+  expect(fixture.events.some(event => event.type === 'tool-call-start')).toBe(true);
+  expect(fixture.events.some(event => event.type === 'tool-call-delta' && event.delta === 'ok\n')).toBe(true);
+  expect(fixture.events.some(event => event.type === 'result' && event.text === 'Codex fake result.')).toBe(true);
+  expect(fixture.events.some(event => event.type === 'usage' && event.turnsDelta === 1)).toBe(true);
+  expect(fixture.events).toContainEqual({ type: 'finish', reason: 'completed' });
+  expect(untracked).toEqual(tracked);
+});
+
+test('adapter cancellation terminates the real child and completes without an orphan', async () => {
+  const fixture = makeContext('codex');
+  const state = codexAdapter.createState(fixture.ctx);
+  const handle = codexAdapter.createHandle('HANG', fixture.ctx, state);
+  const run = handle.run();
+  await waitFor(() => fixture.getSession() === 'codex-hanging-session');
+  await handle.kill();
+  await expect(run).resolves.toBeUndefined();
+
+  expect(fixture.events).toContainEqual({ type: 'finish', reason: 'killed' });
+  expect(tracked).toHaveLength(1);
+  expect(untracked).toEqual(tracked);
+}, 10_000);

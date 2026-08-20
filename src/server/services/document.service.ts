@@ -7,11 +7,42 @@ import { watch, existsSync, mkdirSync, type FSWatcher } from 'fs';
 import { join, basename } from 'path';
 import { generateId } from '../utils';
 import { persistenceService } from './persistence.service';
+import { runDurableMutation } from './durable-mutation';
 
 // HMR-safe state
 const documents: Map<string, LiveDocument> = (globalThis as any).__documentsMap ??= new Map<string, LiveDocument>();
 const planWriteFromServer: Set<string> = (globalThis as any).__planWriteFromServer ??= new Set<string>();
 const planWatchers: Map<string, FSWatcher> = (globalThis as any).__planWatchers ??= new Map<string, FSWatcher>();
+
+type DocumentExtra = { status?: LiveDocument['status']; lockedBy?: string; filePath?: string; lastEditedBy?: string };
+
+function buildDocument(
+  title: string,
+  content: string,
+  agentId?: string,
+  workspaceId?: string,
+  extra?: DocumentExtra,
+): LiveDocument {
+  const now = Date.now();
+  return {
+    id: generateId(),
+    title,
+    content,
+    lastEditedBy: extra?.lastEditedBy || 'user',
+    agentId,
+    workspaceId,
+    status: extra?.status || 'draft',
+    lockedBy: extra?.lockedBy,
+    filePath: extra?.filePath,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+function restoreDocument(target: LiveDocument, snapshot: LiveDocument): void {
+  for (const key of Object.keys(target) as Array<keyof LiveDocument>) delete (target as any)[key];
+  Object.assign(target, snapshot);
+}
 
 export const documentService = {
   getAll(): LiveDocument[] {
@@ -23,61 +54,71 @@ export const documentService = {
     content: string,
     agentId?: string,
     workspaceId?: string,
-    extra?: { status?: LiveDocument['status']; lockedBy?: string; filePath?: string; lastEditedBy?: string },
+    extra?: DocumentExtra,
   ): Promise<LiveDocument> {
-    const now = Date.now();
-    const doc: LiveDocument = {
-      id: generateId(),
-      title,
-      content,
-      lastEditedBy: extra?.lastEditedBy || 'user',
-      agentId,
-      workspaceId,
-      status: extra?.status || 'draft',
-      lockedBy: extra?.lockedBy,
-      filePath: extra?.filePath,
-      createdAt: now,
-      updatedAt: now,
-    };
-    documents.set(doc.id, doc);
-    await persistenceService.saveNow();
-    return doc;
+    return runDurableMutation(async () => {
+      const doc = buildDocument(title, content, agentId, workspaceId, extra);
+      documents.set(doc.id, doc);
+      try {
+        await persistenceService.saveNow();
+        return doc;
+      } catch (error) {
+        documents.delete(doc.id);
+        throw error;
+      }
+    });
   },
 
   // --- Plan interception & sync ---
 
   async handlePlanWrite(agentId: string, agentName: string, isRunning: boolean, workspaceId: string | undefined, filePath: string, content: string): Promise<void> {
-    const filename = basename(filePath, '.md');
-    const title = filename.replace(/[-_]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    return runDurableMutation(async () => {
+      const filename = basename(filePath, '.md');
+      const title = filename.replace(/[-_]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 
-    let existingDoc: LiveDocument | undefined;
-    for (const doc of documents.values()) {
-      if (doc.filePath === filePath) { existingDoc = doc; break; }
-    }
-    if (!existingDoc) {
+      let existingDoc: LiveDocument | undefined;
       for (const doc of documents.values()) {
-        if (doc.title === title && doc.agentId === agentId) { existingDoc = doc; break; }
+        if (doc.filePath === filePath) { existingDoc = doc; break; }
       }
-    }
+      if (!existingDoc) {
+        for (const doc of documents.values()) {
+          if (doc.title === title && doc.agentId === agentId) { existingDoc = doc; break; }
+        }
+      }
 
-    if (existingDoc) {
-      existingDoc.content = content;
-      existingDoc.filePath = filePath;
-      if (isRunning) {
-        existingDoc.lastEditedBy = agentName;
-        existingDoc.lockedBy = agentId;
-        existingDoc.status = 'in_progress';
+      if (existingDoc) {
+        const previous = structuredClone(existingDoc);
+        existingDoc.content = content;
+        existingDoc.filePath = filePath;
+        if (isRunning) {
+          existingDoc.lastEditedBy = agentName;
+          existingDoc.lockedBy = agentId;
+          existingDoc.status = 'in_progress';
+        }
+        existingDoc.updatedAt = Date.now();
+        try {
+          await persistenceService.saveNow();
+        } catch (error) {
+          restoreDocument(existingDoc, previous);
+          throw error;
+        }
+        return;
       }
-      existingDoc.updatedAt = Date.now();
-      await persistenceService.saveNow();
-    } else {
-      await documentService.create(title, content, agentId, workspaceId, {
+
+      const doc = buildDocument(title, content, agentId, workspaceId, {
         status: isRunning ? 'in_progress' : 'draft',
         lockedBy: isRunning ? agentId : undefined,
         filePath,
         lastEditedBy: isRunning ? agentName : 'user',
       });
-    }
+      documents.set(doc.id, doc);
+      try {
+        await persistenceService.saveNow();
+      } catch (error) {
+        documents.delete(doc.id);
+        throw error;
+      }
+    });
   },
 
   async syncPlanFromFile(agentId: string, agentName: string, isRunning: boolean, workspaceId: string | undefined, filePath: string): Promise<void> {
@@ -94,14 +135,23 @@ export const documentService = {
   },
 
   async releaseLocksForAgent(agentId: string): Promise<void> {
-    for (const doc of documents.values()) {
-      if (doc.lockedBy === agentId) {
-        doc.lockedBy = undefined;
-        if (doc.status === 'in_progress') doc.status = 'draft';
-        doc.updatedAt = Date.now();
+    return runDurableMutation(async () => {
+      const changed = new Map<LiveDocument, LiveDocument>();
+      for (const doc of documents.values()) {
+        if (doc.lockedBy === agentId) {
+          changed.set(doc, structuredClone(doc));
+          doc.lockedBy = undefined;
+          if (doc.status === 'in_progress') doc.status = 'draft';
+          doc.updatedAt = Date.now();
+        }
       }
-    }
-    await persistenceService.saveNow();
+      try {
+        await persistenceService.saveNow();
+      } catch (error) {
+        for (const [doc, snapshot] of changed) restoreDocument(doc, snapshot);
+        throw error;
+      }
+    });
   },
 
   /** Build documents context string for agent prompts */

@@ -2,11 +2,14 @@ import { createSign, randomUUID } from 'crypto';
 import { existsSync, mkdirSync, readFileSync } from 'fs';
 import { homedir } from 'os';
 import { dirname, isAbsolute, join, relative, resolve } from 'path';
+import { fetchWithTimeout } from './external-io';
 
 const DOCS_SCOPE = 'https://www.googleapis.com/auth/documents';
 const DOCS_API = 'https://docs.googleapis.com/v1/documents';
 const CONFIG_PATH = join(homedir(), '.agent-forge', 'google-docs.json');
 const DEFAULT_CREDENTIAL_PATH = join(homedir(), '.agent-forge', 'credentials', 'google-docs-service-account.json');
+export const GOOGLE_TOKEN_TIMEOUT_MS = 10_000;
+export const GOOGLE_DOCS_TIMEOUT_MS = 15_000;
 
 export interface GoogleDocsConfig {
   documentUrl: string;
@@ -42,6 +45,22 @@ function safeGoogleError(status: number, payload: any): Error {
   return new Error(message.slice(0, 500));
 }
 
+export function validateServiceAccountCredential(credential: unknown): ServiceAccountCredential {
+  const candidate = credential as any;
+  if (candidate?.type !== 'service_account' || typeof candidate.client_email !== 'string'
+      || !candidate.client_email.trim() || typeof candidate.private_key !== 'string' || !candidate.private_key.trim()
+      || typeof candidate.token_uri !== 'string') {
+    throw new Error('Google Docs credential file is not a valid service-account key');
+  }
+  let tokenUrl: URL;
+  try { tokenUrl = new URL(candidate.token_uri); }
+  catch { throw new Error('Google Docs credential token endpoint is invalid'); }
+  if (tokenUrl.protocol !== 'https:' || !(tokenUrl.hostname === 'oauth2.googleapis.com' || tokenUrl.hostname.endsWith('.googleapis.com'))) {
+    throw new Error('Google Docs credential token endpoint must be an HTTPS Google API endpoint');
+  }
+  return candidate as ServiceAccountCredential;
+}
+
 function readCredential(path: string): ServiceAccountCredential {
   if (!isAbsolute(path) || !existsSync(path)) throw new Error(`Google Docs credential file was not found at ${path}`);
   let credential: any;
@@ -50,11 +69,7 @@ function readCredential(path: string): ServiceAccountCredential {
   } catch {
     throw new Error('Google Docs credential file is not valid JSON');
   }
-  if (credential?.type !== 'service_account' || typeof credential.client_email !== 'string'
-      || typeof credential.private_key !== 'string' || typeof credential.token_uri !== 'string') {
-    throw new Error('Google Docs credential file is not a valid service-account key');
-  }
-  return credential as ServiceAccountCredential;
+  return validateServiceAccountCredential(credential);
 }
 
 async function getAccessToken(credentialPath: string): Promise<string> {
@@ -73,17 +88,23 @@ async function getAccessToken(credentialPath: string): Promise<string> {
   }));
   const unsigned = `${header}.${claims}`;
   const assertion = `${unsigned}.${createSign('RSA-SHA256').update(unsigned).sign(credential.private_key).toString('base64url')}`;
-  const response = await fetch(credential.token_uri, {
+  const response = await fetchWithTimeout(credential.token_uri, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({ grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer', assertion }),
-  });
+  }, GOOGLE_TOKEN_TIMEOUT_MS, 'Google OAuth token request');
   const payload = await response.json().catch(() => ({}));
-  if (!response.ok || typeof payload.access_token !== 'string') throw safeGoogleError(response.status, payload);
+  if (!response.ok || typeof payload.access_token !== 'string' || !payload.access_token.trim()) {
+    throw safeGoogleError(response.status, payload);
+  }
+  const rawExpiresIn = Number(payload.expires_in);
+  const expiresIn = Number.isFinite(rawExpiresIn)
+    ? Math.min(3_600, Math.max(60, rawExpiresIn))
+    : 3_600;
   tokenCache = {
     credentialPath,
     accessToken: payload.access_token,
-    expiresAt: Date.now() + Math.max(60, Number(payload.expires_in) || 3600) * 1000,
+    expiresAt: Date.now() + expiresIn * 1000,
   };
   return tokenCache.accessToken;
 }
@@ -170,6 +191,27 @@ export function extractGoogleDocument(document: any, configuredTabId?: string) {
   };
 }
 
+export function validateGoogleDocumentPayload(payload: unknown): asserts payload is Record<string, any> {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    throw new Error('Google Docs returned a malformed document response');
+  }
+  const document = payload as any;
+  if (typeof document.documentId !== 'string' || !document.documentId
+      || typeof document.title !== 'string'
+      || typeof document.revisionId !== 'string' || !document.revisionId
+      || (!Array.isArray(document.tabs) && (!document.body || typeof document.body !== 'object'))) {
+    throw new Error('Google Docs returned an incomplete document response');
+  }
+}
+
+export function validateGoogleBatchUpdatePayload(payload: unknown): asserts payload is Record<string, any> {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)
+      || typeof (payload as any).documentId !== 'string' || !(payload as any).documentId
+      || !Array.isArray((payload as any).replies)) {
+    throw new Error('Google Docs returned a malformed write response');
+  }
+}
+
 export function buildGoogleDocsAgentInstructions(config: GoogleDocsConfig, port: number): string {
   const base = `http://127.0.0.1:${port}/api/google-docs`;
   return `Google Docs Project Tracker (configured and write-enabled)
@@ -212,25 +254,29 @@ function requireConfig(): GoogleDocsConfig {
 
 async function docsFetch(config: GoogleDocsConfig, suffix = '', init?: RequestInit): Promise<any> {
   const token = await getAccessToken(resolveCredentialPath(config));
-  const response = await fetch(`${DOCS_API}/${encodeURIComponent(config.documentId)}${suffix}`, {
+  const response = await fetchWithTimeout(`${DOCS_API}/${encodeURIComponent(config.documentId)}${suffix}`, {
     ...init,
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...init?.headers },
-  });
+  }, GOOGLE_DOCS_TIMEOUT_MS, 'Google Docs API request');
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw safeGoogleError(response.status, payload);
   return payload;
 }
 
 async function getDocument(config = requireConfig()) {
-  return extractGoogleDocument(await docsFetch(config, '?includeTabsContent=true'), config.tabId);
+  const payload = await docsFetch(config, '?includeTabsContent=true');
+  validateGoogleDocumentPayload(payload);
+  return extractGoogleDocument(payload, config.tabId);
 }
 
 async function batchUpdate(config: GoogleDocsConfig, revisionId: string, requests: any[]) {
   if (!revisionId) throw new Error('A document revision ID is required for safe writes');
-  return docsFetch(config, ':batchUpdate', {
+  const payload = await docsFetch(config, ':batchUpdate', {
     method: 'POST',
     body: JSON.stringify({ requests, writeControl: { requiredRevisionId: revisionId } }),
   });
+  validateGoogleBatchUpdatePayload(payload);
+  return payload;
 }
 
 function resolveTargetTab(document: Awaited<ReturnType<typeof getDocument>>, configuredTabId: string | undefined, requestedTabId?: string): GoogleDocumentTab {

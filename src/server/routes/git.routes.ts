@@ -2,6 +2,8 @@ import { existsSync, realpathSync, statSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { jsonResponse } from '../utils';
 import { agentService } from '../services/agent.service';
+import { collectBoundedProcess } from '../services/bounded-subprocess';
+import { killProcessTree } from '../utils';
 
 const MAX_GIT_DIFF_BYTES = 300_000;
 
@@ -70,22 +72,32 @@ export function resolveGitDiffTarget(projectRoot: string, requestedPath: string)
   return { absolutePath, relativePath };
 }
 
-async function runGit(cwd: string, args: string[]): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+export async function runGit(cwd: string, args: string[]): Promise<{ exitCode: number; stdout: string; stderr: string }> {
   const proc = Bun.spawn(['git', '-C', cwd, ...args], { stdout: 'pipe', stderr: 'pipe' });
-  const [exitCode, stdout, stderr] = await Promise.all([
-    proc.exited,
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ]);
-  return { exitCode, stdout, stderr };
+  const result = await collectBoundedProcess(proc, {
+    timeoutMs: 10_000,
+    terminationTimeoutMs: 3_000,
+    maxChars: MAX_GIT_DIFF_BYTES + 1,
+    retainOutput: 'head',
+    label: 'Git diff inspection',
+    terminate: () => killProcessTree(proc),
+  });
+  if (result.timedOut || result.error) {
+    return { exitCode: -1, stdout: result.stdout, stderr: result.error || 'Git inspection failed' };
+  }
+  return { exitCode: result.exitCode ?? -1, stdout: result.stdout, stderr: result.stderr };
 }
 
-function boundedDiff(text: string): { diff: string; truncated: boolean } {
+export function boundedDiff(text: string): { diff: string; truncated: boolean } {
   if (Buffer.byteLength(text, 'utf8') <= MAX_GIT_DIFF_BYTES) return { diff: text, truncated: false };
   return {
     diff: Buffer.from(text, 'utf8').subarray(0, MAX_GIT_DIFF_BYTES).toString('utf8') + '\n\n[Diff truncated by Agent Forge]',
     truncated: true,
   };
+}
+
+export function hasSuccessfulGitOutput(result: { exitCode: number; stdout: string }): boolean {
+  return result.exitCode === 0 && result.stdout.trim().length > 0;
 }
 
 export async function handleGitDiff(req: Request): Promise<Response> {
@@ -99,12 +111,15 @@ export async function handleGitDiff(req: Request): Promise<Response> {
     const target = resolveGitDiffTarget(agent.cwd, requestedPath);
 
     const tracked = await runGit(agent.cwd, ['diff', '--no-ext-diff', '--unified=3', 'HEAD', '--', target.relativePath]);
-    if (tracked.stdout.trim()) {
+    if (hasSuccessfulGitOutput(tracked)) {
       return jsonResponse({ file: target.relativePath, kind: 'diff', ...boundedDiff(tracked.stdout) });
     }
 
     const untracked = await runGit(agent.cwd, ['ls-files', '--others', '--exclude-standard', '--', target.relativePath]);
-    if (untracked.stdout.trim()) {
+    if (untracked.exitCode !== 0) {
+      return jsonResponse({ error: untracked.stderr.trim() || 'Unable to inspect untracked files' }, 400);
+    }
+    if (hasSuccessfulGitOutput(untracked)) {
       if (!existsSync(target.absolutePath) || !statSync(target.absolutePath).isFile()) {
         return jsonResponse({ error: 'Changed file no longer exists' }, 404);
       }

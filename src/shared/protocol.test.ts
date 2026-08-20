@@ -56,3 +56,47 @@ test('migrateAgentRecord preserves only well-formed terminal turn outcomes', () 
     lastTurnOutcome: { status: 'still-retrying', at: 'yesterday' },
   }).lastTurnOutcome).toBeNull();
 });
+
+test('migrateAgentRecord clears sessions whose id or provider ownership is malformed', () => {
+  for (const candidate of [
+    { currentSessionId: 42, currentSessionProvider: 'claude', currentSessionModel: 'model' },
+    { currentSessionId: 'session', currentSessionProvider: 'unknown', currentSessionModel: 'model' },
+    { currentSessionId: '', currentSessionProvider: 'codex', currentSessionModel: 'model' },
+  ]) {
+    expect(migrateAgentRecord({ id: 'a1', ...candidate })).toMatchObject({
+      currentSessionId: null,
+      currentSessionProvider: null,
+      currentSessionModel: null,
+    });
+  }
+});
+
+test('migrateAgentRecord replaces non-finite mismatch timestamps and is idempotent', () => {
+  const once = migrateAgentRecord({
+    id: 'a1',
+    modelMismatch: { requested: 'requested', ran: 'actual', at: Number.POSITIVE_INFINITY },
+  });
+  expect(Number.isFinite(once.modelMismatch?.at)).toBe(true);
+  expect(migrateAgentRecord(once)).toEqual(once);
+});
+
+test('migrateAgentRecord never throws across representative hostile persisted values', () => {
+  const hostileValues: any[] = [
+    null,
+    undefined,
+    false,
+    0,
+    '',
+    [],
+    {},
+    { sessionIds: null },
+    { sessionIds: [] },
+    { sessionIds: { claude: 7, codex: {} } },
+    { modelMismatch: Object.create(null) },
+    { lastTurnOutcome: { status: 'completed', at: Number.NaN } },
+    { currentSessionId: {}, currentSessionProvider: ['claude'] },
+  ];
+  for (const value of hostileValues) {
+    expect(() => migrateAgentRecord(value)).not.toThrow();
+  }
+});

@@ -1,6 +1,8 @@
 import { expect, test } from 'bun:test';
 import type { Subprocess } from 'bun';
 import {
+  assertArgvWithinLimit,
+  buildCliEnv,
   defaultCliDirs,
   createProcessUnwindSignal,
   killProcessTree,
@@ -9,6 +11,37 @@ import {
   type ProcessTerminationDependencies,
   type WaitableKillProcess,
 } from './utils';
+
+test('CLI environment removes recursive launcher flags, normalizes PATH, and preserves required credentials', () => {
+  const env = buildCliEnv({
+    Path: 'C:\\Tools;C:\\TOOLS;C:\\Custom',
+    CLAUDECODE: 'nested',
+    claudecode: 'nested-case-variant',
+    VSCODE_IPC_HOOK: 'socket',
+    npm_config_cache: 'cache',
+    INIT_CWD: 'old-workspace',
+    TERM_PROGRAM: 'editor',
+    CREDENTIAL_SENTINEL: 'preserved',
+  }, {
+    CUSTOM_SETTING: 'enabled',
+    CLAUDECODE: 'cannot-be-reintroduced',
+  }, 'win32', 'C:\\Users\\fixture');
+
+  expect(env.CREDENTIAL_SENTINEL).toBe('preserved');
+  expect(env.CUSTOM_SETTING).toBe('enabled');
+  expect(Object.keys(env).filter(key => key.toLowerCase() === 'path')).toEqual(['Path']);
+  expect(env.Path?.split(';').filter(path => path.toLowerCase() === 'c:\\tools')).toHaveLength(1);
+  expect(env.Path).toContain('C:\\Users\\fixture\\.local\\bin');
+  expect(Object.keys(env).some(key => key.toLowerCase() === 'claudecode')).toBe(false);
+  expect(Object.keys(env).some(key => key.toLowerCase().startsWith('vscode_'))).toBe(false);
+  expect(Object.keys(env).some(key => key.toLowerCase().startsWith('npm_'))).toBe(false);
+});
+
+test('argv guard rejects oversized and multibyte command lines before spawn', () => {
+  expect(() => assertArgvWithinLimit(['tool', 'small argument'])).not.toThrow();
+  expect(() => assertArgvWithinLimit(['tool', 'x'.repeat(30_000)])).toThrow('Refusing to spawn');
+  expect(() => assertArgvWithinLimit(['tool', '🙂'.repeat(8_000)])).toThrow('argv would be');
+});
 
 test('default Windows CLI directories include native user-local installers', () => {
   expect(defaultCliDirs('win32', 'C:\\Users\\test-user')).toEqual([

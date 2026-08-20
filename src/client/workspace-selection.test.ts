@@ -75,6 +75,39 @@ test('file changes are reviewable and composer controls are explicit', () => {
   expect(clientSource).toContain("tokenUsage.numTurns === 1 ? 'turn' : 'turns'");
 });
 
+test('live turn snapshots restore progress and use provider activity for stall detection', () => {
+  expect(clientSource).toContain("case 'live_turn_state':");
+  expect(clientSource).toContain('previous.turnId === state.turnId');
+  expect(clientSource).toContain('Number(previous.revision || 0) >= Number(state.revision || 0)');
+  expect(clientSource).toContain('activeLiveTurn?.lastProviderEventAt || null');
+  expect(clientSource).toContain("isActive: isWorking");
+  expect(clientSource).toContain('(possibly stalled)');
+  expect(clientSource).not.toContain('(may be stuck)');
+});
+
+test('long elapsed durations roll up into days, hours, minutes, and seconds', () => {
+  const start = clientSource.indexOf('function formatElapsedDuration(');
+  const end = clientSource.indexOf('\n\n    // Hook: elapsed time', start);
+  expect(start).toBeGreaterThan(-1);
+  expect(end).toBeGreaterThan(start);
+  const formatElapsedDuration = new Function(
+    `${clientSource.slice(start, end)}; return formatElapsedDuration;`,
+  )() as (seconds: number) => string;
+
+  expect(formatElapsedDuration(0)).toBe('0s');
+  expect(formatElapsedDuration(59)).toBe('59s');
+  expect(formatElapsedDuration(60)).toBe('1m 0s');
+  expect(formatElapsedDuration(3_600)).toBe('1h 0m 0s');
+  expect(formatElapsedDuration(86_400)).toBe('1d 0h 0m 0s');
+  expect(formatElapsedDuration((3_724 * 60) + 28)).toBe('2d 14h 4m 28s');
+});
+
+test('Claude model-specific weekly usage renders as Fable in both limits surfaces', () => {
+  expect(clientSource).toContain("snap.provider === 'claude' && Number.isFinite(snap.modelWeekly?.usedPercent)");
+  expect(clientSource).toContain("e(LimitsMeter, { label: 'Fable', window: snap.modelWeekly })");
+  expect(clientSource).toContain("{ key: 'modelWeekly', label: 'Fable', data: snap.modelWeekly }");
+});
+
 test('the browser application inline script remains syntactically valid', () => {
   const start = clientSource.lastIndexOf('<script>');
   const end = clientSource.lastIndexOf('</script>');

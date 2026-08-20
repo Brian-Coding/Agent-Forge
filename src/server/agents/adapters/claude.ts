@@ -1,20 +1,26 @@
 import { existsSync } from 'fs';
+import { extname, win32 as win32Path } from 'path';
 import {
   ArgvTooLongError,
+  claudeCredentialsPath,
   createCliEnv,
   createProcessUnwindSignal,
+  isClaudeAccessTokenExpired,
+  isClaudeRefreshTokenExpired,
   killProcessTree,
+  readClaudeCredentialState,
   resolveCliBinary,
   safeSpawn,
   type ProcessTerminationResult,
   waitForProcessExit,
   waitForOperationOrUnwind,
 } from '../../utils';
-import { stripModelTier } from '../agent-kinds';
+import { isRealClaudeModelId, stripModelTier } from '../agent-kinds';
 import { persistenceService } from '../../services/persistence.service';
 import { summarizeToolInput, type AgentEvent } from '../events';
 import { drainStreamToString, parseNdjsonLines, flushNdjsonLeftover } from '../stream-utils';
 import type { AgentAdapter, AgentHandle, AgentRunContext } from '../types';
+import { collectBoundedProcess } from '../../services/bounded-subprocess';
 
 /**
  * Claude CLI adapter. Preserves agent-forge's existing invocation:
@@ -30,7 +36,7 @@ import type { AgentAdapter, AgentHandle, AgentRunContext } from '../types';
  *   system/init  → emit 'session' (and call ctx.updateSessionId)
  *   assistant    → emit 'usage' (delta tokens), then per content block:
  *                    type=thinking → emit 'status:thinking' + 'thinking-delta'
- *                    type=text     → emit 'status:responding' + 'text-delta'
+ *                    type=text     → emit live provider commentary; final result stays response
  *                    type=tool_use → emit 'tool-call-start'
  *   user         → per content block: type=tool_result → emit 'tool-call-end'
  *   result       → emit 'usage' (cost+turns deltas, contextLimit snapshot) + 'result'
@@ -40,15 +46,146 @@ import type { AgentAdapter, AgentHandle, AgentRunContext } from '../types';
  * The bridge (chat.service) accumulates usage deltas onto the agent's
  * running totals and broadcasts `token_usage` with the snapshot.
  */
-export const claudeAdapter: AgentAdapter<undefined> = {
+export interface ClaudeRunState {
+  streamedThinking: string;
+  streamedText: string;
+  lastRenderedContentKind: 'thinking' | 'text' | null;
+  currentMessageId: string | null;
+  currentIsSubagent: boolean;
+  startedToolIds: Set<string>;
+  pendingSessionId: string | null;
+}
+
+export function createClaudeRunState(): ClaudeRunState {
+  return {
+    streamedThinking: '',
+    streamedText: '',
+    lastRenderedContentKind: null,
+    currentMessageId: null,
+    currentIsSubagent: false,
+    startedToolIds: new Set<string>(),
+    pendingSessionId: null,
+  };
+}
+
+function snapshotSuffix(full: string, streamed: string): string {
+  if (!full) return '';
+  if (!streamed) return full;
+  if (full === streamed || streamed.endsWith(full)) return '';
+  if (full.startsWith(streamed)) return full.slice(streamed.length);
+  // The provider changed the completed snapshot rather than extending it.
+  // Emit the snapshot once instead of guessing at an unsafe overlap.
+  return full;
+}
+
+function beginClaudeMessage(
+  ctx: AgentRunContext,
+  state: ClaudeRunState,
+  messageId: string | null,
+  isSubagent: boolean,
+): void {
+  const effectiveMessageId = messageId ?? state.currentMessageId;
+  const isNewMessage = state.currentMessageId !== null && effectiveMessageId !== state.currentMessageId;
+  if (isNewMessage && (state.streamedThinking || state.streamedText)) {
+    ctx.emitAgentEvent({ type: 'thinking-delta', text: '\n\n', streaming: true });
+  }
+  if (state.currentMessageId === null || isNewMessage) {
+    state.currentMessageId = effectiveMessageId;
+    state.currentIsSubagent = isSubagent;
+    state.streamedThinking = '';
+    state.streamedText = '';
+    state.lastRenderedContentKind = null;
+    state.startedToolIds.clear();
+  }
+}
+
+function emitClaudeProgress(
+  ctx: AgentRunContext,
+  state: ClaudeRunState,
+  kind: 'thinking' | 'text',
+  text: string,
+  streaming = false,
+  label?: string,
+): void {
+  if (!text) return;
+  if (state.lastRenderedContentKind && state.lastRenderedContentKind !== kind) {
+    ctx.emitAgentEvent({ type: 'thinking-delta', text: '\n\n', streaming: true });
+  }
+  state.lastRenderedContentKind = kind;
+  ctx.emitAgentEvent({ type: 'status', status: 'thinking', label });
+  ctx.emitAgentEvent({
+    type: 'thinking-delta',
+    text,
+    messageId: state.currentMessageId ?? undefined,
+    streaming,
+  });
+}
+
+function commitClaudeSession(ctx: AgentRunContext, state: ClaudeRunState): void {
+  const sessionId = state.pendingSessionId;
+  if (!sessionId || sessionId === ctx.getSessionId()) return;
+  ctx.updateSessionId(sessionId);
+  ctx.emitAgentEvent({ type: 'session', providerSessionId: sessionId });
+}
+
+function tokenCount(model: any): number {
+  if (!model || typeof model !== 'object') return 0;
+  return (Number(model.inputTokens) || 0)
+    + (Number(model.outputTokens) || 0)
+    + (Number(model.cacheReadInputTokens) || 0)
+    + (Number(model.cacheCreationInputTokens) || 0);
+}
+
+/** Select only a real Claude model from result.modelUsage. Accounting-only
+ * buckets such as `<synthetic>` are intentionally ignored. */
+export function selectClaudeServingModel(modelUsage: unknown): { modelRan?: string; contextLimit?: number } {
+  if (!modelUsage || typeof modelUsage !== 'object') return {};
+  let modelRan: string | undefined;
+  let contextLimit: number | undefined;
+  let bestTokens = -1;
+  for (const [id, model] of Object.entries(modelUsage as Record<string, any>)) {
+    if (!isRealClaudeModelId(id)) continue;
+    const tokens = tokenCount(model);
+    if (tokens > bestTokens) {
+      bestTokens = tokens;
+      modelRan = id;
+      contextLimit = typeof model?.contextWindow === 'number' ? model.contextWindow : undefined;
+    }
+  }
+  return { modelRan, contextLimit };
+}
+
+export function resolveClaudeLaunchCommand(
+  claudeBin: string,
+  platform: NodeJS.Platform = process.platform,
+  pathExists: (path: string) => boolean = existsSync,
+  nodeBin?: string,
+): string[] {
+  if (platform !== 'win32' || extname(claudeBin).toLowerCase() !== '.cmd') return [claudeBin];
+
+  // Avoid cmd.exe for the standard npm shim. Besides its smaller command-line
+  // limit, Bun/cmd can split an absolute shim path containing spaces. Invoking
+  // Claude's JavaScript entry point directly keeps argv structured and avoids
+  // shell interpretation of system-prompt characters.
+  const entrypoint = win32Path.resolve(
+    win32Path.dirname(claudeBin),
+    'node_modules',
+    '@anthropic-ai',
+    'claude-code',
+    'cli.js',
+  );
+  return pathExists(entrypoint) ? [nodeBin || resolveCliBinary('node'), entrypoint] : [claudeBin];
+}
+
+export const claudeAdapter: AgentAdapter<ClaudeRunState> = {
   kind: 'claude',
   displayName: 'Claude',
 
   createState() {
-    return undefined;
+    return createClaudeRunState();
   },
 
-  createHandle(prompt: string, ctx: AgentRunContext): AgentHandle {
+  createHandle(prompt: string, ctx: AgentRunContext, state: ClaudeRunState): AgentHandle {
     let proc: ReturnType<typeof safeSpawn> | null = null;
     let killed = false;
     let terminationPromise: Promise<void> | null = null;
@@ -102,10 +239,13 @@ export const claudeAdapter: AgentAdapter<undefined> = {
     // Resolve to absolute path so Bun.spawn doesn't have to probe PATHEXT
     // from the agent's cwd (which fails on Windows for npm shim files).
     const claudeBin = resolveCliBinary('claude');
+    const claudeCommand = resolveClaudeLaunchCommand(claudeBin);
     const args: string[] = [
-      claudeBin,
+      ...claudeCommand,
       '--print',
       '--output-format', 'stream-json',
+      '--include-partial-messages',
+      '--forward-subagent-text',
       '--verbose',
       '--dangerously-skip-permissions',
     ];
@@ -136,7 +276,7 @@ export const claudeAdapter: AgentAdapter<undefined> = {
           // CLAUDECODE leaks "already inside Claude Code" signals. createCliEnv
           // strips it and augments PATH for GUI/editor-launched servers.
           const env = createCliEnv();
-          const authError = await getClaudeAuthError(claudeBin, env);
+          const authError = await getClaudeAuthError(claudeCommand, env);
           if (authError) {
             ctx.emitAgentEvent({ type: 'error', message: authError });
             ctx.emitSystemMessage(authError);
@@ -218,10 +358,12 @@ export const claudeAdapter: AgentAdapter<undefined> = {
           const decoder = new TextDecoder();
           let leftover = '';
           let lastResultText = '';
+          let expiredAuthDetected = false;
 
           const handleEvent = (event: any) => {
+            if (!expiredAuthDetected && eventReportsExpiredAuth(event)) expiredAuthDetected = true;
             try {
-              normalizeClaudeEvent(event, ctx, (resultText: string) => { lastResultText = resultText; });
+              normalizeClaudeEvent(event, ctx, state, (resultText: string) => { lastResultText = resultText; });
             } catch (e) {
               console.error('[claude] event handler threw:', e);
             }
@@ -267,6 +409,17 @@ export const claudeAdapter: AgentAdapter<undefined> = {
             return {
               recoverableError: 'stale-session',
               errorMessage: stderrText,
+            };
+          }
+          if (!killed && exitCode !== 0 && (expiredAuthDetected || isClaudeExpiredAuthText(stderrText))) {
+            // The CLI's OAuth access token died before/while this turn ran. It
+            // rewrites `~/.claude/.credentials.json` with a refreshed token, so
+            // a second spawn normally succeeds — hand the bridge a recoverable
+            // error instead of burning the turn on "exited with code 1".
+            ctx.emitAgentEvent({ type: 'finish', reason: 'expired-auth' });
+            return {
+              recoverableError: 'expired-auth',
+              errorMessage: stderrText || 'OAuth access token has expired',
             };
           }
           if (!killed && exitCode !== 0) {
@@ -329,7 +482,36 @@ export const claudeAdapter: AgentAdapter<undefined> = {
 
 const CLAUDE_AUTH_CHECK_TIMEOUT_MS = 5_000;
 
-async function getClaudeAuthError(claudeBin: string, env: Record<string, string>): Promise<string | null> {
+/**
+ * The CLI's own words when it starts a turn with a dead access token. It exits
+ * 1 with an empty stderr, so this text is the only evidence — it arrives as an
+ * assistant text block on stdout, not on the error channel.
+ *   "Failed to authenticate. API Error: 401 OAuth access token has expired.
+ *    Re-authenticate to continue."
+ */
+const CLAUDE_EXPIRED_AUTH_PATTERN =
+  /(oauth[^\n]{0,40}token has expired|401[^\n]{0,80}(?:token has expired|re-?authenticate))/i;
+
+export function isClaudeExpiredAuthText(text: string | null | undefined): boolean {
+  return typeof text === 'string' && text.length > 0 && CLAUDE_EXPIRED_AUTH_PATTERN.test(text);
+}
+
+/** Scan one stream-json event for the CLI's expired-token report. Targeted at
+ *  the blocks that can carry it rather than stringifying every event. */
+export function eventReportsExpiredAuth(event: any): boolean {
+  if (!event || typeof event !== 'object') return false;
+  if (isClaudeExpiredAuthText(event.message) || isClaudeExpiredAuthText(event.error)) return true;
+  if (typeof event.result === 'string' && isClaudeExpiredAuthText(event.result)) return true;
+  const content = event.message?.content ?? event.content;
+  if (Array.isArray(content)) {
+    for (const block of content) {
+      if (block?.type === 'text' && isClaudeExpiredAuthText(block.text)) return true;
+    }
+  }
+  return false;
+}
+
+async function getClaudeAuthError(claudeCommand: readonly string[], env: Record<string, string>): Promise<string | null> {
   if (env.AGENT_FORGE_SKIP_CLAUDE_AUTH_CHECK === '1') return null;
 
   // API-key/token environments do not need Claude Code's persisted first-party login.
@@ -337,8 +519,29 @@ async function getClaudeAuthError(claudeBin: string, env: Record<string, string>
     return null;
   }
 
+  // `claude auth status` reports the stored login, not token freshness, so it
+  // answers loggedIn=true right up to the moment a turn 401s. Read the token
+  // metadata directly for the one state the CLI cannot recover from on its
+  // own: a dead *refresh* token, which needs an interactive login. An expired
+  // access token alone is not blocked — the CLI refreshes it on spawn, and the
+  // expired-auth retry in chat.service covers the case where it loses that race.
+  const creds = await readClaudeCredentialState();
+  if (isClaudeRefreshTokenExpired(creds)) {
+    return [
+      'Claude Code cannot refresh its login: the stored refresh token has expired.',
+      `Credentials: ${claudeCredentialsPath()}`,
+      'Run `claude auth login` in a normal terminal, then retry this turn.',
+    ].join('\n');
+  }
+  if (isClaudeAccessTokenExpired(creds)) {
+    console.warn(
+      '[claude] stored OAuth access token is expired or expiring; the CLI should refresh it on spawn '
+      + '(a 401 on this turn is retried once)',
+    );
+  }
+
   try {
-    const result = await getClaudeAuthStatus(claudeBin, env);
+    const result = await getClaudeAuthStatus(claudeCommand, env);
     if (!result) return null;
 
     const { status, detail } = result;
@@ -359,32 +562,29 @@ async function getClaudeAuthError(claudeBin: string, env: Record<string, string>
 }
 
 async function getClaudeAuthStatus(
-  claudeBin: string,
+  claudeCommand: readonly string[],
   env: Record<string, string>,
 ): Promise<{ status: any; detail: string } | null> {
-  let timedOut = false;
-  const proc = Bun.spawn([claudeBin, 'auth', 'status'], {
+  const proc = Bun.spawn([...claudeCommand, 'auth', 'status'], {
     stdout: 'pipe',
     stderr: 'pipe',
     env,
   });
-  const timeout = setTimeout(() => {
-    timedOut = true;
-    try { proc.kill(); } catch {}
-  }, CLAUDE_AUTH_CHECK_TIMEOUT_MS);
+  const result = await collectBoundedProcess(proc, {
+    timeoutMs: CLAUDE_AUTH_CHECK_TIMEOUT_MS,
+    terminationTimeoutMs: 2_000,
+    maxChars: 64_000,
+    retainOutput: 'head',
+    label: 'Claude auth status check',
+    terminate: () => killProcessTree(proc),
+  });
+  if (result.timedOut || result.error) {
+    console.warn(`[claude] ${result.error || `auth status check timed out after ${CLAUDE_AUTH_CHECK_TIMEOUT_MS}ms`}`);
+    return null;
+  }
 
+  const stdout = result.stdout;
   try {
-    const [, stdout] = await Promise.all([
-      proc.exited,
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ]);
-
-    if (timedOut) {
-      console.warn(`[claude] auth status check timed out after ${CLAUDE_AUTH_CHECK_TIMEOUT_MS}ms`);
-      return null;
-    }
-
     let status: any = null;
     try {
       status = stdout ? JSON.parse(stdout) : null;
@@ -403,8 +603,8 @@ async function getClaudeAuthStatus(
         apiProvider: status.apiProvider,
       })}`,
     };
-  } finally {
-    clearTimeout(timeout);
+  } catch {
+    return null;
   }
 }
 
@@ -413,19 +613,66 @@ async function getClaudeAuthStatus(
  * AgentEvent emissions. The captureResult callback lets run() store the final
  * result text for the AgentRunResult return.
  */
-function normalizeClaudeEvent(
+export function normalizeClaudeEvent(
   event: any,
   ctx: AgentRunContext,
+  state: ClaudeRunState,
   captureResult: (text: string) => void,
 ): void {
   if (!event || typeof event !== 'object' || !event.type) return;
 
   // system/init: emits the session_id we need to resume next turn.
   if (event.type === 'system' && event.subtype === 'init' && typeof event.session_id === 'string') {
-    const prev = ctx.getSessionId();
-    if (event.session_id !== prev) {
-      ctx.updateSessionId(event.session_id);
-      ctx.emitAgentEvent({ type: 'session', providerSessionId: event.session_id });
+    // Defer claiming a fresh session until a real assistant/result event. A
+    // local validation-only run can emit init metadata followed by a synthetic
+    // error; claiming it would corrupt resume ownership despite no model call.
+    state.pendingSessionId = event.session_id;
+    return;
+  }
+
+  // With --include-partial-messages Claude forwards the Anthropic streaming
+  // events under stream_event.event. These are the live token source; the
+  // later assistant snapshot is retained only as a gap-filling fallback.
+  if (event.type === 'stream_event' && event.event && typeof event.event === 'object') {
+    const streamEvent = event.event;
+    if (streamEvent.type === 'message_start') {
+      beginClaudeMessage(
+        ctx,
+        state,
+        typeof streamEvent.message?.id === 'string' ? streamEvent.message.id : null,
+        typeof event.parent_tool_use_id === 'string' && !!event.parent_tool_use_id,
+      );
+      return;
+    }
+    if (streamEvent.type === 'content_block_start' && streamEvent.content_block?.type === 'tool_use') {
+      const block = streamEvent.content_block;
+      const toolName = String(block.name ?? 'tool');
+      // The start frame does not yet contain the streamed JSON input. Mark the
+      // phase now, then let the completed assistant block emit the tool event
+      // with its full input so plan-write detection and activity summaries keep
+      // working.
+      ctx.emitAgentEvent({ type: 'status', status: 'tool', label: `Using ${toolName}` });
+      return;
+    }
+    if (streamEvent.type === 'content_block_delta') {
+      const delta = streamEvent.delta;
+      if (delta?.type === 'thinking_delta' && typeof delta.thinking === 'string' && delta.thinking) {
+        state.streamedThinking += delta.thinking;
+        emitClaudeProgress(ctx, state, 'thinking', delta.thinking, true);
+        return;
+      }
+      if (delta?.type === 'text_delta' && typeof delta.text === 'string' && delta.text) {
+        state.streamedText += delta.text;
+        emitClaudeProgress(
+          ctx,
+          state,
+          'text',
+          delta.text,
+          true,
+          state.currentIsSubagent ? 'Subagent working' : 'Claude working',
+        );
+        return;
+      }
     }
     return;
   }
@@ -436,7 +683,12 @@ function normalizeClaudeEvent(
     // truth per API call, available even when the turn dies before the final
     // result event (kill, crash, max-turns). The result-event modelUsage
     // check below stays as the authoritative end-of-turn snapshot.
+    const assistantMessageId = typeof event.message?.id === 'string' ? event.message.id : null;
+    const isSubagent = typeof event.parent_tool_use_id === 'string' && !!event.parent_tool_use_id;
+    beginClaudeMessage(ctx, state, assistantMessageId, isSubagent);
     const messageModel = event.message?.model;
+    const realMessageModel = !isSubagent && isRealClaudeModelId(messageModel) ? messageModel : undefined;
+    if (realMessageModel) commitClaudeSession(ctx, state);
     const usage = event.message?.usage;
     if (usage && typeof usage === 'object') {
       const inputTokens = (usage.input_tokens || 0)
@@ -447,39 +699,62 @@ function normalizeClaudeEvent(
         contextTokens: inputTokens > 0 ? inputTokens : undefined,
         inputTokensDelta: inputTokens > 0 ? inputTokens : undefined,
         outputTokensDelta: typeof usage.output_tokens === 'number' ? usage.output_tokens : undefined,
-        modelRan: typeof messageModel === 'string' && messageModel ? messageModel : undefined,
+        modelRan: realMessageModel,
       });
-    } else if (typeof messageModel === 'string' && messageModel) {
-      ctx.emitAgentEvent({ type: 'usage', modelRan: messageModel });
+    } else if (realMessageModel) {
+      ctx.emitAgentEvent({ type: 'usage', modelRan: realMessageModel });
     }
 
     const content = event.message?.content;
     if (Array.isArray(content)) {
+      const completeThinking = content
+        .filter((block: any) => block?.type === 'thinking' && typeof block.thinking === 'string')
+        .map((block: any) => block.thinking)
+        .join('');
+      const completeText = content
+        .filter((block: any) => block?.type === 'text' && typeof block.text === 'string')
+        .map((block: any) => block.text)
+        .join('');
+      const thinkingSuffix = snapshotSuffix(completeThinking, state.streamedThinking);
+      const textSuffix = snapshotSuffix(completeText, state.streamedText);
+      if (completeThinking) state.streamedThinking = completeThinking;
+      if (completeText) state.streamedText = completeText;
+      if (thinkingSuffix) {
+        emitClaudeProgress(ctx, state, 'thinking', thinkingSuffix);
+      }
+      if (textSuffix) {
+        emitClaudeProgress(
+          ctx,
+          state,
+          'text',
+          textSuffix,
+          false,
+          isSubagent ? 'Subagent working' : 'Claude working',
+        );
+      }
+      if (!isSubagent && completeText) {
+        ctx.emitAgentEvent({ type: 'assistant-snapshot', text: completeText });
+      }
+
       for (let i = 0; i < content.length; i++) {
         const block = content[i];
         if (!block || typeof block !== 'object') continue;
 
-        if (block.type === 'thinking' && typeof block.thinking === 'string' && block.thinking) {
-          ctx.emitAgentEvent({ type: 'status', status: 'thinking' });
-          ctx.emitAgentEvent({ type: 'thinking-delta', text: block.thinking });
-          continue;
-        }
-        if (block.type === 'text' && typeof block.text === 'string' && block.text) {
-          ctx.emitAgentEvent({ type: 'status', status: 'responding' });
-          ctx.emitAgentEvent({ type: 'text-delta', text: block.text });
-          continue;
-        }
+        if (block.type === 'thinking' || block.type === 'text') continue;
         if (block.type === 'tool_use') {
           const toolName = String(block.name ?? 'tool');
           const input = block.input ?? {};
           const toolCallId = String(block.id ?? `${toolName}:${i}`);
-          ctx.emitAgentEvent({
-            type: 'tool-call-start',
-            toolCallId,
-            toolName,
-            input,
-            summary: summarizeToolInput(toolName, input),
-          });
+          if (!state.startedToolIds.has(toolCallId)) {
+            state.startedToolIds.add(toolCallId);
+            ctx.emitAgentEvent({
+              type: 'tool-call-start',
+              toolCallId,
+              toolName,
+              input,
+              summary: summarizeToolInput(toolName, input),
+            });
+          }
           continue;
         }
       }
@@ -508,38 +783,20 @@ function normalizeClaudeEvent(
 
   // result: final cost + turn count + (sometimes) a fallback result text + modelUsage.
   if (event.type === 'result') {
-    if (typeof event.result === 'string' && event.result) {
+    const resultText = typeof event.result === 'string' ? event.result : '';
+    const localValidationFailure = /Goal condition is limited to \d+ characters \(got \d+\)/i.test(resultText);
+    const resultIsError = event.is_error === true || event.subtype === 'error_during_execution' || localValidationFailure;
+    if (resultText && resultIsError) {
+      ctx.emitAgentEvent({ type: 'error', message: resultText });
+      if (localValidationFailure) return;
+    } else if (resultText) {
       captureResult(event.result);
       ctx.emitAgentEvent({ type: 'result', text: event.result });
     }
 
-    let contextLimit: number | undefined;
-    let modelRan: string | undefined;
-    if (event.modelUsage && typeof event.modelUsage === 'object') {
-      // modelUsage is keyed by EVERY model the CLI touched this turn — not just
-      // the main one. Claude Code fires the small/fast model (claude-haiku-4-5)
-      // for background chores (title/topic generation, quota checks) on nearly
-      // every turn, so haiku appears alongside the model doing the real work.
-      // Taking the first key blindly reported those auxiliary haiku calls as
-      // "the model that ran," which false-latched a mismatch and blocked all
-      // sends whenever a non-haiku model was selected. Pick the model with the
-      // most token usage instead: the main model always dwarfs the tiny
-      // auxiliary call, and a genuine silent substitution (e.g. Fable→Opus)
-      // still surfaces because the substitute does the real work and wins here.
-      const tokensOf = (m: any): number =>
-        !m || typeof m !== 'object' ? 0 :
-        (Number(m.inputTokens) || 0) + (Number(m.outputTokens) || 0) +
-        (Number(m.cacheReadInputTokens) || 0) + (Number(m.cacheCreationInputTokens) || 0);
-      let bestTokens = -1;
-      for (const [id, model] of Object.entries(event.modelUsage) as [string, any][]) {
-        const t = tokensOf(model);
-        if (t > bestTokens) {
-          bestTokens = t;
-          modelRan = id;
-          contextLimit = model && typeof model.contextWindow === 'number' ? model.contextWindow : contextLimit;
-        }
-      }
-    }
+    commitClaudeSession(ctx, state);
+
+    const { contextLimit, modelRan } = selectClaudeServingModel(event.modelUsage);
 
     // Silent-substitution guard: if the model that actually ran differs from what
     // the user requested, the service quietly served something else. Confirmed
