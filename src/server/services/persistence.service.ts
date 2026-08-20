@@ -308,6 +308,8 @@ export function normalizePersistedData(raw: unknown): PersistedDataNormalization
       googleDocsTrackerEnabled: candidate.googleDocsTrackerEnabled === true,
       qaRuns,
     };
+    const cwd = boundedString(candidate.cwd, 32_768, false);
+    if (cwd) workspace.cwd = cwd;
     for (const key of ['testUrl', 'qaAgentId', 'atlasAgentId'] as const) {
       const value = boundedString(candidate[key], key === 'testUrl' ? 8_192 : 256, false);
       if (value) workspace[key] = value;

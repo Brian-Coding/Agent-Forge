@@ -1,7 +1,6 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
-import { unlink } from 'node:fs/promises';
-import { homedir, tmpdir } from 'node:os';
-import { extname, isAbsolute, join, relative, resolve, win32 as win32Path } from 'node:path';
+import { homedir } from 'node:os';
+import { dirname, extname, isAbsolute, join, relative, resolve, win32 as win32Path } from 'node:path';
 import {
   ArgvTooLongError,
   createCliEnv,
@@ -14,6 +13,7 @@ import {
   waitForOperationOrUnwind,
 } from '../../utils';
 import { persistenceService } from '../../services/persistence.service';
+import { createFreshTempDirectorySync, safeRemoveTree } from '../../services/safe-filesystem.mjs';
 import { summarizeToolInput, type AgentEvent } from '../events';
 import { drainStreamToString, parseNdjsonLines, flushNdjsonLeftover } from '../stream-utils';
 import type { AgentAdapter, AgentHandle, AgentRunContext } from '../types';
@@ -42,6 +42,8 @@ import type { AgentAdapter, AgentHandle, AgentRunContext } from '../types';
  */
 
 export interface CodexRunState {
+  outputDirectory: string;
+  outputRoot: string;
   outputPath: string;
   // Streaming state machine — Codex sends discrete items; we treat them like
   // assistant/tool blocks for parity with Claude's content_block semantics.
@@ -787,8 +789,14 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
 
   createState(ctx) {
     const stem = safePaneFileStem(ctx.paneId);
+    const outputDirectory = createFreshTempDirectorySync({
+      prefix: `agent-forge-codex-${stem.slice(0, 36)}-`,
+      protectedPaths: [ctx.cwd],
+    });
     return {
-      outputPath: resolve(tmpdir(), `agent-forge-codex-${stem}-${Date.now()}.txt`),
+      outputDirectory,
+      outputRoot: dirname(outputDirectory),
+      outputPath: join(outputDirectory, 'last-message.txt'),
       toolOpen: false,
       hasFinalAssistantMessage: false,
       lastAssistantMessage: '',
@@ -1161,13 +1169,9 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
           // Codex 0.125+ writes the canonical final answer here even when
           // the stream-event for item.completed/agent_message also ran.
           let finalText = '';
-          try {
-            const f = Bun.file(state.outputPath);
-            if (await f.exists()) {
-              finalText = (await f.text()).trim();
-            }
-          } finally {
-            await unlink(state.outputPath).catch(() => {});
+          const f = Bun.file(state.outputPath);
+          if (await f.exists()) {
+            finalText = (await f.text()).trim();
           }
 
           // Always emit the canonical final answer. If a clean Codex turn ends
@@ -1238,6 +1242,20 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
           }
           ctx.emitAgentEvent({ type: 'finish', reason: 'error' });
           return undefined;
+        } finally {
+          await safeRemoveTree({
+            targetPath: state.outputDirectory,
+            allowedRoot: state.outputRoot,
+            reason: 'Remove the isolated Codex final-message workspace after the provider turn',
+            mode: 'delete',
+            permanent: true,
+            allowNonEmpty: true,
+            allowedTopLevelNames: ['last-message.txt'],
+            maxEntries: 2,
+            expectedTargetName: /^agent-forge-codex-[a-zA-Z0-9._-]+-.*$/,
+          }).catch(error => {
+            console.warn('[codex] safe output workspace cleanup refused or failed:', error);
+          });
         }
       },
 

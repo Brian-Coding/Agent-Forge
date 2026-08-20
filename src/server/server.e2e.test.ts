@@ -166,9 +166,10 @@ test('full server boot recovers state, enforces transport guards, persists a mut
     const invalid = await waitForFrame(frames, frame => frame.type === 'error');
     expect(invalid.message).toContain('not valid JSON');
 
-    ws.send(JSON.stringify({ type: 'create_workspace', name: 'E2E durable workspace' }));
+    ws.send(JSON.stringify({ type: 'create_workspace', name: 'E2E durable workspace', cwd: directory }));
     const created = await waitForFrame(frames, frame => frame.type === 'workspace_created');
     expect(created.workspace.name).toBe('E2E durable workspace');
+    expect(created.workspace.cwd).toBe(directory);
     ws.close();
 
     proc.stdin.write('shutdown\n');

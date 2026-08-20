@@ -31,6 +31,30 @@ test('workspace ordering follows persisted sortOrder with createdAt as a stable 
   expect(sorted.map(item => item.id)).toEqual(['first', 'second-older', 'second-newer', 'third']);
 });
 
+test('workspace creation persists a validated primary working directory', async () => {
+  const map: Map<string, WorkspaceInfo> = (globalThis as any).__workspacesMap;
+  const originalSettings = structuredClone(settingsService.getRef());
+  const originalSaveNow = persistenceService.saveNow;
+  const projectRoot = await mkdtemp(join(tmpdir(), 'agent-forge-workspace-root-'));
+  const filePath = join(projectRoot, 'not-a-directory.txt');
+  let createdId: string | undefined;
+  await writeFile(filePath, 'test');
+  persistenceService.saveNow = async () => {};
+
+  try {
+    const created = await workspaceService.create('Project', `  ${projectRoot}  `);
+    createdId = created.id;
+    expect(created.cwd).toBe(projectRoot);
+    await expect(workspaceService.create('File', filePath)).rejects.toThrow('does not exist or is not a directory');
+    await expect(workspaceService.create('Missing', join(projectRoot, 'missing'))).rejects.toThrow('does not exist or is not a directory');
+  } finally {
+    if (createdId) map.delete(createdId);
+    persistenceService.saveNow = originalSaveNow;
+    settingsService.load(originalSettings);
+    await rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
 test('workspace mutations restore maps, ordering, settings, and reassignments when persistence fails', async () => {
   const map: Map<string, WorkspaceInfo> = (globalThis as any).__workspacesMap;
   const first = workspace(`atomic-a-${randomUUID()}`, 1000, Date.now());
@@ -44,7 +68,7 @@ test('workspace mutations restore maps, ordering, settings, and reassignments wh
 
   try {
     const idsBeforeCreate = [...map.keys()];
-    await expect(workspaceService.create('ghost')).rejects.toThrow('disk full');
+    await expect(workspaceService.create('ghost', tmpdir())).rejects.toThrow('disk full');
     expect([...map.keys()]).toEqual(idsBeforeCreate);
     expect(settingsService.getRef().activeWorkspaceId).toBe(first.id);
 
@@ -148,13 +172,17 @@ test('fresh-state migration persists the default workspace and agent assignments
   persistenceService.saveNow = async () => { saveCalls++; };
 
   try {
-    await workspaceService.loadAndMigrate(undefined, { gridColumns: 4, gridRows: 3 }, ['agent-a', 'agent-b'], (agentId, workspaceId) => {
+    await workspaceService.loadAndMigrate(undefined, { gridColumns: 4, gridRows: 3 }, [
+      { id: 'agent-a', cwd: 'C:\\projects\\alpha' },
+      { id: 'agent-b', cwd: 'C:\\projects\\beta' },
+    ], (agentId, workspaceId) => {
       assignments.push([agentId, workspaceId]);
     });
     const created = workspaceService.getAll();
     expect(created).toHaveLength(1);
     expect(created[0]).toMatchObject({
       name: 'Default',
+      cwd: 'C:\\projects\\alpha',
       gridColumns: 4,
       gridRows: 3,
       selectedAgentIds: ['agent-a', 'agent-b'],
@@ -164,6 +192,30 @@ test('fresh-state migration persists the default workspace and agent assignments
       ['agent-b', created[0]!.id],
     ]);
     expect(settingsService.getRef().activeWorkspaceId).toBe(created[0]!.id);
+    expect(saveCalls).toBe(1);
+  } finally {
+    persistenceService.saveNow = originalSaveNow;
+    map.clear();
+    for (const [id, value] of originalEntries) map.set(id, value);
+    settingsService.load(originalSettings);
+  }
+});
+
+test('legacy workspaces inherit their primary directory from an assigned agent', async () => {
+  const map: Map<string, WorkspaceInfo> = (globalThis as any).__workspacesMap;
+  const originalEntries = [...map.entries()];
+  const originalSettings = structuredClone(settingsService.getRef());
+  const originalSaveNow = persistenceService.saveNow;
+  const legacy = workspace(`legacy-${randomUUID()}`, 0, Date.now());
+  let saveCalls = 0;
+  map.clear();
+  persistenceService.saveNow = async () => { saveCalls++; };
+
+  try {
+    await workspaceService.loadAndMigrate([legacy], {}, [
+      { id: 'agent-a', cwd: 'C:\\projects\\legacy', workspaceId: legacy.id },
+    ], () => {});
+    expect(legacy.cwd).toBe('C:\\projects\\legacy');
     expect(saveCalls).toBe(1);
   } finally {
     persistenceService.saveNow = originalSaveNow;

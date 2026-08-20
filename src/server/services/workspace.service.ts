@@ -42,7 +42,16 @@ export const workspaceService = {
     return workspaces.values();
   },
 
-  async create(name: string): Promise<WorkspaceInfo> {
+  async create(name: string, cwd: string): Promise<WorkspaceInfo> {
+    const normalizedCwd = cwd.trim();
+    try {
+      const { stat } = await import('node:fs/promises');
+      if (!(await stat(normalizedCwd)).isDirectory()) {
+        throw new Error('not a directory');
+      }
+    } catch {
+      throw new Error(`Workspace directory does not exist or is not a directory: ${normalizedCwd}`);
+    }
     return runDurableMutation(async () => {
       const existingOrders = Array.from(workspaces.values(), workspace => workspace.sortOrder)
         .filter(Number.isFinite);
@@ -50,6 +59,7 @@ export const workspaceService = {
       const ws: WorkspaceInfo = {
         id: generateId(),
         name,
+        cwd: normalizedCwd,
         sortOrder: nextSortOrder,
         gridColumns: 3,
         gridRows: 2,
@@ -223,7 +233,7 @@ export const workspaceService = {
   async loadAndMigrate(
     workspacesList: WorkspaceInfo[] | undefined,
     settings: AppSettings | undefined,
-    agentIds: string[],
+    agents: Array<{ id: string; cwd: string; workspaceId?: string }>,
     setAgentWorkspace: (agentId: string, wsId: string) => void,
   ): Promise<void> {
     let recoveryChanged = false;
@@ -232,6 +242,14 @@ export const workspaceService = {
       const { existsSync, readFileSync, statSync } = await import('node:fs');
       const { join } = await import('node:path');
       for (const [index, ws] of workspacesList.entries()) {
+        if (!ws.cwd) {
+          const workspaceAgent = agents.find(agent => agent.workspaceId === ws.id)
+            || agents.find(agent => ws.selectedAgentIds?.includes(agent.id));
+          if (workspaceAgent?.cwd) {
+            ws.cwd = workspaceAgent.cwd;
+            recoveryChanged = true;
+          }
+        }
         if (!Number.isFinite(ws.sortOrder)) {
           ws.sortOrder = index;
           recoveryChanged = true;
@@ -335,22 +353,23 @@ export const workspaceService = {
       const defaultWorkspace: WorkspaceInfo = {
         id: defaultId,
         name: 'Default',
+        cwd: agents[0]?.cwd,
         sortOrder: 0,
         gridColumns: settings?.gridColumns || 2,
         gridRows: settings?.gridRows || 2,
-        selectedAgentIds: settings?.selectedAgentIds || agentIds,
+        selectedAgentIds: settings?.selectedAgentIds || agents.map(agent => agent.id),
         lockedAgentIds: [],
         createdAt: Date.now(),
       };
       workspaces.set(defaultId, defaultWorkspace);
 
-      for (const agentId of agentIds) {
-        setAgentWorkspace(agentId, defaultId);
+      for (const agent of agents) {
+        setAgentWorkspace(agent.id, defaultId);
       }
 
       const settingsRef = settingsService.getRef();
       settingsRef.activeWorkspaceId = defaultId;
-      console.log(`Migration: created "Default" workspace (${defaultId}) with ${agentIds.length} agents`);
+      console.log(`Migration: created "Default" workspace (${defaultId}) with ${agents.length} agents`);
       await persistenceService.saveNow();
     }
   },

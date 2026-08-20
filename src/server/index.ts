@@ -296,7 +296,7 @@ async function init() {
     await workspaceService.loadAndMigrate(
       data.workspaces,
       data.settings,
-      data.agents.map(a => a.id),
+      data.agents.map(a => ({ id: a.id, cwd: a.cwd, workspaceId: a.workspaceId })),
       agentService.setAgentWorkspace,
     );
     console.log(`Loaded ${data.agents.length} agents, ${data.messages.length} messages, ${documentService.getAll().length} documents, ${workspaceService.getAll().length} workspaces, ${(data.usageEvents ?? []).length} usage entries from disk`);

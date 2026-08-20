@@ -4,6 +4,7 @@ import { jsonResponse } from '../utils';
 import { readJsonBody, RequestBodyError } from '../request-body';
 import { collectBoundedProcess } from '../services/bounded-subprocess';
 import { killProcessTree } from '../utils';
+import { safeRemoveTree } from '../services/safe-filesystem.mjs';
 
 export async function runSimctl(...args: string[]): Promise<{ ok: boolean; output: string }> {
   try {
@@ -88,12 +89,38 @@ export async function handleCleanDerivedData(req: Request): Promise<Response> {
     return jsonResponse({ ok: false, message: 'DerivedData cleanup is only available on macOS' }, 400);
   }
 
-  const derivedDataPath = join(homedir(), 'Library', 'Developer', 'Xcode', 'DerivedData');
+  const cleanupPaths = derivedDataCleanupPaths();
   try {
-    const { rm } = await import('node:fs/promises');
-    await rm(derivedDataPath, { recursive: true, force: true });
-    return jsonResponse({ ok: true, message: 'Derived data cleaned' });
+    const result = await safeRemoveTree({
+      targetPath: cleanupPaths.derivedDataPath,
+      allowedRoot: cleanupPaths.xcodeRoot,
+      quarantineRoot: cleanupPaths.quarantineRoot,
+      reason: 'Quarantine Xcode DerivedData after an explicit local UI request',
+      allowNonEmpty: true,
+      maxEntries: 1_000_000,
+      expectedTargetName: 'DerivedData',
+      protectedPaths: [cleanupPaths.home],
+    });
+    const message = result.status === 'dry-run'
+      ? 'DerivedData cleanup passed preflight; dry-run mode left it unchanged'
+      : `DerivedData moved to recoverable quarantine: ${result.path}`;
+    return jsonResponse({ ok: true, message, quarantinePath: result.status === 'quarantined' ? result.path : undefined });
   } catch (e: any) {
     return jsonResponse({ ok: false, message: e.message }, 500);
   }
+}
+
+export function derivedDataCleanupPaths(home = homedir()): {
+  home: string;
+  xcodeRoot: string;
+  derivedDataPath: string;
+  quarantineRoot: string;
+} {
+  const xcodeRoot = join(home, 'Library', 'Developer', 'Xcode');
+  return {
+    home,
+    xcodeRoot,
+    derivedDataPath: join(xcodeRoot, 'DerivedData'),
+    quarantineRoot: join(xcodeRoot, '.agent-forge-quarantine'),
+  };
 }

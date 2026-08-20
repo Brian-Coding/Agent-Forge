@@ -93,6 +93,7 @@ export interface QaRunInfo {
 export interface WorkspaceInfo {
   id: string;
   name: string;
+  cwd?: string;                 // Primary project directory inherited by new agents. Optional only for legacy persisted workspaces.
   sortOrder: number;            // User-controlled order in the Workspaces sidebar
   gridColumns: number;
   gridRows: number;
@@ -579,7 +580,7 @@ export type ClientMessage =
   | { type: 'send_uploaded_images'; agentId: string; images: ChatImageAttachment[]; prompt?: string }
   // Workspaces
   | { type: 'get_workspaces' }
-  | { type: 'create_workspace'; name: string }
+  | { type: 'create_workspace'; name: string; cwd: string }
   | { type: 'update_workspace'; id: string; name?: string; gridColumns?: number; gridRows?: number; selectedAgentIds?: string[]; lockedAgentIds?: string[]; testUrl?: string; googleDocsTrackerEnabled?: boolean }
   | { type: 'reorder_workspaces'; orderedIds: string[] }
   | { type: 'delete_workspace'; id: string }

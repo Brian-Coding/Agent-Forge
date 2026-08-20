@@ -7,7 +7,7 @@
 // Bun on Windows due to child_process/IPC compat. Node runs it cleanly.
 
 import { createServer } from 'node:http';
-import { mkdir, readdir, rm, stat, unlink } from 'node:fs/promises';
+import { mkdir, readdir, stat } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
@@ -19,6 +19,7 @@ import {
   singleFlight,
   withOperationTimeout,
 } from './browser-worker-core.mjs';
+import { safeRemoveFile, safeRemoveTree } from '../src/server/services/safe-filesystem.mjs';
 
 const CONSOLE_LIMIT = 100;
 const NETWORK_LIMIT = 200;
@@ -83,7 +84,16 @@ async function pruneOldScreenshots(dir) {
       try {
         const full = path.join(dir, f);
         const s = await stat(full);
-        if (now - s.mtimeMs > SCREENSHOT_TTL_MS) await unlink(full);
+        if (now - s.mtimeMs > SCREENSHOT_TTL_MS) {
+          await safeRemoveFile({
+            targetPath: full,
+            allowedRoot: dir,
+            reason: 'Remove an expired Agent Forge QA screenshot',
+            mode: 'delete',
+            permanent: true,
+            expectedTargetName: /\.png$/i,
+          });
+        }
       } catch {}
     }));
   } catch {}
@@ -103,12 +113,24 @@ async function pruneOldQaRunDirectories(workspaceRoot, currentRunRoot) {
     const entries = await readdir(workspaceRoot, { withFileTypes: true });
     await Promise.all(entries.map(async (entry) => {
       if (!entry.isDirectory()) return;
+      if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,95}$/.test(entry.name)) return;
       const full = path.join(workspaceRoot, entry.name);
       if (path.resolve(full) === path.resolve(currentRunRoot)) return;
       try {
         const info = await stat(full);
         if (now - info.mtimeMs > SCREENSHOT_TTL_MS) {
-          await rm(full, { recursive: true, force: true });
+          await safeRemoveTree({
+            targetPath: full,
+            allowedRoot: workspaceRoot,
+            reason: 'Remove an expired generated Agent Forge QA run artifact directory',
+            mode: 'delete',
+            permanent: true,
+            allowNonEmpty: true,
+            allowedTopLevelNames: ['screenshots'],
+            maxEntries: 50_000,
+            expectedTargetName: /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,95}$/,
+            protectedPaths: [artifactRoot],
+          });
         }
       } catch {}
     }));

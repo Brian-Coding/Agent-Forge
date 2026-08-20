@@ -1645,7 +1645,7 @@
         // Resolve a latched model mismatch ('continue-actual' | 'fresh-requested')
         resolveModelMismatch: (id, action) => sendRaw({ type: 'resolve_model_mismatch', id, action }),
         // Workspaces
-        createWorkspace: (name) => sendRaw({ type: 'create_workspace', name }),
+        createWorkspace: (name, cwd) => sendRaw({ type: 'create_workspace', name, cwd }),
         reorderWorkspaces: (orderedIds) => sendRaw({ type: 'reorder_workspaces', orderedIds }),
         updateWorkspace: (id, updates) => sendRaw({ type: 'update_workspace', id, ...updates }),
         deleteWorkspace: (id) => sendRaw({ type: 'delete_workspace', id }),
@@ -1855,7 +1855,7 @@
     }
 
     // New Agent Modal (also used for editing)
-    function NewAgentModal({ isOpen, onClose, onCreate, editAgent, onUpdate, workspaceId }) {
+    function NewAgentModal({ isOpen, onClose, onCreate, editAgent, onUpdate, workspaceId, defaultCwd }) {
       const [name, setName] = useState('');
       const [cwd, setCwd] = useState('');
       const [systemPrompt, setSystemPrompt] = useState('');
@@ -1873,11 +1873,11 @@
           setSystemPrompt(editAgent.systemPrompt || '');
           setReferencePaths(editAgent.referencePaths || []);
         } else if (isOpen && !editAgent) {
-          setName(''); setCwd(''); setSystemPrompt(''); setReferencePaths([]);
+          setName(''); setCwd(defaultCwd || ''); setSystemPrompt(''); setReferencePaths([]);
         }
         setShowCwdBrowser(false);
         setShowRefBrowser(false);
-      }, [isOpen, editAgent]);
+      }, [isOpen, editAgent, defaultCwd]);
 
       if (!isOpen) return null;
 
@@ -3997,16 +3997,20 @@
     // New Workspace Modal
     function NewWorkspaceModal({ isOpen, onClose, onCreate }) {
       const [name, setName] = useState('');
+      const [cwd, setCwd] = useState('');
+      const [showCwdBrowser, setShowCwdBrowser] = useState(false);
       if (!isOpen) return null;
       const handleSubmit = () => {
-        if (name.trim()) {
-          onCreate(name.trim());
+        if (name.trim() && cwd.trim()) {
+          onCreate(name.trim(), cwd.trim());
           setName('');
+          setCwd('');
+          setShowCwdBrowser(false);
           onClose();
         }
       };
       return e('div', { className: 'modal-overlay', onClick: (ev) => ev.target === ev.currentTarget && onClose() },
-        e('div', { className: 'modal', style: { maxWidth: 400 } },
+        e('div', { className: 'modal', style: { maxWidth: 700 } },
           e('h2', { className: 'modal-title' }, 'New Workspace'),
           e('div', { className: 'form-group' },
             e('label', { className: 'form-label' }, 'Workspace Name'),
@@ -4019,9 +4023,17 @@
               autoFocus: true,
             })
           ),
+          e('div', { className: 'form-group' },
+            e('label', { className: 'form-label' }, 'Workspace Folder'),
+            e('div', { className: 'form-hint', style: { marginBottom: 6 } }, 'New agents will start in this directory by default'),
+            showCwdBrowser
+              ? e(FolderBrowser, { defaultPath: cwd || (window.__DOCUMENTS_PATH || ''), onSelect: (path) => { setCwd(path); setShowCwdBrowser(false); } })
+              : e('button', { type: 'button', className: 'browse-btn', onClick: () => setShowCwdBrowser(true), style: { width: '100%', textAlign: 'left' } }, cwd || 'Browse for folder...'),
+            cwd && !showCwdBrowser && e('div', { className: 'form-hint' }, 'Selected: ' + cwd)
+          ),
           e('div', { className: 'modal-actions' },
             e('button', { type: 'button', className: 'btn btn-secondary', onClick: onClose }, 'Cancel'),
-            e('button', { type: 'button', className: 'btn btn-primary', disabled: !name.trim(), onClick: handleSubmit }, 'Create Workspace')
+            e('button', { type: 'button', className: 'btn btn-primary', disabled: !name.trim() || !cwd.trim(), onClick: handleSubmit }, 'Create Workspace')
           )
         )
       );
@@ -5186,11 +5198,11 @@
       };
 
       const cleanDerived = () => {
-        if (!confirm('Delete all Xcode Derived Data? This is safe but builds will need to recompile.')) return;
-        setActionMsg('Cleaning...');
+        if (!confirm('Move all Xcode Derived Data to Agent Forge quarantine? Builds will need to recompile, but the prior data remains recoverable.')) return;
+        setActionMsg('Checking and quarantining...');
         fetch('/api/simulators/clean-derived-data', { method: 'POST' }).then(r => r.json()).then(data => {
-          setActionMsg(data.ok ? 'Cleaned!' : (data.message || 'Failed'));
-          setTimeout(() => setActionMsg(null), 3000);
+          setActionMsg(data.ok ? (data.message || 'Quarantined') : (data.message || 'Failed'));
+          setTimeout(() => setActionMsg(null), 8000);
         }).catch(() => {
           setActionMsg('Request failed');
           setTimeout(() => setActionMsg(null), 2000);
@@ -5210,7 +5222,7 @@
           )
         ),
         e('div', { className: 'emu-toolbar' },
-          e('button', { className: 'btn btn-danger btn-sm', onClick: cleanDerived }, 'Clean Derived Data'),
+          e('button', { className: 'btn btn-danger btn-sm', onClick: cleanDerived }, 'Quarantine Derived Data'),
           actionMsg && e('span', { style: { fontSize: 11, color: 'var(--text-secondary)' } }, actionMsg)
         ),
         e('div', { className: 'emu-list' },
@@ -6233,6 +6245,7 @@
           editAgent: editingAgent,
           onUpdate: ws.updateAgent,
           workspaceId: activeWorkspace ? activeWorkspace.id : undefined,
+          defaultCwd: activeWorkspace ? activeWorkspace.cwd : '',
         }),
         e(SharedContextModal, { isOpen: showSharedContext, onClose: () => setShowSharedContext(false), content: sharedContext, onSave: ws.updateSharedContext }),
 

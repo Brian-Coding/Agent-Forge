@@ -45,7 +45,7 @@ const BROWSER_WORKER_ENV_KEYS = new Set([
   'wayland_display', 'xauthority', 'dbus_session_bus_address',
   'playwright_browsers_path', 'playwright_skip_browser_download',
   'browser_headless', 'browser_slowmo', 'http_proxy', 'https_proxy', 'no_proxy',
-  'node_extra_ca_certs',
+  'node_extra_ca_certs', 'agent_forge_safe_fs_dry_run',
 ]);
 
 /** The browser worker needs OS/Playwright settings, not provider/API secrets. */

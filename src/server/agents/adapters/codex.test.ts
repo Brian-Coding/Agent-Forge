@@ -1,4 +1,7 @@
 import { expect, test } from 'bun:test';
+import { existsSync, realpathSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 import type { AgentEvent } from '../events';
 import type { AgentRunContext } from '../types';
 import {
@@ -7,6 +10,7 @@ import {
 } from '../../services/chat-turn-lifecycle';
 import {
   buildCodexExecArgs,
+  codexAdapter,
   codexImageArgs,
   codexReasoningConfigArg,
   extractCodexRolloutCommentary,
@@ -36,6 +40,8 @@ function makeContext(events: AgentEvent[], onEvent?: (event: AgentEvent) => void
 
 function makeState() {
   return {
+    outputDirectory: '',
+    outputRoot: '',
     outputPath: '',
     toolOpen: false,
     hasFinalAssistantMessage: false,
@@ -51,6 +57,22 @@ function makeState() {
     thinkingTail: '',
   };
 }
+
+test('Codex creates fresh isolated output directories under the platform temp root', () => {
+  const ctx = makeContext([]);
+  const first = codexAdapter.createState(ctx);
+  const second = codexAdapter.createState(ctx);
+  try {
+    expect(first.outputDirectory).not.toBe(second.outputDirectory);
+    expect(dirname(first.outputDirectory)).toBe(realpathSync(tmpdir()));
+    expect(first.outputPath).toBe(join(first.outputDirectory, 'last-message.txt'));
+    expect(existsSync(first.outputDirectory)).toBe(true);
+    expect(existsSync(second.outputDirectory)).toBe(true);
+  } finally {
+    rmSync(first.outputDirectory, { recursive: true, force: true });
+    rmSync(second.outputDirectory, { recursive: true, force: true });
+  }
+});
 
 test('Codex rollout fallback exposes only assistant commentary', () => {
   expect(extractCodexRolloutCommentary({

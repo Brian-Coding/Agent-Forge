@@ -456,7 +456,7 @@ export const agentService = {
       wsId = Array.from(workspaceService.keys())[0];
     }
     if (!wsId) {
-      const ws = await workspaceService.create('Default');
+      const ws = await workspaceService.create('Default', cwd);
       wsId = ws.id;
     }
 

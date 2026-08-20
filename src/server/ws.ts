@@ -295,7 +295,7 @@ async function handleMessage(ws: ServerWebSocket<unknown>, message: ClientMessag
     }
 
     case 'create_workspace': {
-      const workspace = await workspaceService.create(message.name);
+      const workspace = await workspaceService.create(message.name, message.cwd);
       broadcast({ type: 'workspace_created', workspace });
       break;
     }

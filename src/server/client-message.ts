@@ -234,8 +234,9 @@ export function validateClientMessage(value: unknown): ClientMessage {
       break;
 
     case 'create_workspace':
-      exactKeys(message, ['type', 'name'], ['type', 'name']);
+      exactKeys(message, ['type', 'name', 'cwd'], ['type', 'name', 'cwd']);
       string(message.name, 'name', MAX_NAME_CHARS, true);
+      string(message.cwd, 'cwd', MAX_PATH_CHARS, true);
       break;
 
     case 'update_workspace':

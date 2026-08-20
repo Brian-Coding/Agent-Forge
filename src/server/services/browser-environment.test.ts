@@ -10,6 +10,7 @@ test('browser worker inherits platform/runtime settings without provider secrets
     XDG_RUNTIME_DIR: '/runtime',
     PLAYWRIGHT_BROWSERS_PATH: '/browsers',
     HTTPS_PROXY: 'http://proxy.invalid',
+    AGENT_FORGE_SAFE_FS_DRY_RUN: '1',
     ANTHROPIC_API_KEY: 'must-not-cross-boundary',
     CLAUDE_CODE_OAUTH_TOKEN: 'must-not-cross-boundary',
     GITHUB_TOKEN: 'must-not-cross-boundary',
@@ -24,6 +25,7 @@ test('browser worker inherits platform/runtime settings without provider secrets
     XDG_RUNTIME_DIR: '/runtime',
     PLAYWRIGHT_BROWSERS_PATH: '/browsers',
     HTTPS_PROXY: 'http://proxy.invalid',
+    AGENT_FORGE_SAFE_FS_DRY_RUN: '1',
     AGENT_FORGE_ARTIFACT_ROOT: '/artifacts',
   });
   expect(env.ANTHROPIC_API_KEY).toBeUndefined();

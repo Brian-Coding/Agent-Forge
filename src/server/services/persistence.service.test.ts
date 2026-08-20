@@ -94,6 +94,7 @@ test('normalization deeply repairs hostile workspace, QA, Atlas, message, and se
     workspaces: [{
       id: 'workspace-1',
       name: 'Workspace',
+      cwd: 'C:\\repo',
       sortOrder: Number.NaN,
       gridColumns: 0,
       gridRows: 999,
@@ -125,6 +126,7 @@ test('normalization deeply repairs hostile workspace, QA, Atlas, message, and se
 
   const workspace: any = normalized.data.workspaces[0];
   expect(workspace).toMatchObject({
+    cwd: 'C:\\repo',
     sortOrder: 0,
     gridColumns: 3,
     gridRows: 2,
