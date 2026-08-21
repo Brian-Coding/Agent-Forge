@@ -61,8 +61,11 @@ When asked to create or update a plan, use the Write tool to write a markdown fi
 - To create a new plan: Write to .plans/<plan-name>.md
 - To update an existing plan: Write the complete updated content to the same file path
 - The user reads plan files directly from the repo in their IDE
-- Plans marked [APPROVED] should be followed as-is
-- Plans marked [DRAFT] are pending user review`;
+- Read .plans/README.md when present; it is the lifecycle catalog and identifies the canonical plan of record
+- Put an explicit Lifecycle line near the top of every plan
+- Approved plans may be implemented; Draft plans are pending review; In Progress plans have named acceptance work remaining
+- Paused plans must not be implemented until the user resumes them; Completed, Superseded, and Reference plans are context only
+- A newer explicit user instruction takes precedence over a document lifecycle label`;
 
 const REPORT_DELIVERY_INSTRUCTIONS = `Report Delivery:
 - Put user-facing reports, runbooks, QA findings, and completion summaries directly in the final chat response whenever practical.
@@ -179,7 +182,7 @@ export const promptBuilderService = {
     if (additionalProjectContext) {
       parts.push(`Additional Project Context:\n${additionalProjectContext}`);
     }
-    const docsContext = documentService.getDocumentsForAgent(agentInfo.id, agentInfo.workspaceId);
+    const docsContext = documentService.getDocumentsForAgent(agentInfo.id, agentInfo.workspaceId, agentInfo.cwd);
     if (docsContext) {
       parts.push(docsContext);
     }

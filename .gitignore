@@ -39,6 +39,11 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 data.json
 pids.json
 agent-forge.lock
+# Persistence recovery/corruption/oversize snapshots are local safety copies.
+# Never add them to source control.
+data.json.*
+pids.json.*
+agent-forge.lock.*
 # Usage history is intentionally Git-backed one shard per machine. Ignore any
 # other runtime sync data and atomic-write temporary files.
 /.agent-forge-sync/*

@@ -7,7 +7,7 @@ import { resolveAgentModel, resolveAgentReasoningLevel } from '../agents/registr
 import { generateId, treeKill, type TreeKillResult } from '../utils';
 import { persistenceService } from './persistence.service';
 import { documentService } from './document.service';
-import { workspaceService } from './workspace.service';
+import { canonicalWorkspaceDirectory, workspaceService } from './workspace.service';
 import { settingsService } from './settings.service';
 import { broadcast } from '../broadcast';
 import { normalizeSharedProjectContext } from './prompt-builder.service';
@@ -94,7 +94,6 @@ export interface CreateAgentOptions {
 // HMR-safe state
 const agents: Map<string, ManagedAgent> = (globalThis as any).__agentsMap ??= new Map<string, ManagedAgent>();
 const messages: Map<string, ChatMessage[]> = (globalThis as any).__messagesMap ??= new Map<string, ChatMessage[]>();
-const sendLocks: Map<string, Promise<void>> = (globalThis as any).__sendLocks ??= new Map<string, Promise<void>>();
 const removalPromises: Map<string, Promise<boolean>> = (globalThis as any).__agentRemovalPromises ??= new Map<string, Promise<boolean>>();
 let sharedContext: string = (globalThis as any).__sharedContext ?? '';
 
@@ -465,6 +464,7 @@ export const agentService = {
     // Atlas agent itself (it owns the atlas, doesn't reference it). Skip if
     // the path already appears in the user-supplied referencePaths.
     const ws = workspaceService.get(wsId);
+    const fallbackWorkspaceCwd = ws?.cwd ? undefined : await canonicalWorkspaceDirectory(cwd);
     const isAtlasAgent = name === 'UI Atlas Agent';
     const finalRefPaths = [...referencePaths];
     if (!isAtlasAgent && ws?.atlasProjectCwd) {
@@ -507,6 +507,11 @@ export const agentService = {
       if (opts.hideFromGrid) info.hideFromGrid = true;
 
       const previousSelectedAgentIds = [...targetWorkspace.selectedAgentIds];
+      const previousWorkspaceCwd = targetWorkspace.cwd;
+      if (!targetWorkspace.cwd) {
+        if (!fallbackWorkspaceCwd) throw new Error(`Workspace directory is unavailable: ${targetWorkspaceId}`);
+        targetWorkspace.cwd = fallbackWorkspaceCwd;
+      }
       agents.set(id, {
         info,
         currentSessionId: null,
@@ -535,6 +540,8 @@ export const agentService = {
         agents.delete(id);
         messages.delete(id);
         targetWorkspace.selectedAgentIds = previousSelectedAgentIds;
+        if (previousWorkspaceCwd === undefined) delete targetWorkspace.cwd;
+        else targetWorkspace.cwd = previousWorkspaceCwd;
         throw error;
       }
     });
@@ -868,8 +875,7 @@ export const agentService = {
   /**
    * Delegate to chat.service so all message-sending paths (ws, qa, atlas)
    * funnel through the same bridge. chat.service owns the per-agent
-   * sendLock chain now; the legacy sendLocks map here is unused but kept
-   * for HMR compatibility until Phase 1D removes the legacy spawn path.
+   * sendLock chain.
    */
   async sendMessage(agentId: string, content: string, source?: 'qa', options?: ChatTurnOptions): Promise<void> {
     // Dynamic import to avoid module-load-time circular reference. chat.service
@@ -880,9 +886,7 @@ export const agentService = {
   },
 
   async stopAgent(agentId: string, reason: 'user' | 'timeout' | 'system' = 'user'): Promise<boolean> {
-    // Execute immediately — don't queue behind sendLocks.
-    // Reset both lock chains (legacy + chat.service's) so queued sends after stop don't run stale.
-    sendLocks.delete(agentId);
+    // Execute immediately rather than queueing behind the active send chain.
     const { chatService } = await import('./chat.service');
     chatService.resetLock(agentId);
     return _stopAgentImpl(agentId, reason);
@@ -890,7 +894,6 @@ export const agentService = {
 
   async killAgent(agentId: string): Promise<boolean> {
     // Execute immediately — same reasoning as stopAgent.
-    sendLocks.delete(agentId);
     const { chatService } = await import('./chat.service');
     chatService.resetLock(agentId);
     return _killAgentImpl(agentId);

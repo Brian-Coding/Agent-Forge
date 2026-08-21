@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const clientSource = readFileSync(join(import.meta.dir, 'index.html'), 'utf8');
+const normalizedClientSource = clientSource.replace(/\r\n/g, '\n');
 
 test('workspace selection remains local to each browser client', () => {
   expect(clientSource).toContain("const ACTIVE_WORKSPACE_STORAGE_KEY = 'agent-forge:active-workspace-id';");
@@ -86,12 +87,12 @@ test('live turn snapshots restore progress and use provider activity for stall d
 });
 
 test('long elapsed durations roll up into days, hours, minutes, and seconds', () => {
-  const start = clientSource.indexOf('function formatElapsedDuration(');
-  const end = clientSource.indexOf('\n\n    // Hook: elapsed time', start);
+  const start = normalizedClientSource.indexOf('function formatElapsedDuration(');
+  const end = normalizedClientSource.indexOf('\n\n    // Hook: elapsed time', start);
   expect(start).toBeGreaterThan(-1);
   expect(end).toBeGreaterThan(start);
   const formatElapsedDuration = new Function(
-    `${clientSource.slice(start, end)}; return formatElapsedDuration;`,
+    `${normalizedClientSource.slice(start, end)}; return formatElapsedDuration;`,
   )() as (seconds: number) => string;
 
   expect(formatElapsedDuration(0)).toBe('0s');
@@ -100,6 +101,24 @@ test('long elapsed durations roll up into days, hours, minutes, and seconds', ()
   expect(formatElapsedDuration(3_600)).toBe('1h 0m 0s');
   expect(formatElapsedDuration(86_400)).toBe('1d 0h 0m 0s');
   expect(formatElapsedDuration((3_724 * 60) + 28)).toBe('2d 14h 4m 28s');
+});
+
+test('folder-browser parent navigation preserves Windows drive roots and POSIX roots', () => {
+  const start = normalizedClientSource.indexOf('function normalizeDirectoryPath(');
+  const end = normalizedClientSource.indexOf('\n\n    // Folder Browser', start);
+  expect(start).toBeGreaterThan(-1);
+  expect(end).toBeGreaterThan(start);
+  const parentDirectoryPath = new Function(
+    `${normalizedClientSource.slice(start, end)}; return parentDirectoryPath;`,
+  )() as (path: string) => string;
+
+  expect(parentDirectoryPath('C:\\Users\\dev\\dev')).toBe('C:/Users/dev');
+  expect(parentDirectoryPath('C:\\Users')).toBe('C:/');
+  expect(parentDirectoryPath('C:\\')).toBe('C:/');
+  expect(parentDirectoryPath('/Users/dev/dev')).toBe('/Users/dev');
+  expect(parentDirectoryPath('/')).toBe('/');
+  expect(parentDirectoryPath('\\\\server\\share\\folder')).toBe('//server/share');
+  expect(parentDirectoryPath('\\\\server\\share')).toBe('//server/share');
 });
 
 test('Claude model-specific weekly usage renders as Fable in both limits surfaces', () => {

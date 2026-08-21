@@ -4,9 +4,13 @@ globs: "*.ts, *.tsx, *.html, *.css, *.js, *.jsx, package.json"
 alwaysApply: false
 ---
 
-Default to using Bun instead of Node.js.
+Default to Bun for the main application, scripts, package management, and tests.
 
-- Use `bun <file>` instead of `node <file>` or `ts-node <file>`
+Project-specific exception: `scripts/browser-worker.mjs` must run under Node.js because Playwright child-process behavior has been unreliable under Bun on Windows. `src/server/services/browser.service.ts` intentionally launches `node` for that worker. Do not mechanically convert this boundary without equivalent cross-platform integration evidence.
+
+Before proposing broad work, read `.plans/README.md` (when present) and `docs/README.md`.
+
+- Use `bun <file>` instead of `node <file>` or `ts-node <file>`, except for the intentional Playwright worker boundary
 - Use `bun test` instead of `jest` or `vitest`
 - Use `bun build <file.html|file.ts|file.css>` instead of `webpack` or `esbuild`
 - Use `bun install` instead of `npm install` or `yarn install` or `pnpm install`
@@ -27,6 +31,8 @@ Default to using Bun instead of Node.js.
 ## Testing
 
 Use `bun test` to run tests.
+
+Before handing off source changes, run `bun run check`. Use `bun run test:coverage` for substantive reliability, persistence, process, provider, QA, or Atlas changes. The live Chromium integration command is documented in `README.md`.
 
 ```ts#index.test.ts
 import { test, expect } from "bun:test";

@@ -1790,6 +1790,26 @@
       );
     }
 
+    function normalizeDirectoryPath(path) {
+      const normalized = String(path || '').replace(/\\/g, '/').replace(/\/+$/, '');
+      if (!normalized || normalized === '/') return '/';
+      if (/^[A-Za-z]:$/.test(normalized)) return normalized + '/';
+      return normalized;
+    }
+
+    function parentDirectoryPath(path) {
+      const normalized = normalizeDirectoryPath(path);
+      if (normalized === '/' || /^[A-Za-z]:\/$/.test(normalized)) return normalized;
+      const uncRoot = normalized.match(/^\/\/[^/]+\/[^/]+/)?.[0];
+      if (uncRoot && normalized === uncRoot) return uncRoot;
+      const slash = normalized.lastIndexOf('/');
+      if (slash < 0) return normalized;
+      const parent = normalized.slice(0, slash);
+      if (uncRoot && parent.length < uncRoot.length) return uncRoot;
+      if (/^[A-Za-z]:$/.test(parent)) return parent + '/';
+      return parent || '/';
+    }
+
     // Folder Browser
     function FolderBrowser({ onSelect, defaultPath }) {
       const [currentPath, setCurrentPath] = useState('');
@@ -1823,8 +1843,11 @@
 
       useEffect(() => { load(defaultPath || ''); }, [load, defaultPath]);
 
-      const goUp = () => { const parts = currentPath.split('/').filter(Boolean); parts.pop(); load('/' + parts.join('/') || '/'); };
-      const canGoUp = currentPath && currentPath !== '/' && currentPath !== homePath;
+      const parentPath = parentDirectoryPath(currentPath);
+      const goUp = () => load(parentPath);
+      const canGoUp = currentPath
+        && normalizeDirectoryPath(currentPath) !== parentPath
+        && normalizeDirectoryPath(currentPath) !== normalizeDirectoryPath(homePath);
 
       const filteredDirs = searchFilter
         ? directories.filter(dir => dir.name.toLowerCase().includes(searchFilter.toLowerCase()))

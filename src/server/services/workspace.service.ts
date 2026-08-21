@@ -1,4 +1,6 @@
 import type { WorkspaceInfo, AppSettings, AtlasRunInfo, QaRunInfo } from '../../shared/protocol';
+import { realpath, stat } from 'node:fs/promises';
+import { isAbsolute, resolve } from 'node:path';
 import { generateId } from '../utils';
 import { persistenceService } from './persistence.service';
 import { settingsService } from './settings.service';
@@ -15,6 +17,20 @@ function restoreWorkspace(target: WorkspaceInfo, snapshot: WorkspaceInfo): void 
 
 export function sortWorkspaces(items: readonly WorkspaceInfo[]): WorkspaceInfo[] {
   return [...items].sort((a, b) => a.sortOrder - b.sortOrder || a.createdAt - b.createdAt);
+}
+
+export async function canonicalWorkspaceDirectory(cwd: string): Promise<string> {
+  const requestedCwd = cwd.trim();
+  if (!requestedCwd || !isAbsolute(requestedCwd)) {
+    throw new Error(`Workspace directory must be an absolute path: ${requestedCwd || '(empty)'}`);
+  }
+  try {
+    const canonical = resolve(await realpath(requestedCwd));
+    if (!(await stat(canonical)).isDirectory()) throw new Error('not a directory');
+    return canonical;
+  } catch {
+    throw new Error(`Workspace directory does not exist or is not a directory: ${requestedCwd}`);
+  }
 }
 
 export const workspaceService = {
@@ -43,15 +59,7 @@ export const workspaceService = {
   },
 
   async create(name: string, cwd: string): Promise<WorkspaceInfo> {
-    const normalizedCwd = cwd.trim();
-    try {
-      const { stat } = await import('node:fs/promises');
-      if (!(await stat(normalizedCwd)).isDirectory()) {
-        throw new Error('not a directory');
-      }
-    } catch {
-      throw new Error(`Workspace directory does not exist or is not a directory: ${normalizedCwd}`);
-    }
+    const normalizedCwd = await canonicalWorkspaceDirectory(cwd);
     return runDurableMutation(async () => {
       const existingOrders = Array.from(workspaces.values(), workspace => workspace.sortOrder)
         .filter(Number.isFinite);

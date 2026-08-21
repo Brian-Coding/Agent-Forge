@@ -1,8 +1,9 @@
 import { expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { WorkspaceInfo } from '../../shared/protocol';
 import { agentService } from './agent.service';
 import { documentService } from './document.service';
 import { persistenceService } from './persistence.service';
@@ -31,7 +32,7 @@ test('failed creation removes the agent, workspace slot, and both watchers', asy
   const directory = await mkdtemp(join(tmpdir(), 'agent-forge-create-atomic-'));
   const workspaceId = `workspace-${randomUUID()}`;
   const workspaceMap: Map<string, any> = (globalThis as any).__workspacesMap;
-  const workspace = {
+  const workspace: WorkspaceInfo = {
     id: workspaceId,
     name: 'Atomicity workspace',
     sortOrder: 999,
@@ -57,12 +58,56 @@ test('failed creation removes the agent, workspace slot, and both watchers', asy
     await expect(agentService.createAgent('Ghost agent', directory, [], '', workspaceId)).rejects.toThrow('agent write failed');
     expect(new Set(agentService.getAgents().map(agent => agent.id))).toEqual(idsBefore);
     expect(workspace.selectedAgentIds).toEqual(selectionBefore);
+    expect(workspace.cwd).toBeUndefined();
     expect(starts).toHaveLength(1);
     expect(stops).toEqual(starts);
   } finally {
     persistenceService.saveNow = originalSaveNow;
     documentService.startPlansWatcher = originalStartPlansWatcher;
     documentService.stopPlansWatcher = originalStopPlansWatcher;
+    workspaceMap.delete(workspaceId);
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('the first agent durably supplies a missing legacy workspace directory', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'agent-forge-workspace-cwd-'));
+  const workspaceId = `workspace-cwd-${randomUUID()}`;
+  const workspaceMap: Map<string, any> = (globalThis as any).__workspacesMap;
+  const workspace: WorkspaceInfo = {
+    id: workspaceId,
+    name: 'Fresh default workspace',
+    sortOrder: 998,
+    gridColumns: 2,
+    gridRows: 2,
+    selectedAgentIds: [],
+    lockedAgentIds: [],
+    createdAt: Date.now(),
+  };
+  const originalSaveNow = persistenceService.saveNow;
+  const originalStartPlansWatcher = documentService.startPlansWatcher;
+  const originalStopPlansWatcher = documentService.stopPlansWatcher;
+  const originalReleaseLocks = documentService.releaseLocksForAgent;
+  let createdAgentId: string | undefined;
+  workspaceMap.set(workspaceId, workspace);
+  persistenceService.saveNow = async () => {};
+  documentService.startPlansWatcher = () => {};
+  documentService.stopPlansWatcher = () => {};
+  documentService.releaseLocksForAgent = async () => {};
+
+  try {
+    const created = await agentService.createAgent('First agent', directory, [], '', workspaceId);
+    createdAgentId = created.id;
+    expect(workspace.cwd).toBe(await realpath(directory));
+    expect(workspace.selectedAgentIds).toContain(created.id);
+  } finally {
+    if (createdAgentId && agentService.getAgent(createdAgentId)) {
+      await agentService.removeAgent(createdAgentId).catch(() => false);
+    }
+    persistenceService.saveNow = originalSaveNow;
+    documentService.startPlansWatcher = originalStartPlansWatcher;
+    documentService.stopPlansWatcher = originalStopPlansWatcher;
+    documentService.releaseLocksForAgent = originalReleaseLocks;
     workspaceMap.delete(workspaceId);
     await rm(directory, { recursive: true, force: true });
   }
@@ -126,7 +171,7 @@ test('failed removal restores the agent and workspace membership without firing 
   const id = `remove-atomic-${randomUUID()}`;
   const workspaceId = `workspace-${randomUUID()}`;
   const workspaceMap: Map<string, any> = (globalThis as any).__workspacesMap;
-  const workspace = {
+  const workspace: WorkspaceInfo = {
     id: workspaceId,
     name: 'Removal atomicity',
     sortOrder: 998,

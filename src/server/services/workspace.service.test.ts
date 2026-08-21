@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { WorkspaceInfo } from '../../shared/protocol';
@@ -44,7 +44,9 @@ test('workspace creation persists a validated primary working directory', async 
   try {
     const created = await workspaceService.create('Project', `  ${projectRoot}  `);
     createdId = created.id;
-    expect(created.cwd).toBe(projectRoot);
+    expect(created.cwd).toBe(await realpath(projectRoot));
+    await expect(workspaceService.create('Relative', '.')).rejects.toThrow('must be an absolute path');
+    await expect(workspaceService.create('Empty', '   ')).rejects.toThrow('must be an absolute path');
     await expect(workspaceService.create('File', filePath)).rejects.toThrow('does not exist or is not a directory');
     await expect(workspaceService.create('Missing', join(projectRoot, 'missing'))).rejects.toThrow('does not exist or is not a directory');
   } finally {

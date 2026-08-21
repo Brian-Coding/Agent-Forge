@@ -286,7 +286,7 @@ async function init() {
     agents: agentService.buildPersistedAgents() as any,
     messages: agentService.buildPersistedMessages(),
     sharedContext: agentService.getSharedContext(),
-    documents: documentService.getAll(),
+    documents: documentService.buildPersistedDocuments(),
     settings: settingsService.get(),
     workspaces: workspaceService.getAll(),
     usageEvents: usageService.getEvents(),
