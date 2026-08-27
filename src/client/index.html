@@ -1225,9 +1225,27 @@
           || workspacesRef.current.some(workspace => workspace.qaAgentId === agentId);
       };
 
+      const clientSessionIdRef = useRef((() => {
+        try {
+          const existing = sessionStorage.getItem('af-client-session');
+          if (existing) return existing;
+          const created = (crypto.randomUUID && crypto.randomUUID()) || String(Date.now());
+          sessionStorage.setItem('af-client-session', created);
+          return created;
+        } catch {
+          return String(Date.now());
+        }
+      })());
+
       const sendRaw = useCallback((msg) => {
         if (wsRef.current?.readyState === WebSocket.OPEN) {
-          wsRef.current.send(JSON.stringify(msg));
+          wsRef.current.send(JSON.stringify({
+            protocolVersion: 1,
+            requestId: msg.requestId || (crypto.randomUUID && crypto.randomUUID()) || String(Date.now()) + Math.random(),
+            clientSessionId: clientSessionIdRef.current,
+            sentAt: Date.now(),
+            ...msg,
+          }));
         }
       }, []);
 
@@ -1301,6 +1319,14 @@
             lastServerActivity = Date.now();
             switch (msg.type) {
               case 'pong':
+              case 'command_ack':
+              case 'server_session':
+                break;
+              case 'command_queue':
+                setQueued(prev => ({
+                  ...prev,
+                  [msg.agentId]: (msg.items || []).filter(item => item.status === 'queued').map(item => item.preview),
+                }));
                 break;
               case 'agents_list':
                 setAgents(msg.agents);
@@ -1618,13 +1644,10 @@
         discardAtlasCandidate: (workspaceId) => sendRaw({ type: 'discard_atlas_candidate', workspaceId }),
         clearQaUnread: (sourceAgentId) => setQaUnread(prev => { if (!prev[sourceAgentId]) return prev; const { [sourceAgentId]: _, ...rest } = prev; return rest; }),
         sendMessage: (agentId, content) => {
-          const agent = agentsRef.current.find(a => a.id === agentId);
           const socketOpen = wsRef.current?.readyState === WebSocket.OPEN;
-          // Queue when the agent is busy OR the socket is down — sendRaw
-          // silently drops frames on a closed socket, which used to destroy
-          // messages typed while disconnected. Queued messages drain on
-          // reconnect (agents_list) / when the agent goes idle.
-          if (!socketOpen || (agent && (agent.status === 'working' || agent.status === 'thinking'))) {
+          // A connected socket hands the prompt to the process-local server
+          // queue. Local queue is only for messages typed while disconnected.
+          if (!socketOpen) {
             setQueued(prev => ({ ...prev, [agentId]: [...(prev[agentId] || []), content] }));
           } else {
             sendRaw({ type: 'send_message', agentId, content });

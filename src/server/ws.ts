@@ -17,8 +17,12 @@ import { liveTurnStateService } from './services/live-turn-state.service';
 import {
   ClientMessageValidationError,
   MAX_WEBSOCKET_MESSAGE_BYTES,
-  parseClientMessage,
+  parseClientCommand,
 } from './client-message';
+import { chatSendPreview, commandQueue, isChatSendCommand, MAX_COMMAND_QUEUE_DEPTH, setCommandQueueListener } from './services/command-queue';
+import { commandSession } from './services/command-session';
+
+setCommandQueueListener(snapshot => broadcast(snapshot));
 
 // WebSocket heartbeat — ping every 30s, close stale clients after 40s.
 // Keep one timer across module reloads; its proxy invokes the newest callback
@@ -49,6 +53,11 @@ async function handleMessage(ws: ServerWebSocket<unknown>, message: ClientMessag
   switch (message.type) {
     case 'ping': {
       sendTo(ws, { type: 'pong' });
+      break;
+    }
+
+    case 'get_command_queue': {
+      for (const snapshot of commandQueue.snapshots()) sendTo(ws, snapshot);
       break;
     }
 
@@ -196,6 +205,7 @@ async function handleMessage(ws: ServerWebSocket<unknown>, message: ClientMessag
     }
 
     case 'stop_agent': {
+      commandQueue.reset(message.agentId);
       const success = await agentService.stopAgent(message.agentId);
       if (!success) {
         sendTo(ws, { type: 'error', message: 'Agent not found', agentId: message.agentId });
@@ -204,6 +214,7 @@ async function handleMessage(ws: ServerWebSocket<unknown>, message: ClientMessag
     }
 
     case 'kill_agent': {
+      commandQueue.reset(message.agentId);
       const success = await agentService.killAgent(message.agentId);
       if (!success) {
         sendTo(ws, { type: 'error', message: 'Agent not found', agentId: message.agentId });
@@ -212,6 +223,7 @@ async function handleMessage(ws: ServerWebSocket<unknown>, message: ClientMessag
     }
 
     case 'remove_agent': {
+      commandQueue.reset(message.agentId);
       const success = await agentService.removeAgent(message.agentId);
       if (success) {
         liveTurnStateService.clear(message.agentId);
@@ -397,6 +409,7 @@ export const websocketHandlers = {
     console.log('Client connected');
 
     // Send current state on connect
+    sendTo(ws, { type: 'server_session', serverSessionId: commandSession.serverSessionId });
     sendTo(ws, { type: 'agents_list', agents: agentService.getAgents() });
     sendTo(ws, { type: 'settings', settings: settingsService.get() });
     sendTo(ws, { type: 'workspaces_list', workspaces: workspaceService.getAll() });
@@ -421,12 +434,46 @@ export const websocketHandlers = {
         });
       }
     }
+    for (const snapshot of commandQueue.snapshots()) sendTo(ws, snapshot);
   },
 
   message(ws: ServerWebSocket<unknown>, message: string | Buffer) {
     try {
-      const data = parseClientMessage(message);
-      handleMessage(ws, data).catch(e => {
+      const parsed = parseClientCommand(message);
+      const dispatch = async () => {
+        if (parsed.meta.requestId) {
+          const observed = commandSession.observe(parsed.meta, parsed.message);
+          if (observed.status !== 'accepted') {
+            sendTo(ws, observed);
+            return;
+          }
+          if (isChatSendCommand(parsed.message)) {
+            const agentId = parsed.message.agentId;
+            const item = commandQueue.enqueue(
+              agentId,
+              observed.requestId,
+              observed.acceptedSequence ?? 0,
+              chatSendPreview(parsed.message),
+              () => handleMessage(ws, parsed.message),
+            );
+            if (!item) {
+              sendTo(ws, commandSession.reject(
+                observed.requestId,
+                'queue-full',
+                `Agent command queue is full (${MAX_COMMAND_QUEUE_DEPTH})`,
+              ));
+              return;
+            }
+            sendTo(ws, { ...observed, queuePosition: commandQueue.size(agentId) });
+            return;
+          }
+          await handleMessage(ws, parsed.message);
+          sendTo(ws, observed);
+          return;
+        }
+        await handleMessage(ws, parsed.message);
+      };
+      dispatch().catch(e => {
         console.error('handleMessage error:', e);
         sendTo(ws, {
           type: 'error',
