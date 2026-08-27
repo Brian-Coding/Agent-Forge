@@ -162,6 +162,21 @@ test('full server boot recovers state, enforces transport guards, persists a mut
       ws.addEventListener('error', () => reject(new Error('WebSocket connection failed')), { once: true });
     });
 
+    const session = await waitForFrame(frames, frame => frame.type === 'server_session');
+    expect(typeof session.serverSessionId).toBe('string');
+    expect(session.serverSessionId.length).toBeGreaterThan(8);
+
+    ws.send(JSON.stringify({
+      protocolVersion: 1,
+      requestId: 'e2e-ping-1',
+      clientSessionId: 'e2e-tab',
+      sentAt: Date.now(),
+      type: 'ping',
+    }));
+    const ack = await waitForFrame(frames, frame => frame.type === 'command_ack' && frame.requestId === 'e2e-ping-1');
+    expect(ack.status).toBe('accepted');
+    expect(ack.serverSessionId).toBe(session.serverSessionId);
+
     ws.send('{malformed');
     const invalid = await waitForFrame(frames, frame => frame.type === 'error');
     expect(invalid.message).toContain('not valid JSON');
