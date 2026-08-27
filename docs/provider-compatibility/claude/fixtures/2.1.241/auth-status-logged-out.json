@@ -1,0 +1,17 @@
+{
+  "id": "auth-status-logged-out",
+  "cli": "claude",
+  "qualifiedVersion": "2.1.241",
+  "kind": "auth-status",
+  "command": ["auth", "status"],
+  "exitCode": 1,
+  "stdout": "{\"loggedIn\":false,\"authMethod\":\"none\",\"apiProvider\":\"firstParty\"}\n",
+  "stderr": "",
+  "expected": {
+    "state": "reauthentication-required",
+    "credentialMode": "unknown",
+    "evidence": "cli-status",
+    "reasonCode": "cli-not-logged-in",
+    "recoveryAction": "login"
+  }
+}

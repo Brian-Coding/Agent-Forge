@@ -162,9 +162,19 @@ test('full server boot recovers state, enforces transport guards, persists a mut
       ws.addEventListener('error', () => reject(new Error('WebSocket connection failed')), { once: true });
     });
 
+    const health = await (await fetch(`${baseUrl}/api/health`)).json() as any;
+    expect(typeof health.runtime.serverSessionId).toBe('string');
+    expect(health.runtime.serverSessionId.length).toBeGreaterThan(8);
+    expect(['current', 'restart-required', 'unknown']).toContain(health.runtime.drift);
+    expect(typeof health.runtime.bunVersion).toBe('string');
+    expect(health.runtime.runningFingerprint).toMatch(/^[0-9a-f]{64}$/);
+    expect(health.auth.every((snapshot: any) => snapshot.reasonCode === 'not-probed')).toBe(true);
+    expect(JSON.stringify(health)).not.toContain('sk-ant-');
+
     const session = await waitForFrame(frames, frame => frame.type === 'server_session');
     expect(typeof session.serverSessionId).toBe('string');
     expect(session.serverSessionId.length).toBeGreaterThan(8);
+    expect(session.serverSessionId).toBe(health.runtime.serverSessionId);
 
     ws.send(JSON.stringify({
       protocolVersion: 1,

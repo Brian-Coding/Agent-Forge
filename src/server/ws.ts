@@ -21,6 +21,7 @@ import {
 } from './client-message';
 import { chatSendPreview, commandQueue, isChatSendCommand, MAX_COMMAND_QUEUE_DEPTH, setCommandQueueListener } from './services/command-queue';
 import { commandSession } from './services/command-session';
+import { peekRuntimeCompact } from './services/runtime-truth';
 
 setCommandQueueListener(snapshot => broadcast(snapshot));
 
@@ -409,7 +410,11 @@ export const websocketHandlers = {
     console.log('Client connected');
 
     // Send current state on connect
-    sendTo(ws, { type: 'server_session', serverSessionId: commandSession.serverSessionId });
+    sendTo(ws, {
+      type: 'server_session',
+      serverSessionId: commandSession.serverSessionId,
+      ...peekRuntimeCompact() ?? {},
+    });
     sendTo(ws, { type: 'agents_list', agents: agentService.getAgents() });
     sendTo(ws, { type: 'settings', settings: settingsService.get() });
     sendTo(ws, { type: 'workspaces_list', workspaces: workspaceService.getAll() });

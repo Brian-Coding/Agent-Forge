@@ -1,0 +1,17 @@
+{
+  "id": "auth-status-logged-in",
+  "cli": "claude",
+  "qualifiedVersion": "2.1.241",
+  "kind": "auth-status",
+  "command": ["auth", "status"],
+  "exitCode": 0,
+  "stdout": "{\"loggedIn\":true,\"authMethod\":\"oauth\",\"apiProvider\":\"firstParty\"}\n",
+  "stderr": "",
+  "expected": {
+    "state": "configured-unverified",
+    "credentialMode": "subscription-oauth",
+    "evidence": "cli-status",
+    "reasonCode": "cli-logged-in",
+    "recoveryAction": "check-again"
+  }
+}

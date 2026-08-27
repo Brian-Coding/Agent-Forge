@@ -261,6 +261,11 @@
 
     /* Connection status */
     .connection-error { padding: 8px 16px; background: var(--error); color: white; text-align: center; font-size: 12px; flex-shrink: 0; }
+    .runtime-banner { padding: 8px 16px; background: var(--warning); color: #0d1117; text-align: center; font-size: 12px; flex-shrink: 0; font-weight: 600; }
+    .runtime-pill { font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); color: var(--text-secondary); white-space: nowrap; }
+    .runtime-pill.runtime-current { color: var(--success); border-color: rgba(63, 185, 80, 0.4); }
+    .runtime-pill.runtime-restart-required { color: var(--warning); border-color: var(--warning); font-weight: 600; }
+    .runtime-pill.runtime-unknown { color: var(--text-muted); }
 
     /* Model-mismatch blocking banner */
     .model-mismatch-banner { background: rgba(220, 60, 60, 0.12); border: 1px solid var(--error); border-radius: 6px; margin: 6px 8px 0 8px; padding: 8px 10px; font-size: 12px; }
@@ -5748,9 +5753,41 @@
       return String(n);
     }
 
+    function RuntimeTruthPill({ health }) {
+      if (!health || !health.runtime) return null;
+      const drift = health.runtime.drift || 'unknown';
+      const label = drift === 'restart-required' ? 'Restart required'
+        : drift === 'current' ? 'Runtime current'
+        : 'Runtime unknown';
+      const providers = (health.runtime.providers || []).map(provider => (
+        provider.cliName + (provider.cliVersion ? ' ' + provider.cliVersion : provider.available ? '' : ' missing')
+      )).join(' · ');
+      const title = [
+        'session ' + health.runtime.serverSessionId,
+        health.runtime.bunVersion ? 'bun ' + health.runtime.bunVersion : null,
+        health.runtime.source && health.runtime.source.commit ? 'commit ' + String(health.runtime.source.commit).slice(0, 12) : null,
+        providers || null,
+      ].filter(Boolean).join('\n');
+      return e('span', { className: 'runtime-pill runtime-' + drift, title }, label);
+    }
+
     function App() {
       const ws = useWebSocket();
       const { connected, agents, messages, liveOutput, queued, sharedContext, fileChanges, thinkingOutput, agentActivity, liveTurnState, settings, workspaces, activeWorkspaceId, statusStartTimes, tokenUsage, usageReport, terminals, terminalOutput, errorToasts } = ws;
+      const [runtimeHealth, setRuntimeHealth] = useState(null);
+      useEffect(() => {
+        if (!connected) return;
+        let cancelled = false;
+        const load = () => {
+          fetch('/api/health')
+            .then(response => response.ok ? response.json() : null)
+            .then(data => { if (!cancelled && data) setRuntimeHealth(data); })
+            .catch(() => {});
+        };
+        load();
+        const timer = setInterval(load, 30000);
+        return () => { cancelled = true; clearInterval(timer); };
+      }, [connected]);
       const [showModal, setShowModal] = useState(false);
       const [showSharedContext, setShowSharedContext] = useState(false);
       const [sidebarTab, setSidebarTab] = useState('agents');
@@ -6124,6 +6161,10 @@
         // Main content
         e('div', { className: 'main-content' },
           !connected && e('div', { className: 'connection-error' }, 'Disconnected. Reconnecting...'),
+          connected && runtimeHealth && runtimeHealth.runtime && runtimeHealth.runtime.drift === 'restart-required' && e('div', {
+            className: 'runtime-banner',
+            role: 'status',
+          }, 'Restart required — this window is talking to an older Agent Forge process than the files on disk.'),
 
           // Minimized panels bar (Feature 2)
           !maximizedAgent && minimizedDisplayAgents.length > 0 && e('div', { className: 'minimized-panels-bar' },
@@ -6260,6 +6301,7 @@
           // Token usage now lives in the dedicated Tokens sidebar tab.
           e('div', { className: 'bottom-bar' },
             e('div', { className: 'bottom-bar-left' },
+              e(RuntimeTruthPill, { health: runtimeHealth }),
               activeWorkspace && e('span', { style: { fontWeight: 600, fontSize: 12, color: 'var(--text-primary)', marginRight: 8 } },
                 e('span', { style: { color: 'var(--text-muted)', fontWeight: 500 } }, 'Workspace: '),
                 activeWorkspace.name

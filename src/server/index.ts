@@ -42,6 +42,8 @@ import {
 } from './routes/google-docs.routes';
 import { googleDocsService } from './services/google-docs.service';
 import { handleHarnessInstructions } from './routes/harness.routes';
+import { handleRuntimeHealth } from './routes/health.routes';
+import { captureRuntimeStartup } from './services/runtime-truth';
 import { handleAskAtlas } from './routes/atlas.routes';
 import { handleProjectFile } from './routes/project-file.routes';
 import { handleChatImage, handleChatImageUpload } from './routes/chat-image.routes';
@@ -169,6 +171,7 @@ async function init() {
 await acquireProcessLock();
 
 await init();
+await captureRuntimeStartup();
 
 // --- Network guard --------------------------------------------------------
 // The server executes code on behalf of whoever can reach it (agents run
@@ -251,6 +254,7 @@ function startServer(preferredPort: number) {
           if (url.pathname === '/api/google-docs/append-if-absent' && req.method === 'POST') return handleGoogleDocsAppend(req, true);
           if (url.pathname === '/api/google-docs/replace' && req.method === 'POST') return handleGoogleDocsReplace(req);
           if (url.pathname === '/api/harness/instructions' && req.method === 'GET') return handleHarnessInstructions();
+          if (url.pathname === '/api/health' && req.method === 'GET') return handleRuntimeHealth();
           if (url.pathname === '/api/project-file' && req.method === 'GET') return handleProjectFile(req);
           if (url.pathname === '/api/chat/image-upload' && req.method === 'POST') return handleChatImageUpload(req);
           if (url.pathname === '/api/chat/image' && req.method === 'GET') return handleChatImage(req);

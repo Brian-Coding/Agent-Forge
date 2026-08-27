@@ -1,0 +1,16 @@
+{
+  "id": "turn-rate-limited",
+  "cli": "claude",
+  "qualifiedVersion": "2.1.241",
+  "kind": "turn-output",
+  "exitCode": 1,
+  "stdout": "API Error: 429 rate limit exceeded\n",
+  "stderr": "",
+  "expected": {
+    "state": "degraded",
+    "credentialMode": "unknown",
+    "evidence": "provider-error",
+    "reasonCode": "provider-error",
+    "recoveryAction": "inspect-provider"
+  }
+}

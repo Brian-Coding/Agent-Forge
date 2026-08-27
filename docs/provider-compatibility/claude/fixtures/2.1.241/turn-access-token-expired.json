@@ -1,0 +1,16 @@
+{
+  "id": "turn-access-token-expired",
+  "cli": "claude",
+  "qualifiedVersion": "2.1.241",
+  "kind": "turn-output",
+  "exitCode": 1,
+  "stdout": "Failed to authenticate. API Error: 401 OAuth access token has expired. Re-authenticate to continue.\n",
+  "stderr": "",
+  "expected": {
+    "state": "reauthentication-required",
+    "credentialMode": "subscription-oauth",
+    "evidence": "provider-error",
+    "reasonCode": "access-token-expired",
+    "recoveryAction": "check-again"
+  }
+}

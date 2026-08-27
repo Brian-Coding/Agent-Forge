@@ -1,3 +1,7 @@
+import type { RuntimeDriftState, RuntimeHealth } from './runtime-health';
+
+export type { RuntimeDriftState, RuntimeHealth } from './runtime-health';
+
 // WebSocket message types for client-server communication
 
 export type AgentStatus = 'idle' | 'working' | 'thinking' | 'error' | 'stopped';
@@ -658,6 +662,14 @@ export type ServerMessage =
   | {
       type: 'server_session';
       serverSessionId: string;
+      startedAt?: number;
+      bunVersion?: string;
+      drift?: RuntimeDriftState;
+      contractVersion?: number;
+    }
+  | {
+      type: 'runtime_health';
+      health: RuntimeHealth;
     }
   | {
       type: 'command_ack';
