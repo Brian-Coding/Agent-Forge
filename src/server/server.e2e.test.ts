@@ -168,7 +168,7 @@ test('full server boot recovers state, enforces transport guards, persists a mut
     expect(['current', 'restart-required', 'unknown']).toContain(health.runtime.drift);
     expect(typeof health.runtime.bunVersion).toBe('string');
     expect(health.runtime.runningFingerprint).toMatch(/^[0-9a-f]{64}$/);
-    expect(health.auth.every((snapshot: any) => snapshot.reasonCode === 'not-probed')).toBe(true);
+    expect(health.auth.every((snapshot: any) => typeof snapshot.state === 'string' && typeof snapshot.reasonCode === 'string')).toBe(true);
     expect(JSON.stringify(health)).not.toContain('sk-ant-');
 
     const session = await waitForFrame(frames, frame => frame.type === 'server_session');

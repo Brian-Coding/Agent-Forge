@@ -17,6 +17,8 @@ import {
 } from '../../utils';
 import { isRealClaudeModelId, stripModelTier } from '../agent-kinds';
 import { persistenceService } from '../../services/persistence.service';
+import { currentAuthCoordinator } from '../../auth/provider-auth-coordinator';
+import type { LegacyAuthObservation } from '../../auth/provider-auth-coordinator';
 import { summarizeToolInput, type AgentEvent } from '../events';
 import { drainStreamToString, parseNdjsonLines, flushNdjsonLeftover } from '../stream-utils';
 import type { AgentAdapter, AgentHandle, AgentRunContext } from '../types';
@@ -512,10 +514,26 @@ export function eventReportsExpiredAuth(event: any): boolean {
 }
 
 async function getClaudeAuthError(claudeCommand: readonly string[], env: Record<string, string>): Promise<string | null> {
-  if (env.AGENT_FORGE_SKIP_CLAUDE_AUTH_CHECK === '1') return null;
+  const shadow = (legacy: LegacyAuthObservation, extras: { timedOut?: boolean; stdout?: string; missing?: boolean } = {}) => {
+    try {
+      currentAuthCoordinator().observeCollected('claude', {
+        kind: 'auth-status',
+        env,
+        timedOut: extras.timedOut,
+        missing: extras.missing,
+        stdout: extras.stdout,
+      }, legacy);
+    } catch {}
+  };
+
+  if (env.AGENT_FORGE_SKIP_CLAUDE_AUTH_CHECK === '1') {
+    shadow({ outcome: 'allow', class: 'skip' });
+    return null;
+  }
 
   // API-key/token environments do not need Claude Code's persisted first-party login.
   if (env.ANTHROPIC_API_KEY || env.ANTHROPIC_AUTH_TOKEN || env.CLAUDE_CODE_OAUTH_TOKEN) {
+    shadow({ outcome: 'allow', class: 'env-bypass' });
     return null;
   }
 
@@ -527,6 +545,7 @@ async function getClaudeAuthError(claudeCommand: readonly string[], env: Record<
   // expired-auth retry in chat.service covers the case where it loses that race.
   const creds = await readClaudeCredentialState();
   if (isClaudeRefreshTokenExpired(creds)) {
+    shadow({ outcome: 'block', class: 'refresh-expired' });
     return [
       'Claude Code cannot refresh its login: the stored refresh token has expired.',
       `Credentials: ${claudeCredentialsPath()}`,
@@ -542,13 +561,23 @@ async function getClaudeAuthError(claudeCommand: readonly string[], env: Record<
 
   try {
     const result = await getClaudeAuthStatus(claudeCommand, env);
-    if (!result) return null;
+    if (!result) {
+      shadow({ outcome: 'allow', class: 'inconclusive-allow' }, { timedOut: true });
+      return null;
+    }
 
     const { status, detail } = result;
 
-    if (status?.loggedIn === true) return null;
-    if (status?.loggedIn !== false) return null;
+    if (status?.loggedIn === true) {
+      shadow({ outcome: 'allow', class: 'cli-allow' }, { stdout: JSON.stringify({ loggedIn: status.loggedIn, authMethod: status.authMethod, apiProvider: status.apiProvider }) });
+      return null;
+    }
+    if (status?.loggedIn !== false) {
+      shadow({ outcome: 'allow', class: 'inconclusive-allow' }, { stdout: typeof result.status === 'object' ? JSON.stringify({ loggedIn: status?.loggedIn }) : '' });
+      return null;
+    }
 
+    shadow({ outcome: 'block', class: 'logged-out' }, { stdout: JSON.stringify({ loggedIn: false, authMethod: status?.authMethod, apiProvider: status?.apiProvider }) });
     return [
       'Claude Code is not authenticated for non-interactive Agent Forge runs.',
       `Fresh CLI auth check failed (${detail}).`,
@@ -557,6 +586,7 @@ async function getClaudeAuthError(claudeCommand: readonly string[], env: Record<
     ].join('\n');
   } catch (e: any) {
     console.warn('[claude] auth status check skipped:', e?.message || e);
+    shadow({ outcome: 'allow', class: 'inconclusive-allow' });
     return null;
   }
 }

@@ -5,6 +5,11 @@ import type {
   ProviderAuthState,
   ProviderCredentialMode,
 } from '../../shared/runtime-health';
+import {
+  inspectClaudeCredentialEnv,
+  isBelowCompatibilityFloor,
+  type ClaudeCredentialEnvInspection,
+} from './claude-precedence';
 
 export interface ClaudeAuthProbeInput {
   exitCode?: number | null;
@@ -13,6 +18,8 @@ export interface ClaudeAuthProbeInput {
   timedOut?: boolean;
   missing?: boolean;
   kind?: 'auth-status' | 'turn-output';
+  env?: Record<string, string | undefined>;
+  cliVersion?: string;
 }
 
 export interface ClaudeAuthClassification {
@@ -24,32 +31,74 @@ export interface ClaudeAuthClassification {
 }
 
 export function classifyClaudeAuthOutput(input: ClaudeAuthProbeInput): ClaudeAuthClassification {
+  const envInspection = inspectClaudeCredentialEnv(input.env);
+  let classified: ClaudeAuthClassification;
   if (input.missing) {
-    return {
+    classified = {
       state: 'provider-unavailable',
       credentialMode: 'unknown',
       evidence: 'none',
       reasonCode: 'cli-missing',
       recoveryAction: 'inspect-provider',
     };
-  }
-  if (input.timedOut) {
-    return {
+  } else if (input.timedOut) {
+    classified = {
       state: 'degraded',
       credentialMode: 'unknown',
       evidence: 'none',
       reasonCode: 'cli-timeout',
       recoveryAction: 'inspect-provider',
     };
+  } else {
+    const stdout = input.stdout ?? '';
+    const stderr = input.stderr ?? '';
+    const text = `${stdout}\n${stderr}`;
+    const kind = input.kind ?? inferKind(stdout);
+    classified = kind === 'turn-output'
+      ? classifyTurnOutput(text)
+      : classifyAuthStatus(stdout, input.exitCode ?? null);
   }
+  return applyClaudeClassificationOverlays(classified, envInspection, input.cliVersion);
+}
 
-  const stdout = input.stdout ?? '';
-  const stderr = input.stderr ?? '';
-  const text = `${stdout}\n${stderr}`;
-  const kind = input.kind ?? inferKind(stdout);
-
-  if (kind === 'turn-output') return classifyTurnOutput(text);
-  return classifyAuthStatus(stdout, input.exitCode ?? null);
+export function applyClaudeClassificationOverlays(
+  classified: ClaudeAuthClassification,
+  envInspection: ClaudeCredentialEnvInspection,
+  cliVersion?: string,
+): ClaudeAuthClassification {
+  let next = classified;
+  if (envInspection.conflict) {
+    next = {
+      state: 'misconfigured',
+      credentialMode: envInspection.highest?.mode ?? classified.credentialMode,
+      evidence: 'configuration',
+      reasonCode: 'precedence-named-conflict',
+      recoveryAction: 'fix-precedence',
+    };
+  } else if (envInspection.highest && (classified.reasonCode === 'cli-not-logged-in' || classified.reasonCode === 'cli-malformed' || classified.reasonCode === 'cli-timeout')) {
+    next = {
+      state: 'configured-unverified',
+      credentialMode: envInspection.highest.mode,
+      evidence: 'configuration',
+      reasonCode: 'named-credential-present',
+      recoveryAction: 'check-again',
+    };
+  } else if (envInspection.highest && classified.state === 'configured-unverified') {
+    next = {
+      ...classified,
+      credentialMode: envInspection.highest.mode,
+      evidence: classified.evidence === 'none' ? 'configuration' : classified.evidence,
+    };
+  }
+  if (isBelowCompatibilityFloor(cliVersion) && next.state !== 'provider-unavailable') {
+    return {
+      ...next,
+      state: 'degraded',
+      reasonCode: 'cli-unsupported',
+      recoveryAction: 'update-cli',
+    };
+  }
+  return next;
 }
 
 function inferKind(stdout: string): 'auth-status' | 'turn-output' {

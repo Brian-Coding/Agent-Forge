@@ -11,6 +11,7 @@ test('auth contract version and reason codes are the Slice A baseline', () => {
   expect(PROVIDER_AUTH_REASON_CODES).toContain('not-probed');
   expect(PROVIDER_AUTH_REASON_CODES).toContain('cli-logged-in');
   expect(PROVIDER_AUTH_REASON_CODES).toContain('access-token-expired');
+  expect(PROVIDER_AUTH_REASON_CODES).toContain('named-credential-present');
   expect(unprobedAuthSnapshot('claude', 10)).toMatchObject({
     provider: 'claude',
     state: 'unknown',

@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { healthContainsSecretLikeValue } from '../../shared/runtime-health';
+import { healthContainsSecretLikeValue, unprobedAuthSnapshot } from '../../shared/runtime-health';
 import {
   CRITICAL_RUNTIME_FILES,
   createRuntimeTruth,
@@ -31,6 +31,9 @@ function truth(overrides: Parameters<typeof createRuntimeTruth>[0] = {}) {
       { provider: 'claude', cliName: 'claude', available: true, cliVersion: '2.1.241' },
       { provider: 'codex', cliName: 'codex', available: true, cliVersion: '0.70.0' },
     ]),
+    getAuthSnapshots: (providers, checkedAt) => providers.map(provider =>
+      unprobedAuthSnapshot(provider.provider, checkedAt, provider.cliVersion),
+    ),
     ...overrides,
   });
 }

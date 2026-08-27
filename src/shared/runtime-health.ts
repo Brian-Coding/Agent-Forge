@@ -48,6 +48,7 @@ export const PROVIDER_AUTH_REASON_CODES = [
   'refresh-token-expired',
   'oauth-revoked',
   'precedence-named-conflict',
+  'named-credential-present',
   'provider-401',
   'provider-error',
 ] as const;

@@ -5762,11 +5762,15 @@
       const providers = (health.runtime.providers || []).map(provider => (
         provider.cliName + (provider.cliVersion ? ' ' + provider.cliVersion : provider.available ? '' : ' missing')
       )).join(' · ');
+      const auth = (health.auth || []).map(snapshot => (
+        snapshot.provider + ' ' + snapshot.state + ' (' + snapshot.reasonCode + ')'
+      )).join(' · ');
       const title = [
         'session ' + health.runtime.serverSessionId,
         health.runtime.bunVersion ? 'bun ' + health.runtime.bunVersion : null,
         health.runtime.source && health.runtime.source.commit ? 'commit ' + String(health.runtime.source.commit).slice(0, 12) : null,
         providers || null,
+        auth || null,
       ].filter(Boolean).join('\n');
       return e('span', { className: 'runtime-pill runtime-' + drift, title }, label);
     }

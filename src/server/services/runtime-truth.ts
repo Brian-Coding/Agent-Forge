@@ -2,12 +2,15 @@ import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 import type {
+  ProviderAuthSnapshot,
   RuntimeDriftState,
   RuntimeHealth,
   RuntimeManifest,
   RuntimeProviderIdentity,
 } from '../../shared/runtime-health';
-import { AUTH_CONTRACT_VERSION, unprobedAuthSnapshot } from '../../shared/runtime-health';
+import { AUTH_CONTRACT_VERSION } from '../../shared/runtime-health';
+import { currentAuthCoordinator } from '../auth/provider-auth-coordinator';
+import { versionProbeEnv } from '../auth/probe-env';
 import { commandSession } from './command-session';
 import { collectBoundedProcess } from './bounded-subprocess';
 import { resolveCliBinary } from '../utils';
@@ -42,6 +45,7 @@ export interface RuntimeTruthOptions {
   fileExists?: (path: string) => boolean;
   readGitIdentity?: (sourceRoot: string) => Promise<GitIdentity> | GitIdentity;
   probeProviders?: () => Promise<RuntimeProviderIdentity[]> | RuntimeProviderIdentity[];
+  getAuthSnapshots?: (providers: RuntimeProviderIdentity[], checkedAt: number) => Promise<ProviderAuthSnapshot[]> | ProviderAuthSnapshot[];
 }
 
 interface StartupCapture {
@@ -136,12 +140,13 @@ export function createRuntimeTruth(options: RuntimeTruthOptions = {}) {
     async getHealth(): Promise<RuntimeHealth> {
       const runtime = await buildManifest();
       const checkedAt = now();
+      const auth = options.getAuthSnapshots
+        ? await options.getAuthSnapshots(runtime.providers, checkedAt)
+        : await currentAuthCoordinator().snapshotsFor(runtime.providers);
       return {
         contractVersion: AUTH_CONTRACT_VERSION,
         runtime,
-        auth: runtime.providers.map(provider =>
-          unprobedAuthSnapshot(provider.provider, checkedAt, provider.cliVersion),
-        ),
+        auth,
       };
     },
     peekCompact() {
@@ -189,14 +194,7 @@ export function parseCliVersion(text: string): string | undefined {
   return match?.[1];
 }
 
-export function versionProbeEnv(source: NodeJS.ProcessEnv = process.env): Record<string, string> {
-  const env: Record<string, string> = {};
-  for (const key of ['PATH', 'Path', 'PATHEXT', 'SystemRoot', 'WINDIR', 'HOME', 'USERPROFILE'] as const) {
-    const value = source[key];
-    if (typeof value === 'string' && value) env[key] = value;
-  }
-  return env;
-}
+export { versionProbeEnv } from '../auth/probe-env';
 
 export async function readGitIdentity(sourceRoot: string): Promise<GitIdentity> {
   const commit = readGitCommit(sourceRoot);
