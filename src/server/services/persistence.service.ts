@@ -391,11 +391,35 @@ export interface PersistenceServiceOptions {
   maxPidBytes?: number;
 }
 
+export interface PersistenceMetrics {
+  generation: number;
+  durableGeneration: number;
+  serializeCount: number;
+  writeCount: number;
+  snapshotReuses: number;
+  coalescedSaves: number;
+  skippedRedundantWrites: number;
+  lastSerializeMs: number;
+  lastWriteMs: number;
+  lastWriteBytes: number;
+}
+
+export interface SaveReceipt {
+  generation: number;
+  written: boolean;
+  reusedSnapshot: boolean;
+}
+
 export interface PersistenceService {
   setBuildPersistedData(fn: () => PersistedData): void;
   _writeData(): Promise<void>;
+  markMutated(reason?: string): number;
+  beginMutation(reason?: string): number;
+  endMutation(): void;
   save(): void;
   saveNow(): Promise<void>;
+  flushThrough(minimumGeneration?: number): Promise<SaveReceipt>;
+  getMetrics(): PersistenceMetrics;
   _writePids(): Promise<void>;
   scheduleSavePids(): void;
   savePidsNow(): Promise<void>;
@@ -431,21 +455,96 @@ export function createPersistenceService(options: PersistenceServiceOptions = {}
   let pidTimer: ReturnType<typeof setTimeout> | null = null;
   let pidDirty = false;
   let buildPersistedData: (() => PersistedData) | null = null;
+  let generation = 0;
+  let durableGeneration = 0;
+  let mutationDepth = 0;
+  let capturedSnapshot: { generation: number; text: string | null } | null = null;
+  let lastWrittenText: string | null | undefined;
+  const metrics: PersistenceMetrics = {
+    generation: 0,
+    durableGeneration: 0,
+    serializeCount: 0,
+    writeCount: 0,
+    snapshotReuses: 0,
+    coalescedSaves: 0,
+    skippedRedundantWrites: 0,
+    lastSerializeMs: 0,
+    lastWriteMs: 0,
+    lastWriteBytes: 0,
+  };
+
+  const syncMetrics = () => {
+    metrics.generation = generation;
+    metrics.durableGeneration = durableGeneration;
+  };
 
   const serializeDataSnapshot = (): string | null => {
     if (!buildPersistedData) return null;
+    const started = now();
     const data = buildPersistedData();
     const serialized = JSON.stringify(data, null, 2);
     const bytes = Buffer.byteLength(serialized, 'utf8');
+    metrics.lastSerializeMs = Math.max(0, now() - started);
+    metrics.serializeCount += 1;
     if (bytes > maxDataBytes) {
       throw new Error(`Refusing to persist ${bytes} bytes; data limit is ${maxDataBytes} bytes`);
     }
     return serialized;
   };
 
-  const writeDataSnapshot = async (serialized: string | null): Promise<void> => {
-    if (serialized === null) return;
+  const markMutated = (reason = 'explicit'): number => {
+    generation += 1;
+    capturedSnapshot = null;
+    syncMetrics();
+    void reason;
+    return generation;
+  };
+
+  const captureSnapshot = (): { text: string | null; reused: boolean } => {
+    if (capturedSnapshot && capturedSnapshot.generation === generation) {
+      metrics.snapshotReuses += 1;
+      return { text: capturedSnapshot.text, reused: true };
+    }
+    const text = serializeDataSnapshot();
+    capturedSnapshot = { generation, text };
+    return { text, reused: false };
+  };
+
+  const writeDataSnapshot = async (serialized: string | null, writtenGeneration: number): Promise<boolean> => {
+    if (serialized === null) {
+      durableGeneration = Math.max(durableGeneration, writtenGeneration);
+      syncMetrics();
+      return false;
+    }
+    if (lastWrittenText === serialized) {
+      metrics.skippedRedundantWrites += 1;
+      durableGeneration = Math.max(durableGeneration, writtenGeneration);
+      syncMetrics();
+      return false;
+    }
+    const started = now();
     await writeFile(dataFile, serialized);
+    metrics.writeCount += 1;
+    metrics.lastWriteMs = Math.max(0, now() - started);
+    metrics.lastWriteBytes = Buffer.byteLength(serialized, 'utf8');
+    lastWrittenText = serialized;
+    durableGeneration = Math.max(durableGeneration, writtenGeneration);
+    syncMetrics();
+    return true;
+  };
+
+  const enqueueWrite = (text: string | null, writtenGeneration: number): Promise<boolean> => {
+    const write = persistChain.then(async () => {
+      try {
+        return await writeDataSnapshot(text, writtenGeneration);
+      } catch (error) {
+        persistDirty = true;
+        console.error('Failed to persist data:', error);
+        throw error;
+      }
+    });
+    persistChain = write.then(() => undefined, () => undefined);
+    return write;
   };
 
   const preserveByRename = async (path: string, label: string): Promise<string> => {
@@ -465,7 +564,9 @@ export function createPersistenceService(options: PersistenceServiceOptions = {}
 
     async _writeData() {
       try {
-        await writeDataSnapshot(serializeDataSnapshot());
+        if (mutationDepth === 0) markMutated('write-data');
+        const { text } = captureSnapshot();
+        await writeDataSnapshot(text, generation);
       } catch (error) {
         persistDirty = true;
         console.error('Failed to persist data:', error);
@@ -473,27 +574,50 @@ export function createPersistenceService(options: PersistenceServiceOptions = {}
       }
     },
 
+    markMutated,
+
+    beginMutation(reason = 'durable-mutation') {
+      mutationDepth += 1;
+      if (mutationDepth === 1) markMutated(reason);
+      return generation;
+    },
+
+    endMutation() {
+      if (mutationDepth > 0) mutationDepth -= 1;
+    },
+
+    getMetrics() {
+      return { ...metrics, generation, durableGeneration };
+    },
+
     save() {
       try {
+        if (mutationDepth === 0) markMutated('save');
         // A save request owns the state visible at this call. Building later
         // inside the debounce callback could capture an unrelated mutation
         // that subsequently rolls back, making failed state durable.
-        pendingDataSnapshot = serializeDataSnapshot();
+        pendingDataSnapshot = captureSnapshot().text;
         persistDirty = true;
       } catch (error) {
         persistDirty = true;
         console.error('Failed to prepare persisted data:', error);
         return;
       }
-      if (persistTimer) return;
+      if (persistTimer) {
+        metrics.coalescedSaves += 1;
+        return;
+      }
       persistTimer = setTimeout(() => {
         persistTimer = null;
         if (!persistDirty) return;
         persistDirty = false;
         const snapshot = pendingDataSnapshot;
+        const snapshotGeneration = generation;
         pendingDataSnapshot = undefined;
         persistChain = persistChain
-          .then(() => writeDataSnapshot(snapshot ?? null))
+          .then(async () => {
+            await writeDataSnapshot(snapshot ?? null, snapshotGeneration);
+          })
           .catch(error => {
             persistDirty = true;
             console.error('Persist error:', error);
@@ -502,34 +626,42 @@ export function createPersistenceService(options: PersistenceServiceOptions = {}
     },
 
     async saveNow() {
+      await service.flushThrough();
+    },
+
+    async flushThrough(minimumGeneration?: number) {
       if (persistTimer) {
         clearTimeout(persistTimer);
         persistTimer = null;
       }
-      persistDirty = false;
-      pendingDataSnapshot = undefined;
-      // Capture the state at the durability boundary, not later when an older
-      // queued write happens to finish. Otherwise that older operation can
-      // accidentally persist a newer operation that has not committed yet.
+      let reusedSnapshot = false;
+      let targetGeneration = generation;
       let snapshot: string | null;
       try {
-        snapshot = serializeDataSnapshot();
+        if (persistDirty && capturedSnapshot && capturedSnapshot.generation === generation) {
+          snapshot = capturedSnapshot.text;
+          reusedSnapshot = true;
+          metrics.snapshotReuses += 1;
+        } else {
+          if (mutationDepth === 0) markMutated('saveNow');
+          const captured = captureSnapshot();
+          snapshot = captured.text;
+          reusedSnapshot = captured.reused;
+          targetGeneration = generation;
+        }
       } catch (error) {
         persistDirty = true;
         console.error('Failed to persist data:', error);
         throw error;
       }
-      const write = persistChain.then(async () => {
-        try {
-          await writeDataSnapshot(snapshot);
-        } catch (error) {
-          persistDirty = true;
-          console.error('Failed to persist data:', error);
-          throw error;
-        }
-      });
-      persistChain = write.catch(() => {});
-      return write;
+      persistDirty = false;
+      pendingDataSnapshot = undefined;
+      const needed = minimumGeneration ?? targetGeneration;
+      const written = await enqueueWrite(snapshot, targetGeneration);
+      if (durableGeneration < needed) {
+        throw new Error(`Durability barrier for generation ${needed} did not complete`);
+      }
+      return { generation: durableGeneration, written, reusedSnapshot };
     },
 
     async _writePids() {

@@ -394,6 +394,87 @@ test('oversized persistence files are preserved without parsing or orphan execut
   expect(JSON.parse(await readFile(pidFile, 'utf8'))).toEqual([]);
 });
 
+test('a mutation generation is serialized once and saveNow can reuse that snapshot', async () => {
+  const directory = await fixtureDirectory();
+  const writes: string[] = [];
+  const service = createPersistenceService({
+    dataFile: join(directory, 'data.json'),
+    pidFile: join(directory, 'pids.json'),
+    ownedFile: join(directory, 'owned-processes.json'),
+    writeFile: async (_path, content) => {
+      writes.push(typeof content === 'string' ? content : Buffer.from(content).toString('utf8'));
+    },
+  });
+  service.setBuildPersistedData(() => ({ ...emptyData(), sharedContext: 'same-generation' }));
+  const generation = service.beginMutation('chat-turn');
+  service.save();
+  const receipt = await service.flushThrough(generation);
+  service.endMutation();
+
+  expect(generation).toBe(1);
+  expect(receipt.reusedSnapshot).toBe(true);
+  expect(receipt.written).toBe(true);
+  expect(writes).toHaveLength(1);
+  expect(JSON.parse(writes[0]!).sharedContext).toBe('same-generation');
+  expect(service.getMetrics()).toMatchObject({
+    generation: 1,
+    durableGeneration: 1,
+    serializeCount: 1,
+    writeCount: 1,
+    snapshotReuses: 1,
+  });
+  expect(JSON.stringify(service.getMetrics())).not.toContain('same-generation');
+});
+
+test('an older queued write cannot replace a newer durable generation', async () => {
+  const directory = await fixtureDirectory();
+  const writes: string[] = [];
+  let releaseFirst!: () => void;
+  const firstMayFinish = new Promise<void>(resolve => { releaseFirst = resolve; });
+  const service = createPersistenceService({
+    dataFile: join(directory, 'data.json'),
+    pidFile: join(directory, 'pids.json'),
+    ownedFile: join(directory, 'owned-processes.json'),
+    writeFile: async (_path, content) => {
+      const text = typeof content === 'string' ? content : Buffer.from(content).toString('utf8');
+      writes.push(JSON.parse(text).sharedContext);
+      if (writes.length === 1) await firstMayFinish;
+    },
+  });
+  let state = 'old';
+  service.setBuildPersistedData(() => ({ ...emptyData(), sharedContext: state }));
+  const first = service.saveNow();
+  state = 'new';
+  const second = service.saveNow();
+  releaseFirst();
+  await Promise.all([first, second]);
+  expect(writes).toEqual(['old', 'new']);
+  expect(service.getMetrics().durableGeneration).toBe(2);
+  expect(service.getMetrics().generation).toBe(2);
+});
+
+test('failed persistence does not advance the durable generation', async () => {
+  const directory = await fixtureDirectory();
+  let fail = true;
+  const service = createPersistenceService({
+    dataFile: join(directory, 'data.json'),
+    pidFile: join(directory, 'pids.json'),
+    ownedFile: join(directory, 'owned-processes.json'),
+    writeFile: async (path, content, options) => {
+      if (fail) {
+        fail = false;
+        throw new Error('write exploded');
+      }
+      await atomicWriteFile(path, content, options);
+    },
+  });
+  service.setBuildPersistedData(() => ({ ...emptyData(), sharedContext: 'retry' }));
+  await expect(service.saveNow()).rejects.toThrow('write exploded');
+  expect(service.getMetrics().durableGeneration).toBe(0);
+  await service.saveNow();
+  expect(service.getMetrics().durableGeneration).toBeGreaterThan(0);
+});
+
 test('oversized generated state rejects before replacing the durable file', async () => {
   const directory = await fixtureDirectory();
   const dataFile = join(directory, 'data.json');
