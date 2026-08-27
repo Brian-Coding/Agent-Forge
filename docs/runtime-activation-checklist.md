@@ -12,6 +12,6 @@ Use this after a controlled Agent Forge restart. It does not start, stop, or rep
 8. Run one read-only UI/API smoke (`/api/health`, `/api/models`, WebSocket open). Do not treat that as provider authentication.
 9. Run a live Claude or Codex prompt only in an approved safe environment, and only after the fingerprint check passes.
 
-`auth` on `/api/health` is shadow classification. It does not gate turns. `not-probed` means that provider has no classifier yet.
+`auth` on `/api/health` is the same coordinator snapshot used to gate Claude turns. Codex stays `not-probed` and is not blocked by Claude state. Inconclusive Claude results still allow one bounded bootstrap; only definitive failures block.
 
 The health payload must stay redacted: no API keys, OAuth tokens, credential-file contents, or prompt text.

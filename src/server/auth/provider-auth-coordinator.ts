@@ -1,6 +1,7 @@
 import type { AgentProvider } from '../../shared/protocol';
 import type { ProviderAuthSnapshot, RuntimeProviderIdentity } from '../../shared/runtime-health';
 import { healthContainsSecretLikeValue, unprobedAuthSnapshot } from '../../shared/runtime-health';
+import { decideAuthGate, PROVIDER_INIT_DEADLINE_MS, type AuthGateDecision } from './auth-gate';
 import { inspectClaudeCredentialEnv } from './claude-precedence';
 import { classifyClaudeAuthOutput, type ClaudeAuthProbeInput } from './classify-claude-auth';
 import { createClaudeAuthProbe, createCodexAuthProbe, type ProviderAuthProbe } from './provider-auth-probe';
@@ -33,10 +34,18 @@ export interface AuthShadowComparison {
 export interface ProviderAuthCoordinatorOptions {
   now?: () => number;
   cacheTtlMs?: number;
+  initDeadlineMs?: number;
   probes?: Partial<Record<AgentProvider, ProviderAuthProbe>>;
   env?: Record<string, string | undefined>;
   log?: (message: string) => void;
 }
+
+export type AuthStartPermit = AuthGateDecision & {
+  needsInitHold: boolean;
+  release(): void;
+  noteInitObserved(): void;
+  noteAuthFailure(): void;
+};
 
 function envGeneration(env: Record<string, string | undefined>): string {
   const inspection = inspectClaudeCredentialEnv(env);
@@ -51,6 +60,7 @@ function expectedLegacyOutcome(snapshot: ProviderAuthSnapshot): 'allow' | 'block
 export function createProviderAuthCoordinator(options: ProviderAuthCoordinatorOptions = {}) {
   const now = options.now ?? Date.now;
   const cacheTtlMs = options.cacheTtlMs ?? AUTH_SHADOW_CACHE_TTL_MS;
+  const initDeadlineMs = options.initDeadlineMs ?? PROVIDER_INIT_DEADLINE_MS;
   const log = options.log ?? ((message: string) => console.info(message));
   const probes: Record<AgentProvider, ProviderAuthProbe> = {
     claude: options.probes?.claude ?? createClaudeAuthProbe(),
@@ -59,6 +69,7 @@ export function createProviderAuthCoordinator(options: ProviderAuthCoordinatorOp
 
   const snapshots = new Map<AgentProvider, ProviderAuthSnapshot>();
   const inflight = new Map<string, Promise<ProviderAuthSnapshot>>();
+  const bootstrapTails = new Map<AgentProvider, Promise<void>>();
   let generation = 0;
   let lastEnvGeneration = envGeneration(options.env ?? process.env);
   const comparisons: AuthShadowComparison[] = [];
@@ -91,14 +102,15 @@ export function createProviderAuthCoordinator(options: ProviderAuthCoordinatorOp
     const key = cacheKey(provider);
     const existing = inflight.get(key);
     if (existing) return existing;
+    const version = cliVersion ?? snapshots.get(provider)?.cliVersion;
 
     const pending = probes[provider].run({
       env: currentEnv(),
-      cliVersion,
+      cliVersion: version,
       now: now(),
     }).then(snapshot => {
       if (healthContainsSecretLikeValue(snapshot)) {
-        const redacted = unprobedAuthSnapshot(provider, now(), cliVersion);
+        const redacted = unprobedAuthSnapshot(provider, now(), version);
         snapshots.set(provider, redacted);
         return redacted;
       }
@@ -109,6 +121,85 @@ export function createProviderAuthCoordinator(options: ProviderAuthCoordinatorOp
     });
     inflight.set(key, pending);
     return pending;
+  }
+
+  function acquireBootstrap(provider: AgentProvider): Promise<() => void> {
+    let release!: () => void;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    const previous = bootstrapTails.get(provider) ?? Promise.resolve();
+    bootstrapTails.set(provider, previous.then(() => held).catch(() => undefined));
+    return previous.then(() => {
+      let released = false;
+      return () => {
+        if (released) return;
+        released = true;
+        release();
+      };
+    });
+  }
+
+  function permitFromDecision(decision: AuthGateDecision, unlock: () => void): AuthStartPermit {
+    const hold = decision.action === 'allow' && decision.bootstrap === 'required';
+    let watchdog: ReturnType<typeof setTimeout> | undefined;
+    if (hold) {
+      watchdog = setTimeout(() => unlock(), initDeadlineMs);
+    } else {
+      unlock();
+    }
+    return {
+      ...decision,
+      needsInitHold: hold,
+      release() {
+        if (watchdog) clearTimeout(watchdog);
+        unlock();
+      },
+      noteInitObserved() {
+        const current = snapshots.get(decision.snapshot.provider) ?? decision.snapshot;
+        const next = {
+          ...current,
+          state: 'verified' as const,
+          evidence: 'provider-init' as const,
+          reasonCode: current.reasonCode === 'cli-timeout' || current.reasonCode === 'not-probed'
+            ? 'cli-logged-in' as const
+            : current.reasonCode,
+          checkedAt: now(),
+          verifiedAt: now(),
+        };
+        if (!healthContainsSecretLikeValue(next)) snapshots.set(decision.snapshot.provider, next);
+      },
+      noteAuthFailure() {
+        generation += 1;
+        inflight.clear();
+        const next = {
+          ...decision.snapshot,
+          state: 'checking' as const,
+          evidence: 'provider-error' as const,
+          reasonCode: 'provider-401' as const,
+          checkedAt: now(),
+        };
+        if (!healthContainsSecretLikeValue(next)) snapshots.set(decision.snapshot.provider, next);
+      },
+    };
+  }
+
+  async function prepareStart(provider: AgentProvider, cliVersion?: string): Promise<AuthStartPermit> {
+    const unlock = await acquireBootstrap(provider);
+    try {
+      const env = currentEnv();
+      if (provider === 'claude' && env.AGENT_FORGE_SKIP_CLAUDE_AUTH_CHECK === '1') {
+        const snapshot = unprobedAuthSnapshot('claude', now(), cliVersion);
+        return permitFromDecision({ action: 'allow', snapshot, bootstrap: 'none' }, unlock);
+      }
+      const snapshot = await probe(provider, cliVersion);
+      const decision = decideAuthGate(snapshot, env);
+      if (decision.action === 'block') {
+        log(`[auth-gate] ${provider} action=block reason=${snapshot.reasonCode} state=${snapshot.state}`);
+      }
+      return permitFromDecision(decision, unlock);
+    } catch (error) {
+      unlock();
+      throw error;
+    }
   }
 
   function observeLegacy(provider: AgentProvider, legacy: LegacyAuthObservation, snapshot?: ProviderAuthSnapshot) {
@@ -136,6 +227,8 @@ export function createProviderAuthCoordinator(options: ProviderAuthCoordinatorOp
     async probe(provider: AgentProvider, cliVersion?: string) {
       return probe(provider, cliVersion);
     },
+
+    prepareStart,
 
     record(snapshot: ProviderAuthSnapshot) {
       if (healthContainsSecretLikeValue(snapshot)) return;

@@ -94,6 +94,150 @@ test('classifier never reads the credential file and coordinator source owns no 
   expect(readFileSync(join(import.meta.dir, 'classify-claude-auth.ts'), 'utf8')).not.toContain('credentials');
   expect(readFileSync(join(import.meta.dir, 'provider-auth-coordinator.ts'), 'utf8')).not.toMatch(/shutdown|process-lock|killProcessTree|credentials\.json/);
   expect(readFileSync(join(import.meta.dir, 'provider-auth-probe.ts'), 'utf8')).not.toContain('credentials.json');
+  expect(readFileSync(join(import.meta.dir, 'auth-gate.ts'), 'utf8')).not.toMatch(/shutdown|process-lock|killProcessTree|credentials\.json/);
+  const claudeAdapter = readFileSync(join(import.meta.dir, '../agents/adapters/claude.ts'), 'utf8');
+  expect(claudeAdapter).not.toContain('getClaudeAuthError');
+  expect(claudeAdapter).not.toContain('readClaudeCredentialState');
+});
+
+test('ten Claude starts share one probe and do not hold the Codex bootstrap lock', async () => {
+  let claudeCalls = 0;
+  const coordinator = createProviderAuthCoordinator({
+    probes: {
+      claude: createClaudeAuthProbe(async () => {
+        claudeCalls += 1;
+        await Bun.sleep(15);
+        return { exitCode: 0, stdout: '{"loggedIn":true,"authMethod":"oauth"}\n', stderr: '', timedOut: false };
+      }),
+      codex: createCodexAuthProbe(),
+    },
+    env: {},
+  });
+
+  const [codexPermit, ...claudePermits] = await Promise.all([
+    coordinator.prepareStart('codex'),
+    ...Array.from({ length: 10 }, () => coordinator.prepareStart('claude')),
+  ]);
+  expect(codexPermit.action).toBe('allow');
+  expect(codexPermit.needsInitHold).toBe(false);
+  expect(claudeCalls).toBe(1);
+  expect(claudePermits.every(permit => permit.action === 'allow' && permit.bootstrap === 'none')).toBe(true);
+  for (const permit of [codexPermit, ...claudePermits]) permit.release();
+});
+
+test('an inconclusive Claude bootstrap holds only Claude and a probe timeout cannot stick the mutex', async () => {
+  let claudeCalls = 0;
+  let releaseProbe!: () => void;
+  const probeHold = new Promise<void>(resolve => { releaseProbe = resolve; });
+  const coordinator = createProviderAuthCoordinator({
+    initDeadlineMs: 30_000,
+    probes: {
+      claude: createClaudeAuthProbe(async () => {
+        claudeCalls += 1;
+        await probeHold;
+        return { exitCode: null, stdout: '', stderr: '', timedOut: true };
+      }),
+      codex: createCodexAuthProbe(),
+    },
+    env: {},
+  });
+
+  const first = coordinator.prepareStart('claude');
+  await Bun.sleep(10);
+  const second = coordinator.prepareStart('claude');
+  const codex = await coordinator.prepareStart('codex');
+  expect(codex.action).toBe('allow');
+  expect(codex.needsInitHold).toBe(false);
+  codex.release();
+
+  releaseProbe();
+  const firstPermit = await first;
+  expect(claudeCalls).toBe(1);
+  expect(firstPermit).toMatchObject({ action: 'allow', bootstrap: 'required', needsInitHold: true });
+
+  let secondReady = false;
+  void second.then(() => { secondReady = true; });
+  await Bun.sleep(20);
+  expect(secondReady).toBe(false);
+
+  firstPermit.release();
+  const secondPermit = await second;
+  expect(claudeCalls).toBe(1);
+  expect(secondPermit.needsInitHold).toBe(true);
+  secondPermit.release();
+});
+
+test('a skipped Claude check and a thrown probe cannot wedge later starts', async () => {
+  let calls = 0;
+  const skipCoordinator = createProviderAuthCoordinator({
+    probes: {
+      claude: createClaudeAuthProbe(async () => {
+        calls += 1;
+        return { exitCode: 1, stdout: '{"loggedIn":false,"authMethod":"none"}\n', stderr: '', timedOut: false };
+      }),
+      codex: createCodexAuthProbe(),
+    },
+    env: { AGENT_FORGE_SKIP_CLAUDE_AUTH_CHECK: '1' },
+  });
+  const skipped = await skipCoordinator.prepareStart('claude');
+  expect(skipped).toMatchObject({ action: 'allow', bootstrap: 'none' });
+  expect(calls).toBe(0);
+  skipped.release();
+
+  let attempts = 0;
+  const throwing = createProviderAuthCoordinator({
+    probes: {
+      claude: createClaudeAuthProbe(async () => {
+        attempts += 1;
+        if (attempts === 1) throw new Error('probe exploded');
+        return { exitCode: null, stdout: '', stderr: '', timedOut: true };
+      }),
+      codex: createCodexAuthProbe(),
+    },
+    env: {},
+  });
+  await expect(throwing.prepareStart('claude')).rejects.toThrow('probe exploded');
+  const recovered = await throwing.prepareStart('claude');
+  expect(recovered).toMatchObject({ action: 'allow', bootstrap: 'required' });
+  recovered.release();
+});
+
+test('the bootstrap watchdog releases a forgotten hold', async () => {
+  const coordinator = createProviderAuthCoordinator({
+    initDeadlineMs: 25,
+    probes: {
+      claude: createClaudeAuthProbe(async () => ({ exitCode: null, stdout: '', stderr: '', timedOut: true })),
+      codex: createCodexAuthProbe(),
+    },
+    env: {},
+  });
+  const held = await coordinator.prepareStart('claude');
+  expect(held.needsInitHold).toBe(true);
+  const next = await coordinator.prepareStart('claude');
+  expect(next.action).toBe('allow');
+  held.release();
+  next.release();
+});
+
+test('a blocking Claude snapshot does not change Codex and probe failure cannot stick the mutex', async () => {
+  const coordinator = createProviderAuthCoordinator({
+    probes: {
+      claude: createClaudeAuthProbe(async () => ({
+        exitCode: 1,
+        stdout: '{"loggedIn":false,"authMethod":"none"}\n',
+        stderr: '',
+        timedOut: false,
+      })),
+      codex: createCodexAuthProbe(),
+    },
+    env: {},
+  });
+  const blocked = await coordinator.prepareStart('claude');
+  expect(blocked.action).toBe('block');
+  blocked.release();
+  const codex = await coordinator.prepareStart('codex');
+  expect(codex.action).toBe('allow');
+  codex.release();
 });
 
 test('named env conflict and unsupported CLI stay typed without leaking values', () => {
