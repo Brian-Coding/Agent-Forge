@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, realpathSync, statSync } from 'node:fs';
 import { basename, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { ChatImageAttachment } from '../../shared/protocol';
+import { recordCreatedArtifact } from './artifact-inventory.service';
 import { getArtifactRoot, safeArtifactSegment } from './artifact-paths';
 
 export const MAX_CHAT_IMAGES = 100;
@@ -67,6 +68,13 @@ export async function storeChatImageBytes(
   mkdirSync(directory, { recursive: true });
   const path = resolve(join(directory, `${Date.now()}-${randomUUID().slice(0, 8)}${extension}`));
   await Bun.write(path, bytes);
+  await recordCreatedArtifact({
+    type: 'chat-upload-original',
+    absolutePath: path,
+    byteSize: bytes.byteLength,
+    artifactRoot: getArtifactRoot(),
+    ownerRefs: [{ kind: 'message', id: agentId }],
+  }).catch(() => null);
 
   return {
     path,
