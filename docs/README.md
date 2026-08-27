@@ -15,6 +15,7 @@ This directory contains current operational documentation and detailed design re
 
 ## Paused reference
 
+- [Grok Build 1.0.5 compatibility spike](./provider-compatibility/grok-build/README.md): Slice A evidence retained; product integration paused 2026-08-26. Grok is used in Cursor and Grok Bot, not Agent Forge agent selection.
 - [Unreal MCP with Codex and Agent Forge](./unreal-mcp-agent-forge.md): setup/design reference for an explicitly paused integration.
 - [Unreal MCP implementation prompt](./unreal-mcp-agent-forge-implementation-prompt.md): copy/paste execution brief; do not use until the user resumes the plan.
 

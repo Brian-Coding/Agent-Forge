@@ -14,7 +14,8 @@
     "tracker:reconcile": "bun scripts/reconcile-google-docs-tracker.ts",
     "tracker:install": "bun scripts/install-tracker-reconciliation-launchd.ts",
     "usage:sync": "bun scripts/sync-usage.ts",
-    "usage:sync:dry-run": "bun scripts/sync-usage.ts --dry-run"
+    "usage:sync:dry-run": "bun scripts/sync-usage.ts --dry-run",
+    "smoke:live-thought": "bun scripts/live-thought-activation-smoke.ts"
   },
   "devDependencies": {
     "@types/bun": "latest",
