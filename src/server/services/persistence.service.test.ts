@@ -4,11 +4,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { PersistedData } from '../../shared/protocol';
 import { atomicWriteFile } from './atomic-file';
+import { createFakeProcessProbe } from '../platform/process-probe';
 import {
   createPersistenceService,
   normalizePersistedData,
   PERSISTED_SCHEMA_VERSION,
 } from './persistence.service';
+import { createOwnershipSession, recordFromProbe } from './process-ownership';
 
 const temporaryDirectories: string[] = [];
 
@@ -248,16 +250,23 @@ test('PID persistence errors propagate and a later write can recover', async () 
   expect(JSON.parse(await readFile(pidFile, 'utf8'))).toEqual([4242]);
 });
 
-test('orphan cleanup ignores unsafe records, deduplicates, caps work, and durably clears the file', async () => {
+test('orphan cleanup ignores unsafe records, never kills legacy PIDs, and durably clears the file', async () => {
   const directory = await fixtureDirectory();
   const dataFile = join(directory, 'missing-data.json');
   const pidFile = join(directory, 'pids.json');
+  const ownedFile = join(directory, 'owned-processes.json');
   const candidates = Array.from({ length: 300 }, (_, index) => 10_000 + index);
   await writeFile(pidFile, JSON.stringify([process.pid, -1, 0, 1, 42, 42, 3.5, '44', ...candidates]));
+  const liveLegacy = new Map([
+    [42, { status: 'matched' as const, identity: { pid: 42, name: 'bun', startTimeMs: 1 } }],
+    [10_000, { status: 'matched' as const, identity: { pid: 10_000, name: 'claude', startTimeMs: 2 } }],
+  ]);
   const killed: number[] = [];
   const service = createPersistenceService({
     dataFile,
     pidFile,
+    ownedFile,
+    probe: createFakeProcessProbe(liveLegacy),
     killTree: async pid => {
       killed.push(pid);
       return { attempted: true, succeeded: true, exitCode: 0, timedOut: false };
@@ -265,11 +274,36 @@ test('orphan cleanup ignores unsafe records, deduplicates, caps work, and durabl
   });
 
   expect(await service.load()).toBeNull();
-  expect(killed).toHaveLength(256);
-  expect(killed.slice(0, 3)).toEqual([42, 10_000, 10_001]);
-  expect(killed).not.toContain(process.pid);
-  expect(killed).not.toContain(1);
+  expect(killed).toEqual([]);
   expect(JSON.parse(await readFile(pidFile, 'utf8'))).toEqual([]);
+  expect(await Bun.file(ownedFile).exists()).toBe(false);
+});
+
+test('owned-process recovery terminates only a twice-proved V2 match', async () => {
+  const directory = await fixtureDirectory();
+  const ownedFile = join(directory, 'owned-processes.json');
+  const session = createOwnershipSession('instance-a');
+  const owned = recordFromProbe(session, 'claude', { pid: 4242, name: 'claude', startTimeMs: 1_700_000_000_000 });
+  const reused = recordFromProbe(session, 'codex', { pid: 4343, name: 'codex', startTimeMs: 1_700_000_000_000 });
+  await writeFile(ownedFile, JSON.stringify([owned, reused]));
+  const killed: number[] = [];
+  const service = createPersistenceService({
+    dataFile: join(directory, 'missing-data.json'),
+    pidFile: join(directory, 'pids.json'),
+    ownedFile,
+    probe: createFakeProcessProbe(new Map([
+      [4242, { status: 'matched', identity: { pid: 4242, name: 'claude', startTimeMs: 1_700_000_000_100 } }],
+      [4343, { status: 'matched', identity: { pid: 4343, name: 'bun', startTimeMs: 1_700_000_000_100 } }],
+    ])),
+    killTree: async pid => {
+      killed.push(pid);
+      return { attempted: true, succeeded: true, exitCode: 0, timedOut: false };
+    },
+  });
+
+  expect(await service.load()).toBeNull();
+  expect(killed).toEqual([4242]);
+  expect(JSON.parse(await readFile(ownedFile, 'utf8'))).toEqual([]);
 });
 
 test('active PID snapshots cannot mutate the recovery registry', () => {
@@ -285,7 +319,12 @@ test('corrupt JSON is preserved instead of crashing startup', async () => {
   const directory = await fixtureDirectory();
   const dataFile = join(directory, 'data.json');
   await writeFile(dataFile, '{incomplete');
-  const service = createPersistenceService({ dataFile, pidFile: join(directory, 'pids.json'), now: () => 123 });
+  const service = createPersistenceService({
+    dataFile,
+    pidFile: join(directory, 'pids.json'),
+    ownedFile: join(directory, 'owned-processes.json'),
+    now: () => 123,
+  });
 
   expect(await service.load()).toBeNull();
   expect(await readdir(directory)).toEqual(['data.json.corrupt-123']);
@@ -297,7 +336,12 @@ test('legacy partial state is backed up and replaced by normalized versioned sta
   const dataFile = join(directory, 'data.json');
   const original = JSON.stringify({ agents: 'bad', messages: [], sharedContext: '', documents: [], settings: {}, workspaces: [] });
   await writeFile(dataFile, original);
-  const service = createPersistenceService({ dataFile, pidFile: join(directory, 'pids.json'), now: () => 456 });
+  const service = createPersistenceService({
+    dataFile,
+    pidFile: join(directory, 'pids.json'),
+    ownedFile: join(directory, 'owned-processes.json'),
+    now: () => 456,
+  });
 
   const loaded = await service.load();
   expect(loaded?.schemaVersion).toBe(PERSISTED_SCHEMA_VERSION);
@@ -311,7 +355,12 @@ test('a future schema is rejected while preserving both original and a safety co
   const dataFile = join(directory, 'data.json');
   const original = JSON.stringify({ ...emptyData(), schemaVersion: PERSISTED_SCHEMA_VERSION + 1 });
   await writeFile(dataFile, original);
-  const service = createPersistenceService({ dataFile, pidFile: join(directory, 'pids.json'), now: () => 789 });
+  const service = createPersistenceService({
+    dataFile,
+    pidFile: join(directory, 'pids.json'),
+    ownedFile: join(directory, 'owned-processes.json'),
+    now: () => 789,
+  });
 
   await expect(service.load()).rejects.toThrow('Unsupported Agent Forge data schema version');
   expect(await readFile(dataFile, 'utf8')).toBe(original);
@@ -328,6 +377,7 @@ test('oversized persistence files are preserved without parsing or orphan execut
   const service = createPersistenceService({
     dataFile,
     pidFile,
+    ownedFile: join(directory, 'owned-processes.json'),
     maxDataBytes: 100,
     maxPidBytes: 10,
     now: () => 999,

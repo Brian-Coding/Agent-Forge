@@ -1,8 +1,14 @@
 import { rename } from 'node:fs/promises';
 import type { PersistedData } from '../../shared/protocol';
 import { migrateAgentRecord } from '../../shared/protocol';
+import { createProcessProbe, type ProcessProbe } from '../platform/process-probe';
 import { treeKill } from '../utils';
 import { atomicWriteFile } from './atomic-file';
+import {
+  decideOwnership,
+  isOwnedProcessRecord,
+  type OwnedProcessRecordV2,
+} from './process-ownership';
 
 export const PERSISTED_SCHEMA_VERSION = 1;
 const MAX_ORPHAN_PIDS = 256;
@@ -374,10 +380,12 @@ export function normalizePersistedData(raw: unknown): PersistedDataNormalization
 export interface PersistenceServiceOptions {
   dataFile?: string;
   pidFile?: string;
+  ownedFile?: string;
   activePids?: Set<number>;
   debounceMs?: number;
   writeFile?: typeof atomicWriteFile;
   killTree?: typeof treeKill;
+  probe?: ProcessProbe;
   now?: () => number;
   maxDataBytes?: number;
   maxPidBytes?: number;
@@ -401,10 +409,12 @@ export interface PersistenceService {
 export function createPersistenceService(options: PersistenceServiceOptions = {}): PersistenceService {
   const dataFile = options.dataFile ?? './data.json';
   const pidFile = options.pidFile ?? './pids.json';
+  const ownedFile = options.ownedFile ?? './owned-processes.json';
   const activePids = options.activePids ?? new Set<number>();
   const debounceMs = options.debounceMs ?? 200;
   const writeFile = options.writeFile ?? atomicWriteFile;
   const killTree = options.killTree ?? treeKill;
+  const probe = options.probe ?? createProcessProbe();
   const now = options.now ?? Date.now;
   const maxDataBytes = Number.isSafeInteger(options.maxDataBytes) && (options.maxDataBytes ?? -1) >= 0
     ? options.maxDataBytes!
@@ -584,7 +594,11 @@ export function createPersistenceService(options: PersistenceServiceOptions = {}
 
     async load() {
       const pidFileHandle = Bun.file(pidFile);
-      if (await pidFileHandle.exists()) {
+      const ownedHandle = Bun.file(ownedFile);
+      const pidFileExists = await pidFileHandle.exists();
+      const ownedFileExists = await ownedHandle.exists();
+
+      if (pidFileExists) {
         let parsedPids: unknown;
         if (pidFileHandle.size > maxPidBytes) {
           const backup = await preserveByRename(pidFile, 'oversized');
@@ -608,13 +622,47 @@ export function createPersistenceService(options: PersistenceServiceOptions = {}
           console.error('[persistence] ignored malformed, duplicate, self, or excessive orphan PID records');
         }
         if (pids.length > 0) {
-          console.log(`Cleaning up ${pids.length} orphaned PIDs from previous run.`);
-          await Promise.allSettled(pids.map(pid => killTree(pid)));
+          const probes = await probe.probeMany(pids);
+          const liveLegacy: number[] = [];
+          for (const pid of pids) {
+            const decision = decideOwnership({ processId: pid, legacy: true }, probes.get(pid) ?? { status: 'ambiguous' });
+            if (decision.reason === 'legacy-unverified') {
+              liveLegacy.push(pid);
+              console.warn(`[persistence] leaving legacy-unverified PID ${pid} untouched; ownership cannot be proved`);
+            }
+          }
+          if (liveLegacy.length > 0) {
+            console.warn(`[persistence] ${liveLegacy.length} legacy PID(s) still live and were not terminated.`);
+          }
         }
+      }
+
+      if (ownedFileExists && ownedHandle.size <= maxPidBytes) {
+        try {
+          const parsedOwned = JSON.parse(await ownedHandle.text()) as unknown;
+          const records = Array.isArray(parsedOwned) ? parsedOwned.filter(isOwnedProcessRecord) : [];
+          for (const record of records.slice(0, MAX_ORPHAN_PIDS)) {
+            const probed = await probe.probe(record.processId);
+            const decision = decideOwnership(record, probed);
+            if (!decision.terminate) continue;
+            const again = await probe.probe(record.processId);
+            if (decideOwnership(record, again).terminate) {
+              await killTree(record.processId);
+            }
+          }
+        } catch (error) {
+          console.error('[persistence] owned-process recovery failed closed:', error);
+        }
+      }
+
+      if (pidFileExists) {
         // Never leave already-attempted or malformed PID records behind where
         // OS PID reuse could target an unrelated future process.
         activePids.clear();
         await service.savePidsNow();
+      }
+      if (ownedFileExists) {
+        await writeFile(ownedFile, '[]');
       }
 
       const file = Bun.file(dataFile);
