@@ -28,6 +28,7 @@ function previewFrom(message: ClientMessage): string {
   if (message.type === 'send_image' || message.type === 'send_images' || message.type === 'send_uploaded_images') {
     return message.prompt?.slice(0, PREVIEW_CHARS) || '[image]';
   }
+  if (message.type === 'retry_auth_prompt') return 'Retry preserved prompt';
   return message.type;
 }
 
@@ -39,7 +40,8 @@ export function isChatSendCommand(message: ClientMessage): message is ClientMess
   return message.type === 'send_message'
     || message.type === 'send_image'
     || message.type === 'send_images'
-    || message.type === 'send_uploaded_images';
+    || message.type === 'send_uploaded_images'
+    || message.type === 'retry_auth_prompt';
 }
 
 export function createCommandQueue(options: {

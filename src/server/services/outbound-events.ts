@@ -31,6 +31,7 @@ export function classifyServerMessage(message: ServerMessage): OutboundEventClas
     case 'usage_report':
     case 'limits_snapshot':
     case 'runtime_health':
+    case 'auth_recovery':
       return 'snapshot';
     case 'output':
     case 'thinking_output':

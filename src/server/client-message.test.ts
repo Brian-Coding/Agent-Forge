@@ -44,6 +44,8 @@ const validMessages: ClientMessage[] = [
   { type: 'refresh_limits' },
   { type: 'kill_all' },
   { type: 'get_command_queue' },
+  { type: 'check_auth', agentId: 'a1' },
+  { type: 'retry_auth_prompt', agentId: 'a1', incidentId: 'inc-1', confirmSideEffects: true },
   { type: 'ping' },
 ];
 

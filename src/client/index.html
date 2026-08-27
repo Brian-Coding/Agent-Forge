@@ -159,6 +159,9 @@
     .turn-outcome-action { border: 1px solid var(--border); border-radius: 4px; background: var(--bg-tertiary); color: var(--text-primary); padding: 5px 10px; cursor: pointer; font-size: 12px; }
     .turn-outcome-action:hover:not(:disabled) { border-color: var(--accent); background: rgba(47, 129, 247, 0.1); }
     .turn-outcome-action:disabled { opacity: 0.45; cursor: not-allowed; }
+    .auth-recovery-card { margin-top: 8px; padding: 8px 10px; border: 1px solid rgba(210, 153, 34, 0.45); border-radius: 6px; background: rgba(210, 153, 34, 0.08); }
+    .auth-recovery-title { font-size: 12px; font-weight: 700; color: var(--warning); }
+    .auth-recovery-copy { margin-top: 4px; font-size: 12px; line-height: 1.45; color: var(--text-secondary); }
     .inline-turn-marker { width: fit-content; margin-top: 8px; padding: 3px 8px; border: 1px solid var(--border); border-radius: 999px; background: var(--bg-tertiary); color: var(--text-secondary); font: 11px/1.4 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
     .chat-turn-streaming { background: var(--bg-primary); }
     .chat-turn-streaming .chat-turn-role { color: var(--success); }
@@ -1197,6 +1200,7 @@
       const [terminals, setTerminals] = useState([]);
       const [terminalOutput, setTerminalOutput] = useState({});
       const [errorToasts, setErrorToasts] = useState([]);
+      const [authRecoveries, setAuthRecoveries] = useState([]);
       const [qaUnread, setQaUnread] = useState({}); // sourceAgentId -> true when QA results arrived for that agent
       const [qaLiveShots, setQaLiveShots] = useState({}); // workspaceId -> [{path, timestamp}]
       const wsRef = useRef(null);
@@ -1325,6 +1329,18 @@
             switch (msg.type) {
               case 'pong':
               case 'command_ack':
+                if (msg.status === 'rejected' && msg.userMessage) {
+                  const toastId = 'ack-' + msg.requestId;
+                  setErrorToasts(prev => {
+                    if (prev.some(t => t.id === toastId)) return prev;
+                    return [...prev, { id: toastId, message: msg.userMessage }].slice(-5);
+                  });
+                  setTimeout(() => setErrorToasts(prev => prev.filter(t => t.id !== toastId)), 8000);
+                }
+                break;
+              case 'auth_recovery':
+                setAuthRecoveries(msg.incidents || []);
+                break;
               case 'server_session':
                 break;
               case 'command_queue':
@@ -1635,7 +1651,7 @@
       }, []);
 
       return {
-        connected, agents, messages, liveOutput, queued, sharedContext, fileChanges, thinkingOutput, agentActivity, liveTurnState, settings, workspaces, activeWorkspaceId, providerCatalog, statusStartTimes, tokenUsage, usageReport, limits, terminals, terminalOutput, errorToasts, qaUnread, qaLiveShots,
+        connected, agents, messages, liveOutput, queued, sharedContext, fileChanges, thinkingOutput, agentActivity, liveTurnState, settings, workspaces, activeWorkspaceId, providerCatalog, statusStartTimes, tokenUsage, usageReport, limits, terminals, terminalOutput, errorToasts, qaUnread, qaLiveShots, authRecoveries,
         refreshLimits: () => sendRaw({ type: 'refresh_limits' }),
         createAgent: (name, cwd, referencePaths, systemPrompt, workspaceId) => {
           sendRaw({ type: 'create_agent', name, cwd, referencePaths, systemPrompt, workspaceId });
@@ -1648,6 +1664,8 @@
         resumeAtlas: (workspaceId) => sendRaw({ type: 'resume_atlas', workspaceId }),
         discardAtlasCandidate: (workspaceId) => sendRaw({ type: 'discard_atlas_candidate', workspaceId }),
         clearQaUnread: (sourceAgentId) => setQaUnread(prev => { if (!prev[sourceAgentId]) return prev; const { [sourceAgentId]: _, ...rest } = prev; return rest; }),
+        checkAuth: (agentId) => sendRaw({ type: 'check_auth', agentId }),
+        retryAuthPrompt: (agentId, incidentId, confirmSideEffects) => sendRaw({ type: 'retry_auth_prompt', agentId, incidentId, confirmSideEffects: !!confirmSideEffects }),
         sendMessage: (agentId, content) => {
           const socketOpen = wsRef.current?.readyState === WebSocket.OPEN;
           // A connected socket hands the prompt to the process-local server
@@ -2300,8 +2318,9 @@
       return Math.floor(seconds / 86400) + 'd ago';
     }
 
-    const ChatTurn = React.memo(function ChatTurn({ role, content, timestamp, isStreaming, imageData, imageMimeType, imageAttachments, showToolMessages, searchQuery, showRetry, retryDisabled, onRetry, onOutcomeRetry, outcomeRetryDisabled, source, provider, model, agentId }) {
+    const ChatTurn = React.memo(function ChatTurn({ role, content, timestamp, isStreaming, imageData, imageMimeType, imageAttachments, showToolMessages, searchQuery, showRetry, retryDisabled, onRetry, onOutcomeRetry, outcomeRetryDisabled, source, provider, model, agentId, authRecovery, onCheckAuth, onRetryPreserved, recoveryDisabled }) {
       const [copied, setCopied] = useState(false);
+      const [confirmSideEffect, setConfirmSideEffect] = useState(false);
       const isQa = source === 'qa';
       // Per-message provider stamp (newer messages); fall back to 'Claude' for
       // legacy messages that pre-date the per-provider stamping. Look up the
@@ -2417,14 +2436,41 @@
           title: retryDisabled
             ? 'Wait for the current turn to finish before retrying this message'
             : 'Resend this message as a new turn at the end of the conversation',
-        }, '\u21BB Retry')
+        }, '\u21BB Retry'),
+        authRecovery && e('div', { className: 'auth-recovery-card' },
+          e('div', { className: 'auth-recovery-title' }, authRecovery.provider === 'codex' ? 'Codex reauthentication required' : 'Claude reauthentication required'),
+          e('div', { className: 'auth-recovery-copy' }, authRecovery.userMessage),
+          authRecovery.sideEffectRisk && e('div', { className: 'auth-recovery-copy' }, 'This turn may already have done work. Automatic retry was withheld.'),
+          e('div', { className: 'turn-outcome-actions' },
+            e('button', {
+              className: 'turn-outcome-action',
+              onClick: onCheckAuth,
+              disabled: recoveryDisabled,
+              title: 'Recheck this provider without starting a turn',
+            }, 'Check again'),
+            e('button', {
+              className: 'turn-outcome-action',
+              onClick: () => {
+                if (authRecovery.sideEffectRisk && !confirmSideEffect) {
+                  setConfirmSideEffect(true);
+                  return;
+                }
+                onRetryPreserved && onRetryPreserved(confirmSideEffect || !authRecovery.sideEffectRisk);
+              },
+              disabled: recoveryDisabled,
+              title: authRecovery.sideEffectRisk
+                ? 'Retry this preserved prompt only if you accept a possible duplicate action'
+                : 'Retry this preserved prompt',
+            }, authRecovery.sideEffectRisk && !confirmSideEffect ? 'Review & retry' : 'Retry preserved prompt')
+          )
+        )
       );
     }, (prev, next) => {
-      return prev.content === next.content && prev.role === next.role && prev.timestamp === next.timestamp && prev.isStreaming === next.isStreaming && prev.searchQuery === next.searchQuery && prev.showToolMessages === next.showToolMessages && prev.showRetry === next.showRetry && prev.retryDisabled === next.retryDisabled && prev.outcomeRetryDisabled === next.outcomeRetryDisabled && prev.imageData === next.imageData && prev.imageAttachments === next.imageAttachments && prev.source === next.source && prev.provider === next.provider && prev.model === next.model;
+      return prev.content === next.content && prev.role === next.role && prev.timestamp === next.timestamp && prev.isStreaming === next.isStreaming && prev.searchQuery === next.searchQuery && prev.showToolMessages === next.showToolMessages && prev.showRetry === next.showRetry && prev.retryDisabled === next.retryDisabled && prev.outcomeRetryDisabled === next.outcomeRetryDisabled && prev.imageData === next.imageData && prev.imageAttachments === next.imageAttachments && prev.source === next.source && prev.provider === next.provider && prev.model === next.model && prev.authRecovery === next.authRecovery && prev.recoveryDisabled === next.recoveryDisabled;
     });
 
     // Terminal Panel
-    function TerminalPanel({ agent, messages, liveOutput, queuedMessages, fileChanges, thinkingOutput, agentActivity, liveTurnState, statusStartTime, tokenUsage, terminals, terminalOutput, workspace, qaRuns, qaHasUnread, qaLiveShots, onQaSend, onQaAbort, onQaHandoff, onClearQaUnread, onSendMessage, onSendImages, onStop, onClearHistory, onClearFileChanges, onMinimize, onMaximize, isMaximized, onFocus, isFocused, onCreateTerminal, onKillTerminal, onUpdateAgent, onResolveModelMismatch, isLocked, onToggleLock, isDragging, isDragOver, onDragStart, onDragEnd, onDragOver, onDragLeave, onDrop }) {
+    function TerminalPanel({ agent, messages, liveOutput, queuedMessages, fileChanges, thinkingOutput, agentActivity, liveTurnState, statusStartTime, tokenUsage, terminals, terminalOutput, workspace, qaRuns, qaHasUnread, qaLiveShots, onQaSend, onQaAbort, onQaHandoff, onClearQaUnread, onSendMessage, onSendImages, onStop, onClearHistory, onClearFileChanges, onMinimize, onMaximize, isMaximized, onFocus, isFocused, onCreateTerminal, onKillTerminal, onUpdateAgent, onResolveModelMismatch, isLocked, onToggleLock, isDragging, isDragOver, onDragStart, onDragEnd, onDragOver, onDragLeave, onDrop, authRecoveries, onCheckAuth, onRetryAuthPrompt }) {
       const [input, setInput] = useState('');
       const [inputHistory, setInputHistory] = useState([]);
       const [historyIdx, setHistoryIdx] = useState(-1);
@@ -3157,6 +3203,13 @@
                         searchQuery: searchVisible ? searchQuery : '',
                         showRetry: m.role === 'user',
                         retryDisabled: isWorking || !!agent.modelMismatch,
+                        authRecovery: m.role === 'user' ? (authRecoveries || []).find(item => item.messageId === m.id && !item.resolvedAt) : null,
+                        onCheckAuth: () => onCheckAuth && onCheckAuth(agent.id),
+                        onRetryPreserved: (confirmSideEffects) => {
+                          const incident = (authRecoveries || []).find(item => item.messageId === m.id && !item.resolvedAt);
+                          if (incident && onRetryAuthPrompt) onRetryAuthPrompt(agent.id, incident.incidentId, confirmSideEffects);
+                        },
+                        recoveryDisabled: isWorking || !!agent.modelMismatch,
                         onRetry: m.role === 'user' ? () => retryMessage(m) : undefined,
                         onOutcomeRetry: realIdx === latestOutcomeMessageIndex && latestOutcomeMessageIndex > lastUserMessageIndex && lastUserMessage
                           ? () => retryMessage(lastUserMessage)
@@ -6222,6 +6275,9 @@
                   onClearQaUnread: ws.clearQaUnread,
                   onSendMessage: (content) => ws.sendMessage(agent.id, content),
                   onSendImages: ws.sendImages,
+                  authRecoveries: (ws.authRecoveries || []).filter(item => item.agentId === agent.id),
+                  onCheckAuth: ws.checkAuth,
+                  onRetryAuthPrompt: ws.retryAuthPrompt,
                   onStop: ws.stopAgent,
                   onClearHistory: ws.clearHistory,
                   onClearFileChanges: ws.clearFileChanges,
@@ -6275,6 +6331,9 @@
                   onClearQaUnread: ws.clearQaUnread,
                   onSendMessage: (content) => ws.sendMessage(agent.id, content),
                   onSendImages: ws.sendImages,
+                  authRecoveries: (ws.authRecoveries || []).filter(item => item.agentId === agent.id),
+                  onCheckAuth: ws.checkAuth,
+                  onRetryAuthPrompt: ws.retryAuthPrompt,
                   onStop: ws.stopAgent,
                   onClearHistory: ws.clearHistory,
                   onClearFileChanges: ws.clearFileChanges,

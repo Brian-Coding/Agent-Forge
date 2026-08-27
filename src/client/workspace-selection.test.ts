@@ -37,6 +37,16 @@ test('token usage exports follow the selected machine scope', () => {
   expect(clientSource).toContain('Download the selected machine scope as JSON');
 });
 
+test('auth recovery actions stay on the preserved prompt and stay provider-specific', () => {
+  expect(clientSource).toContain("'Check again'");
+  expect(clientSource).toContain("'Retry preserved prompt'");
+  expect(clientSource).toContain('Codex reauthentication required');
+  expect(clientSource).toContain('Claude reauthentication required');
+  expect(clientSource).toContain("type: 'check_auth'");
+  expect(clientSource).toContain("type: 'retry_auth_prompt'");
+  expect(clientSource).toContain('item.messageId === m.id');
+});
+
 test('every user message keeps a retry action bound to its own text or image attachments', () => {
   expect(clientSource).toContain("showRetry: m.role === 'user'");
   expect(clientSource).toContain('retryDisabled: isWorking || !!agent.modelMismatch');

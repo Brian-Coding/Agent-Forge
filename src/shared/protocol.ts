@@ -1,6 +1,13 @@
-import type { RuntimeDriftState, RuntimeHealth } from './runtime-health';
+import type {
+  ProviderAuthReasonCode,
+  ProviderAuthRecoveryAction,
+  ProviderAuthState,
+  RuntimeDriftState,
+  RuntimeHealth,
+} from './runtime-health';
 
 export type { RuntimeDriftState, RuntimeHealth } from './runtime-health';
+export type { ProviderAuthReasonCode, ProviderAuthRecoveryAction, ProviderAuthState } from './runtime-health';
 
 // WebSocket message types for client-server communication
 
@@ -609,7 +616,9 @@ export type ClientMessage =
   // App-level heartbeat — browsers can't send protocol-level pings, so the
   // client uses this to detect half-open sockets (e.g. after sleep/resume).
   | { type: 'ping' }
-  | { type: 'get_command_queue' };
+  | { type: 'get_command_queue' }
+  | { type: 'check_auth'; agentId: string }
+  | { type: 'retry_auth_prompt'; agentId: string; incidentId: string; confirmSideEffects?: boolean };
 
 // Server -> Client messages
 export type ServerMessage =
@@ -693,7 +702,29 @@ export type ServerMessage =
         preview: string;
         acceptedSequence: number;
       }>;
+    }
+  | {
+      type: 'auth_recovery';
+      serverSessionId: string;
+      incidents: AuthRecoveryIncident[];
     };
+
+export interface AuthRecoveryIncident {
+  incidentId: string;
+  agentId: string;
+  provider: AgentProvider;
+  messageId: string;
+  reasonCode: ProviderAuthReasonCode;
+  state: ProviderAuthState;
+  recoveryAction: ProviderAuthRecoveryAction;
+  userMessage: string;
+  retrySafe: boolean;
+  sideEffectRisk: boolean;
+  automaticRetryUsed: boolean;
+  createdAt: number;
+  lastCheckedAt?: number;
+  resolvedAt?: number;
+}
 
 // Persistence types
 export interface PersistedData {

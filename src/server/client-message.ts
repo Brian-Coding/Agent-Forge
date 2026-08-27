@@ -170,6 +170,18 @@ export function validateClientMessage(value: unknown): ClientMessage {
       noFields(message);
       break;
 
+    case 'check_auth':
+      exactKeys(message, ['type', 'agentId'], ['type', 'agentId']);
+      id(message.agentId, 'agentId');
+      break;
+
+    case 'retry_auth_prompt':
+      exactKeys(message, ['type', 'agentId', 'incidentId', 'confirmSideEffects'], ['type', 'agentId', 'incidentId']);
+      id(message.agentId, 'agentId');
+      id(message.incidentId, 'incidentId');
+      if (message.confirmSideEffects !== undefined) boolean(message.confirmSideEffects, 'confirmSideEffects');
+      break;
+
     case 'create_agent':
       exactKeys(message, ['type', 'name', 'cwd', 'referencePaths', 'systemPrompt', 'workspaceId'], ['type', 'name', 'cwd']);
       string(message.name, 'name', MAX_NAME_CHARS, true);

@@ -14,4 +14,6 @@ Use this after a controlled Agent Forge restart. It does not start, stop, or rep
 
 `auth` on `/api/health` is the same coordinator snapshot used to gate Claude turns. Codex stays `not-probed` and is not blocked by Claude state. Inconclusive Claude results still allow one bounded bootstrap; only definitive failures block.
 
+Auth recovery cards (`Check again`, `Retry preserved prompt`) are server-session state. A browser reload on the same server keeps them; a server restart does not. The accepted user prompt remains in chat history either way.
+
 The health payload must stay redacted: no API keys, OAuth tokens, credential-file contents, or prompt text.

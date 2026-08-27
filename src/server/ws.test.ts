@@ -39,6 +39,7 @@ test('websocket open publishes a coherent snapshot and close releases all client
   expect(messageTypes).toContain('workspaces_list');
   expect(messageTypes).toContain('terminals_list');
   expect(messageTypes).toContain('usage_report');
+  expect(messageTypes).toContain('auth_recovery');
   expect(clients.has(ws as any)).toBe(true);
   expect(clientLastPong.get(ws as any)).toBeNumber();
 
