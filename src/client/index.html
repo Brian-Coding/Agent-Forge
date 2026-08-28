@@ -159,6 +159,9 @@
     .turn-outcome-action { border: 1px solid var(--border); border-radius: 4px; background: var(--bg-tertiary); color: var(--text-primary); padding: 5px 10px; cursor: pointer; font-size: 12px; }
     .turn-outcome-action:hover:not(:disabled) { border-color: var(--accent); background: rgba(47, 129, 247, 0.1); }
     .turn-outcome-action:disabled { opacity: 0.45; cursor: not-allowed; }
+    .auth-recovery-card { margin-top: 8px; padding: 8px 10px; border: 1px solid rgba(210, 153, 34, 0.45); border-radius: 6px; background: rgba(210, 153, 34, 0.08); }
+    .auth-recovery-title { font-size: 12px; font-weight: 700; color: var(--warning); }
+    .auth-recovery-copy { margin-top: 4px; font-size: 12px; line-height: 1.45; color: var(--text-secondary); }
     .inline-turn-marker { width: fit-content; margin-top: 8px; padding: 3px 8px; border: 1px solid var(--border); border-radius: 999px; background: var(--bg-tertiary); color: var(--text-secondary); font: 11px/1.4 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
     .chat-turn-streaming { background: var(--bg-primary); }
     .chat-turn-streaming .chat-turn-role { color: var(--success); }
@@ -261,6 +264,11 @@
 
     /* Connection status */
     .connection-error { padding: 8px 16px; background: var(--error); color: white; text-align: center; font-size: 12px; flex-shrink: 0; }
+    .runtime-banner { padding: 8px 16px; background: var(--warning); color: #0d1117; text-align: center; font-size: 12px; flex-shrink: 0; font-weight: 600; }
+    .runtime-pill { font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); color: var(--text-secondary); white-space: nowrap; }
+    .runtime-pill.runtime-current { color: var(--success); border-color: rgba(63, 185, 80, 0.4); }
+    .runtime-pill.runtime-restart-required { color: var(--warning); border-color: var(--warning); font-weight: 600; }
+    .runtime-pill.runtime-unknown { color: var(--text-muted); }
 
     /* Model-mismatch blocking banner */
     .model-mismatch-banner { background: rgba(220, 60, 60, 0.12); border: 1px solid var(--error); border-radius: 6px; margin: 6px 8px 0 8px; padding: 8px 10px; font-size: 12px; }
@@ -1192,6 +1200,7 @@
       const [terminals, setTerminals] = useState([]);
       const [terminalOutput, setTerminalOutput] = useState({});
       const [errorToasts, setErrorToasts] = useState([]);
+      const [authRecoveries, setAuthRecoveries] = useState([]);
       const [qaUnread, setQaUnread] = useState({}); // sourceAgentId -> true when QA results arrived for that agent
       const [qaLiveShots, setQaLiveShots] = useState({}); // workspaceId -> [{path, timestamp}]
       const wsRef = useRef(null);
@@ -1225,9 +1234,27 @@
           || workspacesRef.current.some(workspace => workspace.qaAgentId === agentId);
       };
 
+      const clientSessionIdRef = useRef((() => {
+        try {
+          const existing = sessionStorage.getItem('af-client-session');
+          if (existing) return existing;
+          const created = (crypto.randomUUID && crypto.randomUUID()) || String(Date.now());
+          sessionStorage.setItem('af-client-session', created);
+          return created;
+        } catch {
+          return String(Date.now());
+        }
+      })());
+
       const sendRaw = useCallback((msg) => {
         if (wsRef.current?.readyState === WebSocket.OPEN) {
-          wsRef.current.send(JSON.stringify(msg));
+          wsRef.current.send(JSON.stringify({
+            protocolVersion: 1,
+            requestId: msg.requestId || (crypto.randomUUID && crypto.randomUUID()) || String(Date.now()) + Math.random(),
+            clientSessionId: clientSessionIdRef.current,
+            sentAt: Date.now(),
+            ...msg,
+          }));
         }
       }, []);
 
@@ -1301,6 +1328,26 @@
             lastServerActivity = Date.now();
             switch (msg.type) {
               case 'pong':
+              case 'command_ack':
+                if (msg.status === 'rejected' && msg.userMessage) {
+                  const toastId = 'ack-' + msg.requestId;
+                  setErrorToasts(prev => {
+                    if (prev.some(t => t.id === toastId)) return prev;
+                    return [...prev, { id: toastId, message: msg.userMessage }].slice(-5);
+                  });
+                  setTimeout(() => setErrorToasts(prev => prev.filter(t => t.id !== toastId)), 8000);
+                }
+                break;
+              case 'auth_recovery':
+                setAuthRecoveries(msg.incidents || []);
+                break;
+              case 'server_session':
+                break;
+              case 'command_queue':
+                setQueued(prev => ({
+                  ...prev,
+                  [msg.agentId]: (msg.items || []).filter(item => item.status === 'queued').map(item => item.preview),
+                }));
                 break;
               case 'agents_list':
                 setAgents(msg.agents);
@@ -1604,7 +1651,7 @@
       }, []);
 
       return {
-        connected, agents, messages, liveOutput, queued, sharedContext, fileChanges, thinkingOutput, agentActivity, liveTurnState, settings, workspaces, activeWorkspaceId, providerCatalog, statusStartTimes, tokenUsage, usageReport, limits, terminals, terminalOutput, errorToasts, qaUnread, qaLiveShots,
+        connected, agents, messages, liveOutput, queued, sharedContext, fileChanges, thinkingOutput, agentActivity, liveTurnState, settings, workspaces, activeWorkspaceId, providerCatalog, statusStartTimes, tokenUsage, usageReport, limits, terminals, terminalOutput, errorToasts, qaUnread, qaLiveShots, authRecoveries,
         refreshLimits: () => sendRaw({ type: 'refresh_limits' }),
         createAgent: (name, cwd, referencePaths, systemPrompt, workspaceId) => {
           sendRaw({ type: 'create_agent', name, cwd, referencePaths, systemPrompt, workspaceId });
@@ -1617,14 +1664,13 @@
         resumeAtlas: (workspaceId) => sendRaw({ type: 'resume_atlas', workspaceId }),
         discardAtlasCandidate: (workspaceId) => sendRaw({ type: 'discard_atlas_candidate', workspaceId }),
         clearQaUnread: (sourceAgentId) => setQaUnread(prev => { if (!prev[sourceAgentId]) return prev; const { [sourceAgentId]: _, ...rest } = prev; return rest; }),
+        checkAuth: (agentId) => sendRaw({ type: 'check_auth', agentId }),
+        retryAuthPrompt: (agentId, incidentId, confirmSideEffects) => sendRaw({ type: 'retry_auth_prompt', agentId, incidentId, confirmSideEffects: !!confirmSideEffects }),
         sendMessage: (agentId, content) => {
-          const agent = agentsRef.current.find(a => a.id === agentId);
           const socketOpen = wsRef.current?.readyState === WebSocket.OPEN;
-          // Queue when the agent is busy OR the socket is down — sendRaw
-          // silently drops frames on a closed socket, which used to destroy
-          // messages typed while disconnected. Queued messages drain on
-          // reconnect (agents_list) / when the agent goes idle.
-          if (!socketOpen || (agent && (agent.status === 'working' || agent.status === 'thinking'))) {
+          // A connected socket hands the prompt to the process-local server
+          // queue. Local queue is only for messages typed while disconnected.
+          if (!socketOpen) {
             setQueued(prev => ({ ...prev, [agentId]: [...(prev[agentId] || []), content] }));
           } else {
             sendRaw({ type: 'send_message', agentId, content });
@@ -2272,8 +2318,9 @@
       return Math.floor(seconds / 86400) + 'd ago';
     }
 
-    const ChatTurn = React.memo(function ChatTurn({ role, content, timestamp, isStreaming, imageData, imageMimeType, imageAttachments, showToolMessages, searchQuery, showRetry, retryDisabled, onRetry, onOutcomeRetry, outcomeRetryDisabled, source, provider, model, agentId }) {
+    const ChatTurn = React.memo(function ChatTurn({ role, content, timestamp, isStreaming, imageData, imageMimeType, imageAttachments, showToolMessages, searchQuery, showRetry, retryDisabled, onRetry, onOutcomeRetry, outcomeRetryDisabled, source, provider, model, agentId, authRecovery, onCheckAuth, onRetryPreserved, recoveryDisabled }) {
       const [copied, setCopied] = useState(false);
+      const [confirmSideEffect, setConfirmSideEffect] = useState(false);
       const isQa = source === 'qa';
       // Per-message provider stamp (newer messages); fall back to 'Claude' for
       // legacy messages that pre-date the per-provider stamping. Look up the
@@ -2389,14 +2436,41 @@
           title: retryDisabled
             ? 'Wait for the current turn to finish before retrying this message'
             : 'Resend this message as a new turn at the end of the conversation',
-        }, '\u21BB Retry')
+        }, '\u21BB Retry'),
+        authRecovery && e('div', { className: 'auth-recovery-card' },
+          e('div', { className: 'auth-recovery-title' }, authRecovery.provider === 'codex' ? 'Codex reauthentication required' : 'Claude reauthentication required'),
+          e('div', { className: 'auth-recovery-copy' }, authRecovery.userMessage),
+          authRecovery.sideEffectRisk && e('div', { className: 'auth-recovery-copy' }, 'This turn may already have done work. Automatic retry was withheld.'),
+          e('div', { className: 'turn-outcome-actions' },
+            e('button', {
+              className: 'turn-outcome-action',
+              onClick: onCheckAuth,
+              disabled: recoveryDisabled,
+              title: 'Recheck this provider without starting a turn',
+            }, 'Check again'),
+            e('button', {
+              className: 'turn-outcome-action',
+              onClick: () => {
+                if (authRecovery.sideEffectRisk && !confirmSideEffect) {
+                  setConfirmSideEffect(true);
+                  return;
+                }
+                onRetryPreserved && onRetryPreserved(confirmSideEffect || !authRecovery.sideEffectRisk);
+              },
+              disabled: recoveryDisabled,
+              title: authRecovery.sideEffectRisk
+                ? 'Retry this preserved prompt only if you accept a possible duplicate action'
+                : 'Retry this preserved prompt',
+            }, authRecovery.sideEffectRisk && !confirmSideEffect ? 'Review & retry' : 'Retry preserved prompt')
+          )
+        )
       );
     }, (prev, next) => {
-      return prev.content === next.content && prev.role === next.role && prev.timestamp === next.timestamp && prev.isStreaming === next.isStreaming && prev.searchQuery === next.searchQuery && prev.showToolMessages === next.showToolMessages && prev.showRetry === next.showRetry && prev.retryDisabled === next.retryDisabled && prev.outcomeRetryDisabled === next.outcomeRetryDisabled && prev.imageData === next.imageData && prev.imageAttachments === next.imageAttachments && prev.source === next.source && prev.provider === next.provider && prev.model === next.model;
+      return prev.content === next.content && prev.role === next.role && prev.timestamp === next.timestamp && prev.isStreaming === next.isStreaming && prev.searchQuery === next.searchQuery && prev.showToolMessages === next.showToolMessages && prev.showRetry === next.showRetry && prev.retryDisabled === next.retryDisabled && prev.outcomeRetryDisabled === next.outcomeRetryDisabled && prev.imageData === next.imageData && prev.imageAttachments === next.imageAttachments && prev.source === next.source && prev.provider === next.provider && prev.model === next.model && prev.authRecovery === next.authRecovery && prev.recoveryDisabled === next.recoveryDisabled;
     });
 
     // Terminal Panel
-    function TerminalPanel({ agent, messages, liveOutput, queuedMessages, fileChanges, thinkingOutput, agentActivity, liveTurnState, statusStartTime, tokenUsage, terminals, terminalOutput, workspace, qaRuns, qaHasUnread, qaLiveShots, onQaSend, onQaAbort, onQaHandoff, onClearQaUnread, onSendMessage, onSendImages, onStop, onClearHistory, onClearFileChanges, onMinimize, onMaximize, isMaximized, onFocus, isFocused, onCreateTerminal, onKillTerminal, onUpdateAgent, onResolveModelMismatch, isLocked, onToggleLock, isDragging, isDragOver, onDragStart, onDragEnd, onDragOver, onDragLeave, onDrop }) {
+    function TerminalPanel({ agent, messages, liveOutput, queuedMessages, fileChanges, thinkingOutput, agentActivity, liveTurnState, statusStartTime, tokenUsage, terminals, terminalOutput, workspace, qaRuns, qaHasUnread, qaLiveShots, onQaSend, onQaAbort, onQaHandoff, onClearQaUnread, onSendMessage, onSendImages, onStop, onClearHistory, onClearFileChanges, onMinimize, onMaximize, isMaximized, onFocus, isFocused, onCreateTerminal, onKillTerminal, onUpdateAgent, onResolveModelMismatch, isLocked, onToggleLock, isDragging, isDragOver, onDragStart, onDragEnd, onDragOver, onDragLeave, onDrop, authRecoveries, onCheckAuth, onRetryAuthPrompt }) {
       const [input, setInput] = useState('');
       const [inputHistory, setInputHistory] = useState([]);
       const [historyIdx, setHistoryIdx] = useState(-1);
@@ -3129,6 +3203,13 @@
                         searchQuery: searchVisible ? searchQuery : '',
                         showRetry: m.role === 'user',
                         retryDisabled: isWorking || !!agent.modelMismatch,
+                        authRecovery: m.role === 'user' ? (authRecoveries || []).find(item => item.messageId === m.id && !item.resolvedAt) : null,
+                        onCheckAuth: () => onCheckAuth && onCheckAuth(agent.id),
+                        onRetryPreserved: (confirmSideEffects) => {
+                          const incident = (authRecoveries || []).find(item => item.messageId === m.id && !item.resolvedAt);
+                          if (incident && onRetryAuthPrompt) onRetryAuthPrompt(agent.id, incident.incidentId, confirmSideEffects);
+                        },
+                        recoveryDisabled: isWorking || !!agent.modelMismatch,
                         onRetry: m.role === 'user' ? () => retryMessage(m) : undefined,
                         onOutcomeRetry: realIdx === latestOutcomeMessageIndex && latestOutcomeMessageIndex > lastUserMessageIndex && lastUserMessage
                           ? () => retryMessage(lastUserMessage)
@@ -5725,9 +5806,45 @@
       return String(n);
     }
 
+    function RuntimeTruthPill({ health }) {
+      if (!health || !health.runtime) return null;
+      const drift = health.runtime.drift || 'unknown';
+      const label = drift === 'restart-required' ? 'Restart required'
+        : drift === 'current' ? 'Runtime current'
+        : 'Runtime unknown';
+      const providers = (health.runtime.providers || []).map(provider => (
+        provider.cliName + (provider.cliVersion ? ' ' + provider.cliVersion : provider.available ? '' : ' missing')
+      )).join(' · ');
+      const auth = (health.auth || []).map(snapshot => (
+        snapshot.provider + ' ' + snapshot.state + ' (' + snapshot.reasonCode + ')'
+      )).join(' · ');
+      const title = [
+        'session ' + health.runtime.serverSessionId,
+        health.runtime.bunVersion ? 'bun ' + health.runtime.bunVersion : null,
+        health.runtime.source && health.runtime.source.commit ? 'commit ' + String(health.runtime.source.commit).slice(0, 12) : null,
+        providers || null,
+        auth || null,
+      ].filter(Boolean).join('\n');
+      return e('span', { className: 'runtime-pill runtime-' + drift, title }, label);
+    }
+
     function App() {
       const ws = useWebSocket();
       const { connected, agents, messages, liveOutput, queued, sharedContext, fileChanges, thinkingOutput, agentActivity, liveTurnState, settings, workspaces, activeWorkspaceId, statusStartTimes, tokenUsage, usageReport, terminals, terminalOutput, errorToasts } = ws;
+      const [runtimeHealth, setRuntimeHealth] = useState(null);
+      useEffect(() => {
+        if (!connected) return;
+        let cancelled = false;
+        const load = () => {
+          fetch('/api/health')
+            .then(response => response.ok ? response.json() : null)
+            .then(data => { if (!cancelled && data) setRuntimeHealth(data); })
+            .catch(() => {});
+        };
+        load();
+        const timer = setInterval(load, 30000);
+        return () => { cancelled = true; clearInterval(timer); };
+      }, [connected]);
       const [showModal, setShowModal] = useState(false);
       const [showSharedContext, setShowSharedContext] = useState(false);
       const [sidebarTab, setSidebarTab] = useState('agents');
@@ -6101,6 +6218,10 @@
         // Main content
         e('div', { className: 'main-content' },
           !connected && e('div', { className: 'connection-error' }, 'Disconnected. Reconnecting...'),
+          connected && runtimeHealth && runtimeHealth.runtime && runtimeHealth.runtime.drift === 'restart-required' && e('div', {
+            className: 'runtime-banner',
+            role: 'status',
+          }, 'Restart required — this window is talking to an older Agent Forge process than the files on disk.'),
 
           // Minimized panels bar (Feature 2)
           !maximizedAgent && minimizedDisplayAgents.length > 0 && e('div', { className: 'minimized-panels-bar' },
@@ -6154,6 +6275,9 @@
                   onClearQaUnread: ws.clearQaUnread,
                   onSendMessage: (content) => ws.sendMessage(agent.id, content),
                   onSendImages: ws.sendImages,
+                  authRecoveries: (ws.authRecoveries || []).filter(item => item.agentId === agent.id),
+                  onCheckAuth: ws.checkAuth,
+                  onRetryAuthPrompt: ws.retryAuthPrompt,
                   onStop: ws.stopAgent,
                   onClearHistory: ws.clearHistory,
                   onClearFileChanges: ws.clearFileChanges,
@@ -6207,6 +6331,9 @@
                   onClearQaUnread: ws.clearQaUnread,
                   onSendMessage: (content) => ws.sendMessage(agent.id, content),
                   onSendImages: ws.sendImages,
+                  authRecoveries: (ws.authRecoveries || []).filter(item => item.agentId === agent.id),
+                  onCheckAuth: ws.checkAuth,
+                  onRetryAuthPrompt: ws.retryAuthPrompt,
                   onStop: ws.stopAgent,
                   onClearHistory: ws.clearHistory,
                   onClearFileChanges: ws.clearFileChanges,
@@ -6237,6 +6364,7 @@
           // Token usage now lives in the dedicated Tokens sidebar tab.
           e('div', { className: 'bottom-bar' },
             e('div', { className: 'bottom-bar-left' },
+              e(RuntimeTruthPill, { health: runtimeHealth }),
               activeWorkspace && e('span', { style: { fontWeight: 600, fontSize: 12, color: 'var(--text-primary)', marginRight: 8 } },
                 e('span', { style: { color: 'var(--text-muted)', fontWeight: 500 } }, 'Workspace: '),
                 activeWorkspace.name

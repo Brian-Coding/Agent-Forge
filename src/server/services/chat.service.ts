@@ -21,6 +21,9 @@ import {
   type InactivityWatchdog,
   type TurnAbortReason,
 } from './chat-turn-lifecycle';
+import { authRecoveryStore } from '../auth/auth-recovery';
+import { shouldAutomaticallyRetryExpiredAuth } from '../auth/auth-retry-policy';
+import { currentAuthCoordinator } from '../auth/provider-auth-coordinator';
 
 // --- HMR-safe state ---------------------------------------------------------
 
@@ -54,6 +57,8 @@ interface TurnBuffer {
   modelRan?: string;
   /** Automatic stale-session retries are unsafe after any tool/checkpoint. */
   retrySafe: boolean;
+  userMessageId: string;
+  authBlocked: boolean;
 }
 
 export interface ChatTurnOptions {
@@ -425,7 +430,7 @@ function handleEvent(agentId: string, event: AgentEvent): void {
     }
 
     case 'finish': {
-      // The runChatTurn() finally block handles status reset + buffer flush.
+      if (event.reason === 'auth-error' && activeTurn) activeTurn.authBlocked = true;
       return;
     }
 
@@ -564,6 +569,8 @@ async function runChatTurn(agentId: string, content: string, source?: 'qa', opti
     resolvedModel: requestedResolvedModel,
     turnUsage: { inputTokens: 0, outputTokens: 0, costUsd: 0, turns: 0 },
     retrySafe: true,
+    userMessageId: userMsg.id,
+    authBlocked: false,
   };
   turnBuffers.set(agentId, turn);
   broadcastLiveTurnState(agentId, true);
@@ -723,7 +730,7 @@ async function runChatTurn(agentId: string, content: string, source?: 'qa', opti
       // the token in place, so one immediate re-spawn normally succeeds. Unlike
       // a stale session the conversation is intact — keep the session id and the
       // prompt, and only reset the buffers holding the failed attempt's output.
-      if (result?.recoverableError === 'expired-auth' && !didExpiredAuthRetry && turn.retrySafe) {
+      if (result?.recoverableError === 'expired-auth' && shouldAutomaticallyRetryExpiredAuth(didExpiredAuthRetry, turn.retrySafe)) {
         didExpiredAuthRetry = true;
         console.warn(`[chat] expired ${provider} OAuth token for ${agentId}; retrying once with the refreshed token`);
         turn.accumulatedText = '';
@@ -736,13 +743,17 @@ async function runChatTurn(agentId: string, content: string, source?: 'qa', opti
       }
       if (result?.recoverableError === 'expired-auth') {
         const authError = result.errorMessage || 'OAuth access token has expired';
-        const authMessage = [
-          `${provider === 'codex' ? 'Codex' : 'Claude'} login expired mid-turn (${authError}).`,
-          didExpiredAuthRetry
-            ? 'Agent Forge retried once and it failed again.'
-            : 'This turn had already done work, so it was not retried automatically.',
-          'Run any Claude turn (or `claude auth status`) to refresh the token, then resend.',
-        ].join(' ');
+        const incident = authRecoveryStore.record({
+          agentId,
+          provider,
+          messageId: turn.userMessageId,
+          reasonCode: 'access-token-expired',
+          state: 'reauthentication-required',
+          retrySafe: turn.retrySafe,
+          sideEffectRisk: !turn.retrySafe,
+          automaticRetryUsed: didExpiredAuthRetry,
+        });
+        const authMessage = incident?.userMessage || authError;
         const sysMsg = agentService.addSystemMessage(agentId, authMessage);
         turn.lastErrorMessage = authError;
         turn.persistedSystemMessages.add(authMessage);
@@ -783,6 +794,23 @@ async function runChatTurn(agentId: string, content: string, source?: 'qa', opti
       errorMessage: turnState.lastErrorMessage,
       persistedSystemMessages: [...turnState.persistedSystemMessages],
     });
+
+    if (outcomeStatus === 'completed') {
+      authRecoveryStore.resolveAgent(agentId);
+    } else if (turnState.authBlocked) {
+      const snapshot = currentAuthCoordinator().getSnapshot(provider);
+      authRecoveryStore.record({
+        agentId,
+        provider,
+        messageId: turnState.userMessageId,
+        reasonCode: snapshot.reasonCode,
+        state: snapshot.state === 'unknown' ? 'reauthentication-required' : snapshot.state,
+        cliVersion: snapshot.cliVersion,
+        retrySafe: true,
+        sideEffectRisk: false,
+        automaticRetryUsed: false,
+      });
+    }
 
     if (finalization.assistantText) {
       persistAssistantResult(agentId, finalization.assistantText, turnState);

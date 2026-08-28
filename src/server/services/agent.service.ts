@@ -1,4 +1,4 @@
-﻿import { watch, existsSync, type FSWatcher } from 'fs';
+﻿import { existsSync } from 'fs';
 import { join } from 'path';
 import type { AgentInfo, AgentProvider, AgentStatus, AgentTurnOutcome, ChatImageAttachment, ChatMessage } from '../../shared/protocol';
 import type { ChatTurnOptions } from './chat.service';
@@ -13,6 +13,7 @@ import { broadcast } from '../broadcast';
 import { normalizeSharedProjectContext } from './prompt-builder.service';
 import { observeProviderModel } from './model-catalog.service';
 import { runDurableMutation } from './durable-mutation';
+import { isRebuildTriggerPath, projectWatcherHub } from './project-watcher.service';
 import {
   buildExhaustiveImagePrompt,
   storeChatImageBytes,
@@ -38,7 +39,6 @@ interface ManagedAgent {
   currentSessionId: string | null;
   currentSessionProvider: AgentProvider | null;
   currentSessionModel: string | null;
-  watcher: FSWatcher | null;
   lastFileChange: string[];
   pendingTimeouts: ReturnType<typeof setTimeout>[];
   contextTokens: number;
@@ -168,72 +168,27 @@ function clearAgentTimeouts(agentId: string): void {
 }
 
 // --- File Watcher ---
+// Agents subscribe to a process-local hub keyed by canonical project root.
+// Physical OS watchers are shared; per-agent file_changed semantics stay the same.
 
 function startFileWatcher(agentId: string) {
   const agent = agents.get(agentId);
   if (!agent || !existsSync(agent.info.cwd)) return;
-
-  if (agent.watcher) {
-    agent.watcher.close();
-    agent.watcher = null;
-  }
-
-  try {
-    const changedFiles = new Set<string>();
-    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
-
-    agent.watcher = watch(agent.info.cwd, { recursive: true }, (eventType, filename) => {
-      if (!filename) return;
-      // Skip noisy/internal paths:
-      //   - node_modules:        huge tree, never user-meaningful changes
-      //   - .git/:               git internals; HEAD reads are direct now
-      //   - dotfiles:            OneDrive metadata, IDE state, swap files
-      //   - data.json / pids.json / agent-forge.lock:
-      //       server-internal files we write on every state mutation. Without
-      //       filtering, each save echoes back as a "file changed" event,
-      //       which on a OneDrive-synced cwd triggers Defender to rescan
-      //       the file, then OneDrive to re-upload, producing a feedback
-      //       loop with sustained 30-70% CPU even at chat-idle.
-      //   - dist / build / .next / .turbo / .cache / out:
-      //       common build output directories, similarly high-churn.
-      if (
-        filename.includes('node_modules')
-        || filename.includes('.git/')
-        || filename.includes('.git\\')
-        || filename.startsWith('.')
-        || filename === 'data.json'
-        || filename === 'pids.json'
-        || filename === 'agent-forge.lock'
-        || filename === 'data.json.tmp'
-        || filename === 'pids.json.tmp'
-        || filename.startsWith('dist/') || filename.startsWith('dist\\')
-        || filename.startsWith('build/') || filename.startsWith('build\\')
-        || filename.startsWith('out/') || filename.startsWith('out\\')
-        || filename.startsWith('.next/') || filename.startsWith('.next\\')
-        || filename.startsWith('.turbo/') || filename.startsWith('.turbo\\')
-        || filename.startsWith('.cache/') || filename.startsWith('.cache\\')
-      ) return;
-
-      changedFiles.add(filename);
-      if (debounceTimer) clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => {
-        const files = Array.from(changedFiles);
-        changedFiles.clear();
-        agent.lastFileChange = files;
-        broadcast({ type: 'file_changed', agentId, files });
-      }, 1000);
-    });
-  } catch (e) {
-    console.error(`File watcher failed for agent ${agentId}:`, e);
-  }
+  projectWatcherHub.subscribeSource(agentId, agent.info.cwd, event => {
+    const live = agents.get(agentId);
+    if (!live) return;
+    live.lastFileChange = event.changedRelativePaths;
+    broadcast({ type: 'file_changed', agentId, files: event.changedRelativePaths });
+    if (event.changedRelativePaths.some(isRebuildTriggerPath) && live.info.workspaceId) {
+      void import('./browser.service').then(({ browserService }) => {
+        void browserService.notifyFileChanged(live.info.workspaceId);
+      });
+    }
+  });
 }
 
 function stopFileWatcher(agentId: string) {
-  const agent = agents.get(agentId);
-  if (agent?.watcher) {
-    agent.watcher.close();
-    agent.watcher = null;
-  }
+  projectWatcherHub.unsubscribeSource(agentId);
 }
 
 
@@ -517,7 +472,6 @@ export const agentService = {
         currentSessionId: null,
         currentSessionProvider: null,
         currentSessionModel: null,
-        watcher: null,
         lastFileChange: [],
         pendingTimeouts: [],
         contextTokens: 0,
@@ -1090,7 +1044,6 @@ export const agentService = {
         currentSessionModel: currentSessionProvider === 'claude' && currentSessionModel && !isRealClaudeModelId(currentSessionModel)
           ? null
           : currentSessionModel,
-        watcher: null,
         lastFileChange: [],
         pendingTimeouts: [],
         contextTokens: agentData.contextTokens || 0,

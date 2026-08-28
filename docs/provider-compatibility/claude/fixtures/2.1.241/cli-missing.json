@@ -1,0 +1,16 @@
+{
+  "id": "cli-missing",
+  "cli": "claude",
+  "qualifiedVersion": "2.1.241",
+  "kind": "auth-status",
+  "missing": true,
+  "stdout": "",
+  "stderr": "",
+  "expected": {
+    "state": "provider-unavailable",
+    "credentialMode": "unknown",
+    "evidence": "none",
+    "reasonCode": "cli-missing",
+    "recoveryAction": "inspect-provider"
+  }
+}

@@ -9,6 +9,20 @@ const MAX_TEXT_CHARS = 1024 * 1024;
 const MAX_COMMAND_CHARS = 128 * 1024;
 const MAX_ID_LIST = 1_024;
 
+export const COMMAND_ENVELOPE_KEYS = ['protocolVersion', 'requestId', 'clientSessionId', 'sentAt'] as const;
+
+export interface ClientCommandMeta {
+  protocolVersion?: number;
+  requestId?: string;
+  clientSessionId?: string;
+  sentAt?: number;
+}
+
+export interface ParsedClientCommand {
+  message: ClientMessage;
+  meta: ClientCommandMeta;
+}
+
 export class ClientMessageValidationError extends Error {
   constructor(message: string) {
     super(message);
@@ -152,7 +166,20 @@ export function validateClientMessage(value: unknown): ClientMessage {
     case 'get_terminals':
     case 'refresh_limits':
     case 'kill_all':
+    case 'get_command_queue':
       noFields(message);
+      break;
+
+    case 'check_auth':
+      exactKeys(message, ['type', 'agentId'], ['type', 'agentId']);
+      id(message.agentId, 'agentId');
+      break;
+
+    case 'retry_auth_prompt':
+      exactKeys(message, ['type', 'agentId', 'incidentId', 'confirmSideEffects'], ['type', 'agentId', 'incidentId']);
+      id(message.agentId, 'agentId');
+      id(message.incidentId, 'incidentId');
+      if (message.confirmSideEffects !== undefined) boolean(message.confirmSideEffects, 'confirmSideEffects');
       break;
 
     case 'create_agent':
@@ -318,11 +345,45 @@ export function validateClientMessage(value: unknown): ClientMessage {
   return message as ClientMessage;
 }
 
+export function stripCommandEnvelope(value: unknown): { payload: unknown; meta: ClientCommandMeta } {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return { payload: value, meta: {} };
+  const record = { ...(value as Record<string, unknown>) };
+  const meta: ClientCommandMeta = {};
+  if (record.protocolVersion !== undefined) {
+    if (!Number.isSafeInteger(record.protocolVersion) || (record.protocolVersion as number) < 1) {
+      fail('protocolVersion must be a positive integer');
+    }
+    meta.protocolVersion = record.protocolVersion as number;
+    delete record.protocolVersion;
+  }
+  if (record.requestId !== undefined) {
+    meta.requestId = string(record.requestId, 'requestId', MAX_ID_CHARS, true);
+    delete record.requestId;
+  }
+  if (record.clientSessionId !== undefined) {
+    meta.clientSessionId = string(record.clientSessionId, 'clientSessionId', MAX_ID_CHARS, true);
+    delete record.clientSessionId;
+  }
+  if (record.sentAt !== undefined) {
+    integer(record.sentAt, 'sentAt', 0, Number.MAX_SAFE_INTEGER);
+    meta.sentAt = record.sentAt as number;
+    delete record.sentAt;
+  }
+  return { payload: record, meta };
+}
+
 /** Decode, size-check, parse, and validate one WebSocket payload. */
 export function parseClientMessage(
   raw: string | Uint8Array,
   maxBytes = MAX_WEBSOCKET_MESSAGE_BYTES,
 ): ClientMessage {
+  return parseClientCommand(raw, maxBytes).message;
+}
+
+export function parseClientCommand(
+  raw: string | Uint8Array,
+  maxBytes = MAX_WEBSOCKET_MESSAGE_BYTES,
+): ParsedClientCommand {
   const byteLength = typeof raw === 'string' ? Buffer.byteLength(raw, 'utf8') : raw.byteLength;
   if (byteLength > maxBytes) fail(`Message exceeds ${maxBytes} bytes`);
   let text: string;
@@ -337,5 +398,6 @@ export function parseClientMessage(
   } catch {
     fail('Message is not valid JSON');
   }
-  return validateClientMessage(decoded);
+  const { payload, meta } = stripCommandEnvelope(decoded);
+  return { message: validateClientMessage(payload), meta };
 }

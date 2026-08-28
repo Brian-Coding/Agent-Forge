@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import type { ClientMessage } from '../shared/protocol';
 import {
   ClientMessageValidationError,
+  parseClientCommand,
   parseClientMessage,
   validateClientMessage,
 } from './client-message';
@@ -42,8 +43,24 @@ const validMessages: ClientMessage[] = [
   { type: 'get_terminals' },
   { type: 'refresh_limits' },
   { type: 'kill_all' },
+  { type: 'get_command_queue' },
+  { type: 'check_auth', agentId: 'a1' },
+  { type: 'retry_auth_prompt', agentId: 'a1', incidentId: 'inc-1', confirmSideEffects: true },
   { type: 'ping' },
 ];
+
+test('command envelope fields are stripped before shape validation', () => {
+  expect(parseClientCommand(JSON.stringify({
+    protocolVersion: 1,
+    requestId: 'req-1',
+    clientSessionId: 'tab-1',
+    sentAt: 10,
+    type: 'ping',
+  }))).toEqual({
+    message: { type: 'ping' },
+    meta: { protocolVersion: 1, requestId: 'req-1', clientSessionId: 'tab-1', sentAt: 10 },
+  });
+});
 
 test('every declared client command has a valid strict wire shape', () => {
   for (const message of validMessages) {

@@ -20,7 +20,9 @@ import {
   type ProcessLockHandle,
 } from './services/process-lock';
 import { collectBoundedProcess } from './services/bounded-subprocess';
-import { killProcessTree, treeKill } from './utils';
+import { killProcessTree } from './utils';
+import { createProcessProbe } from './platform/process-probe';
+import { inspectExistingServerLock, reportOccupiedPorts, waitUntilProcessMissing } from './process-startup';
 import { createShutdownCoordinator } from './services/shutdown-coordinator';
 import { parseServerPort } from './server-config';
 
@@ -40,6 +42,8 @@ import {
 } from './routes/google-docs.routes';
 import { googleDocsService } from './services/google-docs.service';
 import { handleHarnessInstructions } from './routes/harness.routes';
+import { handleRuntimeHealth } from './routes/health.routes';
+import { captureRuntimeStartup } from './services/runtime-truth';
 import { handleAskAtlas } from './routes/atlas.routes';
 import { handleProjectFile } from './routes/project-file.routes';
 import { handleChatImage, handleChatImageUpload } from './routes/chat-image.routes';
@@ -49,118 +53,36 @@ import { handleBrowserNavigate, handleBrowserScreenshot, handleBrowserClick, han
 // --- Process lock --------------------------------------------------------
 // Prevents two agent-forge bun.exe instances from clobbering the same
 // data.json. The lock is cwd-relative so two checkouts in different dirs
-// don't fight. At startup we read it; if it points at a live bun.exe that
-// is NOT one of our ancestors, we kill it before doing anything else. If
-// it IS our ancestor (an agent inside a running server tried to spawn its
-// own `bun run dev`), we refuse to start so we don't terminate our own
-// parent.
+// don't fight. A previous server is asked to exit only after a live probe
+// proves it is still the recorded Bun process. Unproven PIDs are never
+// force-killed.
 
 const LOCK_FILE = './agent-forge.lock';
 let processLockHandle: ProcessLockHandle | null = null;
 
-/**
- * One tasklist call returning a Map<pid, processName>. Replaces the per-PID
- * PowerShell `Get-Process` lookups that used to fire 1-30+ times during
- * startup — each PowerShell cold-start was ~1-2s and they sometimes hung as
- * zombies, producing the visible PowerShell pile that pegged CPU.
- *
- * tasklist is a native Win32 binary (~10ms cold start) and emits CSV.
- */
-async function getProcessNameMap(): Promise<Map<number, string>> {
-  const map = new Map<number, string>();
-  if (process.platform !== 'win32') return map;
-  try {
-    const proc = Bun.spawn(['tasklist', '/FO', 'CSV', '/NH'], { stdout: 'pipe', stderr: 'pipe' });
-    const result = await collectBoundedProcess(proc, {
-      timeoutMs: 3_000,
-      maxChars: 1024 * 1024,
-      label: 'Windows process inventory',
-      terminate: () => killProcessTree(proc),
-    });
-    if (result.timedOut || result.error || result.exitCode !== 0) return map;
-    const out = result.stdout;
-    for (const line of out.split('\n')) {
-      const m = line.match(/^"([^"]+)","(\d+)"/);
-      if (!m) continue;
-      const name = m[1]!.replace(/\.exe$/i, '').toLowerCase();
-      const pid = parseInt(m[2]!, 10);
-      if (!isNaN(pid)) map.set(pid, name);
-    }
-  } catch {}
-  return map;
-}
-
-/**
- * Are we standing inside a process chain that already includes the given
- * PID? Used so a `bun run dev` started by an agent INSIDE agent-forge can't
- * accidentally terminate the parent server when its lock-acquire sees the
- * parent's PID.
- *
- * Old version walked the ancestor chain via repeated `Get-CimInstance
- * Win32_Process` PowerShell calls — up to 32 spawns per check, each one
- * a slow WMI query that visibly hammered WMI Provider Host. New version
- * uses Bun's `process.ppid` for the immediate parent (the only case that
- * actually matters in practice — Claude / Codex inside the running server
- * spawning their own bun) and no shell-outs at all.
- *
- * If you somehow need to detect a deeper ancestor (grandparent or beyond),
- * note that only the immediate parent is checked; deeper ancestors are
- * not verified. This trade-off avoids the WMI process flood.
- */
 function isPidImmediateAncestor(targetPid: number): boolean {
-  if (process.platform !== 'win32') return false;
   if (targetPid === process.pid) return true;
   if (typeof process.ppid === 'number' && targetPid === process.ppid) return true;
   return false;
 }
 
+const processProbe = createProcessProbe();
+
 async function acquireProcessLock(): Promise<void> {
   processLockHandle = await acquireProcessLockFile({
     path: LOCK_FILE,
-    inspectExisting: async owner => {
-      const priorPid = owner.pid;
-      if (priorPid === process.pid) return { action: 'replace', reason: 'same-process legacy lock' };
-
-      if (process.platform !== 'win32') {
-        if (processExists(priorPid)) {
-          return {
-            action: 'refuse',
-            reason: `Refusing to start: agent-forge.lock is owned by live PID ${priorPid}.`,
-          };
-        }
-        console.log(`Stale agent-forge.lock (PID ${priorPid} no longer running); overwriting.`);
-        return { action: 'replace' };
-      }
-
-      // One tasklist call covers both the "is it alive?" and "is it bun?"
-      // questions in one bounded native shell-out.
-      const nameMap = await getProcessNameMap();
-      const priorName = nameMap.get(priorPid);
-      if (priorName === 'bun') {
-        if (isPidImmediateAncestor(priorPid)) {
-          return {
-            action: 'refuse',
-            reason:
-              `Refusing to start: agent-forge.lock is owned by our ancestor process (PID ${priorPid}). ` +
-              'An agent inside a running Agent Forge may have tried to start another server.',
-          };
-        }
-        console.log(`Another agent-forge bun.exe is running (PID ${priorPid}); killing it to free data.json + ports.`);
-        const killed = await treeKill(priorPid);
-        if (!killed.succeeded) {
-          return {
-            action: 'refuse',
-            reason: `Could not confirm termination of prior Agent Forge PID ${priorPid}; refusing to share state.`,
-          };
-        }
-        await new Promise(resolve => setTimeout(resolve, 500));
-      } else if (priorName) {
-        console.log(`Stale agent-forge.lock (PID ${priorPid} now running as '${priorName}', not bun); overwriting.`);
-      } else {
-        console.log(`Stale agent-forge.lock (PID ${priorPid} no longer running); overwriting.`);
-      }
-      return { action: 'replace' };
-    },
+    inspectExisting: owner => inspectExistingServerLock(owner, {
+      probe: processProbe,
+      isImmediateAncestor: isPidImmediateAncestor,
+      requestGracefulExit(pid) {
+        console.log(`Requesting graceful exit of previous Agent Forge PID ${pid}; force-kill is disabled.`);
+        try { process.kill(pid, 'SIGINT'); } catch {}
+      },
+      waitForExit: (pid, timeoutMs) => waitUntilProcessMissing(pid, timeoutMs, processProbe, processExists),
+    }).then(decision => {
+      console.log(decision.reason || `Lock inspect ${decision.action} for PID ${owner.pid}`);
+      return decision;
+    }),
   });
 }
 
@@ -171,95 +93,30 @@ async function releaseProcessLock(): Promise<void> {
   await releaseProcessLockFile(handle);
 }
 
-// --- Orphan-port cleanup -------------------------------------------------
-// Previous server runs sometimes don't release their port (Bun killed mid-
-// stream, parent shell closed, uncaught exception that left a zombie).
-// Before binding, scan for bun.exe processes LISTENING on our port range
-// and taskkill them. Conservative: only kills `bun.exe`, never our own
-// PID, and never any ancestor. Range is preferredPort..preferredPort+7 so
-// a second agent-forge instance running on a different port (e.g. 4000
-// when we're on 3333) is outside the range and stays untouched.
-
-async function killOrphanBunOnPortRange(preferredPort: number): Promise<void> {
+// Occupied preferred ports are reported, never force-cleared. Binding walks
+// preferredPort..+7. A dead Windows socket still requires a reboot.
+async function logOccupiedPreferredPorts(preferredPort: number): Promise<void> {
   if (process.platform !== 'win32') return;
-  const ourPid = process.pid;
-  const rangeStart = preferredPort;
-  const rangeEnd = preferredPort + 7;
-
-  // Two shell-outs total: netstat (port→pid map) + tasklist (pid→name map).
-  // Old version did netstat + N PowerShells (one per candidate PID) which
-  // could each take 1-2s to cold-start and sometimes zombie'd, contributing
-  // to the visible PowerShell pile.
-  let netstatOut = '';
-  let nameMap = new Map<number, string>();
   try {
-    [netstatOut, nameMap] = await Promise.all([
-      (async () => {
-        const proc = Bun.spawn(['netstat', '-ano'], { stdout: 'pipe', stderr: 'pipe' });
-        const result = await collectBoundedProcess(proc, {
-          timeoutMs: 5_000,
-          maxChars: 2 * 1024 * 1024,
-          retainOutput: 'head',
-          label: 'Windows port inventory',
-          terminate: () => killProcessTree(proc),
-        });
-        if (result.timedOut || result.error || result.exitCode !== 0) {
-          throw new Error(result.error || result.stderr || 'netstat failed');
-        }
-        return result.stdout;
-      })(),
-      getProcessNameMap(),
-    ]);
+    const proc = Bun.spawn(['netstat', '-ano'], { stdout: 'pipe', stderr: 'pipe' });
+    const result = await collectBoundedProcess(proc, {
+      timeoutMs: 5_000,
+      maxChars: 2 * 1024 * 1024,
+      retainOutput: 'head',
+      label: 'Windows port inventory',
+      terminate: () => killProcessTree(proc),
+    });
+    if (result.timedOut || result.error || result.exitCode !== 0) return;
+    const occupants = reportOccupiedPorts(result.stdout, preferredPort, preferredPort + 7, process.pid);
+    if (occupants.length > 0) {
+      console.warn(
+        `Preferred ports ${preferredPort}-${preferredPort + 7} have live listeners (PIDs ${occupants.join(', ')}). ` +
+        'They will not be killed; the server will use the next free port if bind fails.',
+      );
+    }
   } catch (e) {
-    console.warn('Orphan-port scan: process inspection failed, skipping cleanup:', e);
-    return;
+    console.warn('Port occupancy scan failed; continuing with bind fallback:', e);
   }
-
-  const orphanPids = new Set<number>();
-  for (const line of netstatOut.split('\n')) {
-    const parts = line.trim().split(/\s+/);
-    if (parts.length < 5 || parts[3] !== 'LISTENING') continue;
-    const m = parts[1]!.match(/:(\d+)$/);
-    if (!m) continue;
-    const port = parseInt(m[1]!, 10);
-    if (port < rangeStart || port > rangeEnd) continue;
-    const pid = parseInt(parts[4]!, 10);
-    if (!Number.isFinite(pid) || pid === 0 || pid === ourPid) continue;
-    orphanPids.add(pid);
-  }
-
-  if (orphanPids.size === 0) return;
-
-  // Filter to actual bun.exe processes (don't kill the user's Vite, Chrome QUIC, etc.)
-  // and skip immediate ancestors (the parent that spawned us).
-  const safeToKill: number[] = [];
-  for (const pid of orphanPids) {
-    const name = nameMap.get(pid);
-    if (name !== 'bun') {
-      if (name) console.log(`Orphan-port scan: PID ${pid} is ${name}, leaving alone.`);
-      continue;
-    }
-    if (isPidImmediateAncestor(pid)) {
-      console.log(`Orphan-port scan: PID ${pid} is our parent — skipping.`);
-      continue;
-    }
-    safeToKill.push(pid);
-  }
-  if (safeToKill.length === 0) return;
-
-  console.log(`Orphan-port scan: killing ${safeToKill.length} stale bun.exe process(es) on ports ${rangeStart}-${rangeEnd}:`, safeToKill);
-  await Promise.all(
-    safeToKill.map(async pid => {
-      try {
-        const result = await treeKill(pid);
-        if (!result.succeeded) throw new Error(result.error || `taskkill exited with ${result.exitCode}`);
-      } catch (e) {
-        console.warn(`Orphan-port scan: taskkill PID ${pid} failed:`, e);
-      }
-    }),
-  );
-  // Brief pause so Windows releases the socket before we try to bind.
-  await new Promise(r => setTimeout(r, 300));
 }
 
 // --- Startup: load persisted data and wire up services ---
@@ -314,6 +171,7 @@ async function init() {
 await acquireProcessLock();
 
 await init();
+await captureRuntimeStartup();
 
 // --- Network guard --------------------------------------------------------
 // The server executes code on behalf of whoever can reach it (agents run
@@ -396,6 +254,7 @@ function startServer(preferredPort: number) {
           if (url.pathname === '/api/google-docs/append-if-absent' && req.method === 'POST') return handleGoogleDocsAppend(req, true);
           if (url.pathname === '/api/google-docs/replace' && req.method === 'POST') return handleGoogleDocsReplace(req);
           if (url.pathname === '/api/harness/instructions' && req.method === 'GET') return handleHarnessInstructions();
+          if (url.pathname === '/api/health' && req.method === 'GET') return handleRuntimeHealth();
           if (url.pathname === '/api/project-file' && req.method === 'GET') return handleProjectFile(req);
           if (url.pathname === '/api/chat/image-upload' && req.method === 'POST') return handleChatImageUpload(req);
           if (url.pathname === '/api/chat/image' && req.method === 'GET') return handleChatImage(req);
@@ -444,7 +303,7 @@ function startServer(preferredPort: number) {
 }
 
 const preferredPort = parseServerPort(process.env.PORT);
-await killOrphanBunOnPortRange(preferredPort);
+await logOccupiedPreferredPorts(preferredPort);
 
 const server = startServer(preferredPort);
 if (server.port !== preferredPort) {

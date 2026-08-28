@@ -1,0 +1,17 @@
+{
+  "id": "auth-status-timeout",
+  "cli": "claude",
+  "qualifiedVersion": "2.1.241",
+  "kind": "auth-status",
+  "command": ["auth", "status"],
+  "timedOut": true,
+  "stdout": "",
+  "stderr": "",
+  "expected": {
+    "state": "degraded",
+    "credentialMode": "unknown",
+    "evidence": "none",
+    "reasonCode": "cli-timeout",
+    "recoveryAction": "inspect-provider"
+  }
+}

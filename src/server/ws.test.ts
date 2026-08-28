@@ -33,11 +33,13 @@ test('websocket open publishes a coherent snapshot and close releases all client
   websocketHandlers.open(ws as any);
 
   const messageTypes = ws.sent.map(message => message.type);
+  expect(messageTypes).toContain('server_session');
   expect(messageTypes).toContain('agents_list');
   expect(messageTypes).toContain('settings');
   expect(messageTypes).toContain('workspaces_list');
   expect(messageTypes).toContain('terminals_list');
   expect(messageTypes).toContain('usage_report');
+  expect(messageTypes).toContain('auth_recovery');
   expect(clients.has(ws as any)).toBe(true);
   expect(clientLastPong.get(ws as any)).toBeNumber();
 
@@ -75,6 +77,47 @@ test('websocket dispatch handles read commands and rejects malformed payloads wi
   ]);
   expect(ws.sent.at(-2)?.message).toContain('not valid JSON');
   expect(ws.sent.at(-1)?.message).toContain('Unexpected field');
+});
+
+test('a request ID receives an idempotent command ack and a changed payload is rejected', async () => {
+  const ws = fakeSocket();
+  websocketHandlers.open(ws as any);
+  ws.sent.length = 0;
+
+  const envelope = {
+    protocolVersion: 1,
+    requestId: 'req-chat-1',
+    clientSessionId: 'tab-1',
+    sentAt: 1,
+    type: 'send_message',
+    agentId: 'missing-agent',
+    content: 'hello',
+  };
+  websocketHandlers.message(ws as any, JSON.stringify(envelope));
+  await Bun.sleep(20);
+  const first = ws.sent.find(message => message.type === 'command_ack');
+  expect(first).toMatchObject({
+    type: 'command_ack',
+    requestId: 'req-chat-1',
+    status: 'accepted',
+  });
+
+  ws.sent.length = 0;
+  websocketHandlers.message(ws as any, JSON.stringify(envelope));
+  await Bun.sleep(20);
+  expect(ws.sent.find(message => message.type === 'command_ack')).toMatchObject({
+    requestId: 'req-chat-1',
+    status: 'duplicate',
+  });
+
+  ws.sent.length = 0;
+  websocketHandlers.message(ws as any, JSON.stringify({ ...envelope, content: 'different' }));
+  await Bun.sleep(20);
+  expect(ws.sent.find(message => message.type === 'command_ack')).toMatchObject({
+    requestId: 'req-chat-1',
+    status: 'rejected',
+    reasonCode: 'request-id-conflict',
+  });
 });
 
 test('the single heartbeat closes stale clients at most once and keeps fresh clients alive', () => {

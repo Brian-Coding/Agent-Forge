@@ -13,6 +13,7 @@ import {
   waitForOperationOrUnwind,
 } from '../../utils';
 import { persistenceService } from '../../services/persistence.service';
+import { currentAuthCoordinator, type AuthStartPermit } from '../../auth/provider-auth-coordinator';
 import { createFreshTempDirectorySync, safeRemoveTree } from '../../services/safe-filesystem.mjs';
 import { summarizeToolInput, type AgentEvent } from '../events';
 import { drainStreamToString, parseNdjsonLines, flushNdjsonLeftover } from '../stream-utils';
@@ -982,8 +983,16 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
 
     return {
       async run() {
+        let permit: AuthStartPermit | undefined;
         try {
           const env = createCliEnv();
+          permit = await currentAuthCoordinator().prepareStart('codex');
+          if (permit.action === 'block') {
+            ctx.emitAgentEvent({ type: 'error', message: permit.userMessage });
+            ctx.emitSystemMessage(permit.userMessage);
+            ctx.emitAgentEvent({ type: 'finish', reason: 'auth-error' });
+            return undefined;
+          }
 
           if (sessionId) {
             const path = await findRolloutPath(sessionId);
@@ -1029,6 +1038,7 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
             console.warn('[codex] stdin write failed; killing process:', e);
             void requestTermination();
           }
+          permit.release();
 
           // Drain stderr and filter known harmless noise. The chat bridge keeps
           // surviving diagnostic chunks hidden until a clean exit error is needed.
@@ -1243,6 +1253,7 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
           ctx.emitAgentEvent({ type: 'finish', reason: 'error' });
           return undefined;
         } finally {
+          permit?.release();
           await safeRemoveTree({
             targetPath: state.outputDirectory,
             allowedRoot: state.outputRoot,

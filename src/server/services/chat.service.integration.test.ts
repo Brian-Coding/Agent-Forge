@@ -13,6 +13,7 @@ import { documentService } from './document.service';
 import { liveTurnStateService } from './live-turn-state.service';
 import { persistenceService } from './persistence.service';
 import { usageService } from './usage.service';
+import { authRecoveryStore } from '../auth/auth-recovery';
 
 const originalCodexAdapter = getAgentAdapter('codex')!;
 const originalSave = persistenceService.save;
@@ -115,6 +116,7 @@ afterEach(async () => {
   saveNowFailure = null;
   registerAdapter(originalCodexAdapter);
   for (const id of [...testAgentIds]) {
+    authRecoveryStore.clearAgent(id);
     if (agentService.getAgent(id)) await agentService.removeAgent(id);
     testAgentIds.delete(id);
   }
@@ -265,6 +267,12 @@ test('an expired OAuth token that survives the retry surfaces an actionable fail
   expect(attempts).toBe(2);
   const systemMessages = agentMessages(id).filter(message => message.role === 'system').map(message => message.content);
   expect(systemMessages.some(message => message.includes('retried once and it failed again'))).toBe(true);
+  expect(systemMessages.join('\n').toLowerCase()).not.toContain('claude');
+  expect(authRecoveryStore.openForAgent(id)[0]).toMatchObject({
+    messageId: agentMessages(id).find(message => message.role === 'user')?.id,
+    automaticRetryUsed: true,
+    provider: 'codex',
+  });
   expect(agentService.getAgent(id)?.lastTurnOutcome?.status).toBe('failed');
 });
 
@@ -289,8 +297,14 @@ test('expired-auth recovery does not retry after a tool call could have mutated 
   await chatService.sendMessage(id, 'Do not duplicate this action.');
 
   expect(attempts).toBe(1);
-  expect(agentMessages(id).filter(message => message.role === 'system').map(message => message.content))
-    .toContain('Codex login expired mid-turn (OAuth access token has expired). This turn had already done work, so it was not retried automatically. Run any Claude turn (or `claude auth status`) to refresh the token, then resend.');
+  const systemMessages = agentMessages(id).filter(message => message.role === 'system').map(message => message.content);
+  expect(systemMessages.some(message => message.includes('may already have done work'))).toBe(true);
+  expect(systemMessages.join('\n').toLowerCase()).not.toContain('claude');
+  expect(authRecoveryStore.openForAgent(id)[0]).toMatchObject({
+    sideEffectRisk: true,
+    automaticRetryUsed: false,
+    provider: 'codex',
+  });
   expect(agentService.getAgent(id)?.lastTurnOutcome?.status).toBe('failed');
 });
 
@@ -501,3 +515,35 @@ test('waitForAgentTurn returns false on a bounded stubborn handle and remains us
   await send;
   expect(await chatService.waitForAgentTurn(id, 100)).toBe(true);
 });
+
+test('a blocked auth finish preserves the user prompt and records session recovery state', async () => {
+  const id = loadAgent();
+  let attempts = 0;
+  registerTestAdapter((_prompt, ctx) => ({
+    async run() {
+      attempts++;
+      ctx.emitAgentEvent({ type: 'error', message: 'Claude Code is not authenticated. Run `claude auth login` in a normal terminal, then retry this prompt.' });
+      ctx.emitSystemMessage('Claude Code is not authenticated. Run `claude auth login` in a normal terminal, then retry this prompt.');
+      ctx.emitAgentEvent({ type: 'finish', reason: 'auth-error' });
+      return undefined;
+    },
+    stop() {},
+    kill() {},
+  }));
+
+  await chatService.sendMessage(id, 'Keep this prompt.');
+
+  expect(attempts).toBe(1);
+  const user = agentMessages(id).find(message => message.role === 'user');
+  expect(user?.content).toBe('Keep this prompt.');
+  const incident = authRecoveryStore.openForAgent(id)[0];
+  expect(incident).toMatchObject({
+    messageId: user?.id,
+    provider: 'codex',
+    sideEffectRisk: false,
+    automaticRetryUsed: false,
+  });
+  expect(incident!.userMessage.toLowerCase()).not.toContain('claude auth login');
+  expect(authRecoveryStore.canRetry(id, incident!.incidentId, false)).toMatchObject({ ok: true });
+});
+

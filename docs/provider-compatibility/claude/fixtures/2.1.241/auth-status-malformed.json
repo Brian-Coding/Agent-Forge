@@ -1,0 +1,17 @@
+{
+  "id": "auth-status-malformed",
+  "cli": "claude",
+  "qualifiedVersion": "2.1.241",
+  "kind": "auth-status",
+  "command": ["auth", "status"],
+  "exitCode": 0,
+  "stdout": "Logged in as user@example.com\n",
+  "stderr": "",
+  "expected": {
+    "state": "degraded",
+    "credentialMode": "unknown",
+    "evidence": "cli-status",
+    "reasonCode": "cli-malformed",
+    "recoveryAction": "inspect-provider"
+  }
+}

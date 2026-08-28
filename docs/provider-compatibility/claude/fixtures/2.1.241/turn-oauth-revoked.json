@@ -1,0 +1,16 @@
+{
+  "id": "turn-oauth-revoked",
+  "cli": "claude",
+  "qualifiedVersion": "2.1.241",
+  "kind": "turn-output",
+  "exitCode": 1,
+  "stdout": "API Error: 401 OAuth login has been revoked. Run claude auth login.\n",
+  "stderr": "",
+  "expected": {
+    "state": "reauthentication-required",
+    "credentialMode": "subscription-oauth",
+    "evidence": "provider-error",
+    "reasonCode": "oauth-revoked",
+    "recoveryAction": "login"
+  }
+}

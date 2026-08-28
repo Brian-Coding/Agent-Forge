@@ -4,8 +4,9 @@
 // anymore. Source-controlled `.plans/*.md` files are canonical; only legacy
 // inline documents and missing-source recovery records remain in data.json.
 import type { LiveDocument } from '../../shared/protocol';
-import { watch, existsSync, mkdirSync, readFileSync, readdirSync, type FSWatcher } from 'fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync } from 'fs';
 import { join, basename, normalize, resolve } from 'path';
+import { projectWatcherHub } from './project-watcher.service';
 import { generateId } from '../utils';
 import { persistenceService } from './persistence.service';
 import { runDurableMutation } from './durable-mutation';
@@ -13,7 +14,6 @@ import { runDurableMutation } from './durable-mutation';
 // HMR-safe state
 const documents: Map<string, LiveDocument> = (globalThis as any).__documentsMap ??= new Map<string, LiveDocument>();
 const planWriteFromServer: Set<string> = (globalThis as any).__planWriteFromServer ??= new Set<string>();
-const planWatchers: Map<string, FSWatcher> = (globalThis as any).__planWatchers ??= new Map<string, FSWatcher>();
 
 type DocumentExtra = { status?: LiveDocument['status']; lockedBy?: string; filePath?: string; lastEditedBy?: string };
 
@@ -298,46 +298,13 @@ export const documentService = {
   // --- Plans file watcher ---
 
   startPlansWatcher(agentId: string, cwd: string): void {
-    const plansDir = join(cwd, '.plans');
-    if (!existsSync(plansDir)) return;
-
-    // Clean up existing watcher
-    const existing = planWatchers.get(agentId);
-    if (existing) {
-      existing.close();
-      planWatchers.delete(agentId);
-    }
-
-    try {
-      let debounceTimer: ReturnType<typeof setTimeout> | null = null;
-      const changedFiles = new Set<string>();
-
-      const watcher = watch(plansDir, (eventType, filename) => {
-        if (!filename || !filename.endsWith('.md')) return;
-        changedFiles.add(filename);
-        if (debounceTimer) clearTimeout(debounceTimer);
-        debounceTimer = setTimeout(() => {
-          for (const fn of changedFiles) {
-            const fp = join(plansDir, fn);
-            // We need agent info at call time — use a generic approach
-            // The caller should handle this via the agent service
-            documentService._onPlanFileChanged?.(agentId, fp);
-          }
-          changedFiles.clear();
-        }, 300);
-      });
-      planWatchers.set(agentId, watcher);
-    } catch (e) {
-      console.error(`Plans watcher failed for agent ${agentId}:`, e);
-    }
+    projectWatcherHub.subscribePlans(agentId, cwd, filePath => {
+      documentService._onPlanFileChanged?.(agentId, filePath);
+    });
   },
 
   stopPlansWatcher(agentId: string): void {
-    const existing = planWatchers.get(agentId);
-    if (existing) {
-      existing.close();
-      planWatchers.delete(agentId);
-    }
+    projectWatcherHub.unsubscribePlans(agentId);
   },
 
   /** Callback set by agent service for plan file changes */

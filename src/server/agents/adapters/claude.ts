@@ -2,13 +2,9 @@ import { existsSync } from 'fs';
 import { extname, win32 as win32Path } from 'path';
 import {
   ArgvTooLongError,
-  claudeCredentialsPath,
   createCliEnv,
   createProcessUnwindSignal,
-  isClaudeAccessTokenExpired,
-  isClaudeRefreshTokenExpired,
   killProcessTree,
-  readClaudeCredentialState,
   resolveCliBinary,
   safeSpawn,
   type ProcessTerminationResult,
@@ -17,10 +13,10 @@ import {
 } from '../../utils';
 import { isRealClaudeModelId, stripModelTier } from '../agent-kinds';
 import { persistenceService } from '../../services/persistence.service';
+import { currentAuthCoordinator, type AuthStartPermit } from '../../auth/provider-auth-coordinator';
 import { summarizeToolInput, type AgentEvent } from '../events';
 import { drainStreamToString, parseNdjsonLines, flushNdjsonLeftover } from '../stream-utils';
 import type { AgentAdapter, AgentHandle, AgentRunContext } from '../types';
-import { collectBoundedProcess } from '../../services/bounded-subprocess';
 
 /**
  * Claude CLI adapter. Preserves agent-forge's existing invocation:
@@ -272,14 +268,15 @@ export const claudeAdapter: AgentAdapter<ClaudeRunState> = {
 
     return {
       async run() {
+        let permit: AuthStartPermit | undefined;
         try {
           // CLAUDECODE leaks "already inside Claude Code" signals. createCliEnv
           // strips it and augments PATH for GUI/editor-launched servers.
           const env = createCliEnv();
-          const authError = await getClaudeAuthError(claudeCommand, env);
-          if (authError) {
-            ctx.emitAgentEvent({ type: 'error', message: authError });
-            ctx.emitSystemMessage(authError);
+          permit = await currentAuthCoordinator().prepareStart('claude');
+          if (permit.action === 'block') {
+            ctx.emitAgentEvent({ type: 'error', message: permit.userMessage });
+            ctx.emitSystemMessage(permit.userMessage);
             ctx.emitAgentEvent({ type: 'finish', reason: 'auth-error' });
             return undefined;
           }
@@ -322,6 +319,7 @@ export const claudeAdapter: AgentAdapter<ClaudeRunState> = {
             console.warn('[claude] stdin write failed; killing process:', e);
             void requestTermination();
           }
+          permit.release();
 
           // Capture stderr for the post-exit error surface. The chat bridge
           // suppresses these diagnostic chunks while the turn is running.
@@ -362,6 +360,9 @@ export const claudeAdapter: AgentAdapter<ClaudeRunState> = {
 
           const handleEvent = (event: any) => {
             if (!expiredAuthDetected && eventReportsExpiredAuth(event)) expiredAuthDetected = true;
+            if (event?.type === 'system' && event.subtype === 'init') {
+              permit?.noteInitObserved();
+            }
             try {
               normalizeClaudeEvent(event, ctx, state, (resultText: string) => { lastResultText = resultText; });
             } catch (e) {
@@ -416,6 +417,7 @@ export const claudeAdapter: AgentAdapter<ClaudeRunState> = {
             // rewrites `~/.claude/.credentials.json` with a refreshed token, so
             // a second spawn normally succeeds — hand the bridge a recoverable
             // error instead of burning the turn on "exited with code 1".
+            permit?.noteAuthFailure();
             ctx.emitAgentEvent({ type: 'finish', reason: 'expired-auth' });
             return {
               recoverableError: 'expired-auth',
@@ -450,6 +452,8 @@ export const claudeAdapter: AgentAdapter<ClaudeRunState> = {
           ctx.emitAgentEvent({ type: 'error', message: msg });
           ctx.emitAgentEvent({ type: 'finish', reason: 'error' });
           return undefined;
+        } finally {
+          permit?.release();
         }
       },
 
@@ -480,8 +484,6 @@ export const claudeAdapter: AgentAdapter<ClaudeRunState> = {
   },
 };
 
-const CLAUDE_AUTH_CHECK_TIMEOUT_MS = 5_000;
-
 /**
  * The CLI's own words when it starts a turn with a dead access token. It exits
  * 1 with an empty stderr, so this text is the only evidence — it arrives as an
@@ -509,103 +511,6 @@ export function eventReportsExpiredAuth(event: any): boolean {
     }
   }
   return false;
-}
-
-async function getClaudeAuthError(claudeCommand: readonly string[], env: Record<string, string>): Promise<string | null> {
-  if (env.AGENT_FORGE_SKIP_CLAUDE_AUTH_CHECK === '1') return null;
-
-  // API-key/token environments do not need Claude Code's persisted first-party login.
-  if (env.ANTHROPIC_API_KEY || env.ANTHROPIC_AUTH_TOKEN || env.CLAUDE_CODE_OAUTH_TOKEN) {
-    return null;
-  }
-
-  // `claude auth status` reports the stored login, not token freshness, so it
-  // answers loggedIn=true right up to the moment a turn 401s. Read the token
-  // metadata directly for the one state the CLI cannot recover from on its
-  // own: a dead *refresh* token, which needs an interactive login. An expired
-  // access token alone is not blocked — the CLI refreshes it on spawn, and the
-  // expired-auth retry in chat.service covers the case where it loses that race.
-  const creds = await readClaudeCredentialState();
-  if (isClaudeRefreshTokenExpired(creds)) {
-    return [
-      'Claude Code cannot refresh its login: the stored refresh token has expired.',
-      `Credentials: ${claudeCredentialsPath()}`,
-      'Run `claude auth login` in a normal terminal, then retry this turn.',
-    ].join('\n');
-  }
-  if (isClaudeAccessTokenExpired(creds)) {
-    console.warn(
-      '[claude] stored OAuth access token is expired or expiring; the CLI should refresh it on spawn '
-      + '(a 401 on this turn is retried once)',
-    );
-  }
-
-  try {
-    const result = await getClaudeAuthStatus(claudeCommand, env);
-    if (!result) return null;
-
-    const { status, detail } = result;
-
-    if (status?.loggedIn === true) return null;
-    if (status?.loggedIn !== false) return null;
-
-    return [
-      'Claude Code is not authenticated for non-interactive Agent Forge runs.',
-      `Fresh CLI auth check failed (${detail}).`,
-      'Run `claude auth login` in a normal terminal, then verify `claude auth status` reports loggedIn=true.',
-      'If you use a Claude subscription token instead, run `claude setup-token`; if you use the Anthropic API, start Agent Forge with `ANTHROPIC_API_KEY` set.',
-    ].join('\n');
-  } catch (e: any) {
-    console.warn('[claude] auth status check skipped:', e?.message || e);
-    return null;
-  }
-}
-
-async function getClaudeAuthStatus(
-  claudeCommand: readonly string[],
-  env: Record<string, string>,
-): Promise<{ status: any; detail: string } | null> {
-  const proc = Bun.spawn([...claudeCommand, 'auth', 'status'], {
-    stdout: 'pipe',
-    stderr: 'pipe',
-    env,
-  });
-  const result = await collectBoundedProcess(proc, {
-    timeoutMs: CLAUDE_AUTH_CHECK_TIMEOUT_MS,
-    terminationTimeoutMs: 2_000,
-    maxChars: 64_000,
-    retainOutput: 'head',
-    label: 'Claude auth status check',
-    terminate: () => killProcessTree(proc),
-  });
-  if (result.timedOut || result.error) {
-    console.warn(`[claude] ${result.error || `auth status check timed out after ${CLAUDE_AUTH_CHECK_TIMEOUT_MS}ms`}`);
-    return null;
-  }
-
-  const stdout = result.stdout;
-  try {
-    let status: any = null;
-    try {
-      status = stdout ? JSON.parse(stdout) : null;
-    } catch {
-      console.warn('[claude] auth status returned non-JSON output');
-      return null;
-    }
-
-    if (!status || typeof status !== 'object') return null;
-
-    return {
-      status,
-      detail: `status=${JSON.stringify({
-        loggedIn: status.loggedIn,
-        authMethod: status.authMethod,
-        apiProvider: status.apiProvider,
-      })}`,
-    };
-  } catch {
-    return null;
-  }
 }
 
 /**

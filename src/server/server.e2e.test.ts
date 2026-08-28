@@ -162,6 +162,31 @@ test('full server boot recovers state, enforces transport guards, persists a mut
       ws.addEventListener('error', () => reject(new Error('WebSocket connection failed')), { once: true });
     });
 
+    const health = await (await fetch(`${baseUrl}/api/health`)).json() as any;
+    expect(typeof health.runtime.serverSessionId).toBe('string');
+    expect(health.runtime.serverSessionId.length).toBeGreaterThan(8);
+    expect(['current', 'restart-required', 'unknown']).toContain(health.runtime.drift);
+    expect(typeof health.runtime.bunVersion).toBe('string');
+    expect(health.runtime.runningFingerprint).toMatch(/^[0-9a-f]{64}$/);
+    expect(health.auth.every((snapshot: any) => typeof snapshot.state === 'string' && typeof snapshot.reasonCode === 'string')).toBe(true);
+    expect(JSON.stringify(health)).not.toContain('sk-ant-');
+
+    const session = await waitForFrame(frames, frame => frame.type === 'server_session');
+    expect(typeof session.serverSessionId).toBe('string');
+    expect(session.serverSessionId.length).toBeGreaterThan(8);
+    expect(session.serverSessionId).toBe(health.runtime.serverSessionId);
+
+    ws.send(JSON.stringify({
+      protocolVersion: 1,
+      requestId: 'e2e-ping-1',
+      clientSessionId: 'e2e-tab',
+      sentAt: Date.now(),
+      type: 'ping',
+    }));
+    const ack = await waitForFrame(frames, frame => frame.type === 'command_ack' && frame.requestId === 'e2e-ping-1');
+    expect(ack.status).toBe('accepted');
+    expect(ack.serverSessionId).toBe(session.serverSessionId);
+
     ws.send('{malformed');
     const invalid = await waitForFrame(frames, frame => frame.type === 'error');
     expect(invalid.message).toContain('not valid JSON');

@@ -1,0 +1,16 @@
+{
+  "id": "turn-invalid-api-key",
+  "cli": "claude",
+  "qualifiedVersion": "2.1.241",
+  "kind": "turn-output",
+  "exitCode": 1,
+  "stdout": "API Error: 401 invalid api key\n",
+  "stderr": "",
+  "expected": {
+    "state": "misconfigured",
+    "credentialMode": "api-key",
+    "evidence": "provider-error",
+    "reasonCode": "precedence-named-conflict",
+    "recoveryAction": "fix-precedence"
+  }
+}

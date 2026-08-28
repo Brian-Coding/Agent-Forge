@@ -7,6 +7,8 @@ This directory contains current operational documentation and detailed design re
 - [Google Docs tracker reconciliation](./google-docs-tracker-reconciliation.md): active scheduled reconciliation design and safety boundary.
 - [Cross-machine token-usage sync](./usage-sync.md): active per-machine usage snapshot workflow.
 - [Harness evals](./harness-evals.md): durable criteria for evaluating whether harness changes are actually better.
+- [Runtime activation checklist](./runtime-activation-checklist.md): confirm which server session and source fingerprint are actually running after a controlled restart.
+- [Claude CLI compatibility fixtures](./provider-compatibility/claude/README.md): captured Claude 2.1.241 auth-status and turn-error shapes. Classifier baseline only; not a gating change.
 
 ## Current reference with open work
 

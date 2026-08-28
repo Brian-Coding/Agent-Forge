@@ -17,8 +17,16 @@ import { liveTurnStateService } from './services/live-turn-state.service';
 import {
   ClientMessageValidationError,
   MAX_WEBSOCKET_MESSAGE_BYTES,
-  parseClientMessage,
+  parseClientCommand,
 } from './client-message';
+import { chatSendPreview, commandQueue, isChatSendCommand, MAX_COMMAND_QUEUE_DEPTH, setCommandQueueListener } from './services/command-queue';
+import { commandSession } from './services/command-session';
+import { peekRuntimeCompact } from './services/runtime-truth';
+import { authRecoveryStore, setAuthRecoveryListener } from './auth/auth-recovery';
+
+setAuthRecoveryListener(snapshot => broadcast(snapshot));
+
+setCommandQueueListener(snapshot => broadcast(snapshot));
 
 // WebSocket heartbeat — ping every 30s, close stale clients after 40s.
 // Keep one timer across module reloads; its proxy invokes the newest callback
@@ -49,6 +57,11 @@ async function handleMessage(ws: ServerWebSocket<unknown>, message: ClientMessag
   switch (message.type) {
     case 'ping': {
       sendTo(ws, { type: 'pong' });
+      break;
+    }
+
+    case 'get_command_queue': {
+      for (const snapshot of commandQueue.snapshots()) sendTo(ws, snapshot);
       break;
     }
 
@@ -103,6 +116,46 @@ async function handleMessage(ws: ServerWebSocket<unknown>, message: ClientMessag
         sendTo(ws, {
           type: 'error',
           message: e?.message || 'Message could not be completed or persisted',
+          agentId: message.agentId,
+        });
+      }
+      break;
+    }
+
+    case 'check_auth': {
+      const agent = agentService.getAgent(message.agentId);
+      if (!agent) {
+        sendTo(ws, { type: 'error', message: 'Agent not found', agentId: message.agentId });
+        break;
+      }
+      try {
+        await authRecoveryStore.checkAgain(message.agentId, agent.provider ?? 'claude');
+      } catch (e: any) {
+        sendTo(ws, { type: 'error', message: e?.message || 'Auth check failed', agentId: message.agentId });
+      }
+      break;
+    }
+
+    case 'retry_auth_prompt': {
+      const decision = authRecoveryStore.canRetry(message.agentId, message.incidentId, message.confirmSideEffects === true);
+      if (!decision.ok) {
+        sendTo(ws, { type: 'error', message: decision.userMessage, agentId: message.agentId });
+        break;
+      }
+      const original = agentService.getMessages(message.agentId)
+        .find(item => item.id === decision.incident.messageId && item.role === 'user');
+      if (!original) {
+        sendTo(ws, { type: 'error', message: 'The preserved prompt is no longer in this chat.', agentId: message.agentId });
+        break;
+      }
+      try {
+        await chatService.sendMessage(message.agentId, original.content, undefined, {
+          imageAttachments: original.imageAttachments,
+        });
+      } catch (e: any) {
+        sendTo(ws, {
+          type: 'error',
+          message: e?.message || 'Preserved prompt could not be retried',
           agentId: message.agentId,
         });
       }
@@ -196,6 +249,7 @@ async function handleMessage(ws: ServerWebSocket<unknown>, message: ClientMessag
     }
 
     case 'stop_agent': {
+      commandQueue.reset(message.agentId);
       const success = await agentService.stopAgent(message.agentId);
       if (!success) {
         sendTo(ws, { type: 'error', message: 'Agent not found', agentId: message.agentId });
@@ -204,6 +258,7 @@ async function handleMessage(ws: ServerWebSocket<unknown>, message: ClientMessag
     }
 
     case 'kill_agent': {
+      commandQueue.reset(message.agentId);
       const success = await agentService.killAgent(message.agentId);
       if (!success) {
         sendTo(ws, { type: 'error', message: 'Agent not found', agentId: message.agentId });
@@ -212,6 +267,8 @@ async function handleMessage(ws: ServerWebSocket<unknown>, message: ClientMessag
     }
 
     case 'remove_agent': {
+      commandQueue.reset(message.agentId);
+      authRecoveryStore.clearAgent(message.agentId);
       const success = await agentService.removeAgent(message.agentId);
       if (success) {
         liveTurnStateService.clear(message.agentId);
@@ -224,6 +281,7 @@ async function handleMessage(ws: ServerWebSocket<unknown>, message: ClientMessag
     }
 
     case 'clear_history': {
+      authRecoveryStore.clearAgent(message.agentId);
       const success = await agentService.clearHistory(message.agentId);
       if (success) {
         if (!liveTurnStateService.get(message.agentId)?.active) {
@@ -397,6 +455,11 @@ export const websocketHandlers = {
     console.log('Client connected');
 
     // Send current state on connect
+    sendTo(ws, {
+      type: 'server_session',
+      serverSessionId: commandSession.serverSessionId,
+      ...peekRuntimeCompact() ?? {},
+    });
     sendTo(ws, { type: 'agents_list', agents: agentService.getAgents() });
     sendTo(ws, { type: 'settings', settings: settingsService.get() });
     sendTo(ws, { type: 'workspaces_list', workspaces: workspaceService.getAll() });
@@ -421,12 +484,58 @@ export const websocketHandlers = {
         });
       }
     }
+    for (const snapshot of commandQueue.snapshots()) sendTo(ws, snapshot);
+    sendTo(ws, authRecoveryStore.snapshot());
   },
 
   message(ws: ServerWebSocket<unknown>, message: string | Buffer) {
     try {
-      const data = parseClientMessage(message);
-      handleMessage(ws, data).catch(e => {
+      const parsed = parseClientCommand(message);
+      const dispatch = async () => {
+        if (parsed.meta.requestId) {
+          const observed = commandSession.observe(parsed.meta, parsed.message);
+          if (observed.status !== 'accepted') {
+            sendTo(ws, observed);
+            return;
+          }
+          if (parsed.message.type === 'retry_auth_prompt') {
+            const decision = authRecoveryStore.canRetry(
+              parsed.message.agentId,
+              parsed.message.incidentId,
+              parsed.message.confirmSideEffects === true,
+            );
+            if (!decision.ok) {
+              sendTo(ws, commandSession.reject(observed.requestId, decision.reasonCode, decision.userMessage));
+              return;
+            }
+          }
+          if (isChatSendCommand(parsed.message)) {
+            const agentId = parsed.message.agentId;
+            const item = commandQueue.enqueue(
+              agentId,
+              observed.requestId,
+              observed.acceptedSequence ?? 0,
+              chatSendPreview(parsed.message),
+              () => handleMessage(ws, parsed.message),
+            );
+            if (!item) {
+              sendTo(ws, commandSession.reject(
+                observed.requestId,
+                'queue-full',
+                `Agent command queue is full (${MAX_COMMAND_QUEUE_DEPTH})`,
+              ));
+              return;
+            }
+            sendTo(ws, { ...observed, queuePosition: commandQueue.size(agentId) });
+            return;
+          }
+          await handleMessage(ws, parsed.message);
+          sendTo(ws, observed);
+          return;
+        }
+        await handleMessage(ws, parsed.message);
+      };
+      dispatch().catch(e => {
         console.error('handleMessage error:', e);
         sendTo(ws, {
           type: 'error',
