@@ -264,7 +264,6 @@
 
     /* Connection status */
     .connection-error { padding: 8px 16px; background: var(--error); color: white; text-align: center; font-size: 12px; flex-shrink: 0; }
-    .runtime-banner { padding: 8px 16px; background: var(--warning); color: #0d1117; text-align: center; font-size: 12px; flex-shrink: 0; font-weight: 600; }
     .runtime-pill { font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); color: var(--text-secondary); white-space: nowrap; }
     .runtime-pill.runtime-current { color: var(--success); border-color: rgba(63, 185, 80, 0.4); }
     .runtime-pill.runtime-restart-required { color: var(--warning); border-color: var(--warning); font-weight: 600; }
@@ -418,6 +417,8 @@
     .limits-header { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); padding: 4px 4px 0; display: flex; align-items: center; justify-content: space-between; }
     .limits-refresh { background: var(--bg-tertiary); border: 1px solid var(--border); color: var(--text-secondary); border-radius: 4px; padding: 1px 8px; font-size: 10px; cursor: pointer; }
     .limits-refresh:hover { border-color: var(--accent); color: var(--text-primary); }
+    .limits-refresh:disabled { opacity: 0.6; cursor: default; }
+    .limits-refresh:disabled:hover { border-color: var(--border); color: var(--text-secondary); }
     .limits-card { padding: 10px 12px; border-radius: 6px; background: var(--bg-primary); border: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px; }
     .limits-card-head { display: flex; align-items: center; justify-content: space-between; }
     .limits-card-title { font-size: 13px; font-weight: 600; color: var(--text-primary); }
@@ -5656,9 +5657,10 @@
     }
 
     // Limits panel — provider rate-limit dashboard. Data sources (server-side
-    // limits.service): Claude via the statusline JSON bridge file, Codex via
-    // the newest rollout-file rate_limits event. Auto-refreshes every minute;
-    // the button forces a re-read. Meter color is a status encoding
+    // limits.service): Claude via the OAuth usage endpoint (statusline bridge
+    // fallback); Codex via app-server account limits (rollout fallback).
+    // Auto-refreshes every minute; the button forces a new read, including
+    // clearing Claude 429 backoff. Meter color is a status encoding
     // (ok/warning/critical) and is always paired with the numeric %.
     function limitsFmtReset(ts) {
       if (!ts) return null;
@@ -5740,10 +5742,20 @@
     function LimitsPanel({ limits, onRefresh }) {
       // Re-render every 30s so "resets in"/"next refresh" countdowns stay honest.
       const [, forceTick] = useState(0);
+      const [refreshing, setRefreshing] = useState(false);
       useEffect(() => {
         const id = setInterval(() => forceTick(t => t + 1), 30000);
         return () => clearInterval(id);
       }, []);
+      const stamp = limits
+        ? String(limits.providers?.claude?.checkedAt) + ':' + String(limits.providers?.codex?.checkedAt)
+        : '';
+      useEffect(() => { setRefreshing(false); }, [stamp]);
+      useEffect(() => {
+        if (!refreshing) return;
+        const id = setTimeout(() => setRefreshing(false), 20000);
+        return () => clearTimeout(id);
+      }, [refreshing]);
 
       const nextIn = limits && limits.nextRefreshAt
         ? Math.max(0, Math.round((limits.nextRefreshAt - Date.now()) / 60000))
@@ -5752,7 +5764,16 @@
       return e('div', { className: 'limits-panel' },
         e('div', { className: 'limits-header' },
           e('span', null, 'Limits'),
-          e('button', { className: 'limits-refresh', onClick: onRefresh, title: 'Re-read both providers now' }, '↻ Refresh')
+          e('button', {
+            className: 'limits-refresh',
+            disabled: refreshing,
+            title: 'Re-read both providers now',
+            onClick: () => {
+              if (refreshing) return;
+              setRefreshing(true);
+              onRefresh();
+            },
+          }, refreshing ? 'Refreshing…' : '↻ Refresh')
         ),
         !limits
           ? e('div', { className: 'limits-detail', style: { padding: 12 } }, 'No limits data yet — first read happens at server start.')
@@ -5819,6 +5840,9 @@
         snapshot.provider + ' ' + snapshot.state + ' (' + snapshot.reasonCode + ')'
       )).join(' · ');
       const title = [
+        drift === 'restart-required'
+          ? 'This window is talking to an older Agent Forge process than the files on disk.'
+          : null,
         'session ' + health.runtime.serverSessionId,
         health.runtime.bunVersion ? 'bun ' + health.runtime.bunVersion : null,
         health.runtime.source && health.runtime.source.commit ? 'commit ' + String(health.runtime.source.commit).slice(0, 12) : null,
@@ -5848,6 +5872,7 @@
       const [showModal, setShowModal] = useState(false);
       const [showSharedContext, setShowSharedContext] = useState(false);
       const [sidebarTab, setSidebarTab] = useState('agents');
+      const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
       const [sidebarWidth, setSidebarWidth] = useState(settings.sidebarWidth || 240);
       const [isResizing, setIsResizing] = useState(false);
       const sidebarResizeRef = useRef(null);
@@ -6132,7 +6157,8 @@
         ws.updateWorkspace(activeWorkspace.id, { selectedAgentIds: updated });
       };
 
-      // Activity bar tabs — Workspaces replaces Agents
+      // Activity bar tabs — Workspaces replaces Agents. Clicking the open tab
+      // again collapses the wide panel so agent grids can use the extra width.
       const tabs = [
         { id: 'agents', icon: ICONS.agents, label: 'Workspaces' },
         { id: 'atlas', icon: null, emoji: '🗺️', label: 'UI Atlas' },
@@ -6141,6 +6167,14 @@
         { id: 'tokens', icon: null, emoji: '🪙', label: 'Token Usage' },
         { id: 'limits', icon: null, emoji: '⏳', label: 'Limits' },
       ];
+      const openSidebarTab = (id) => {
+        if (!sidebarCollapsed && sidebarTab === id) {
+          setSidebarCollapsed(true);
+          return;
+        }
+        setSidebarTab(id);
+        setSidebarCollapsed(false);
+      };
 
       return e('div', { className: 'app' },
         // Activity Bar
@@ -6148,11 +6182,12 @@
           tabs.map(tab =>
             e('button', {
               key: tab.id,
-              className: 'activity-bar-btn' + (sidebarTab === tab.id ? ' active' : ''),
-              onClick: () => setSidebarTab(tab.id),
-              title: tab.label,
+              className: 'activity-bar-btn' + (!sidebarCollapsed && sidebarTab === tab.id ? ' active' : ''),
+              onClick: () => openSidebarTab(tab.id),
+              title: !sidebarCollapsed && sidebarTab === tab.id ? tab.label + ' (click to collapse)' : tab.label,
               'aria-label': tab.label,
-              'aria-pressed': sidebarTab === tab.id,
+              'aria-pressed': !sidebarCollapsed && sidebarTab === tab.id,
+              'aria-expanded': !sidebarCollapsed && sidebarTab === tab.id,
             }, tab.emoji ? e('span', { style: { fontSize: 18 } }, tab.emoji) : e(Icon, { d: tab.icon, size: 20 }))
           ),
           e('div', { className: 'activity-bar-spacer' }),
@@ -6173,7 +6208,7 @@
         ),
 
         // Sidebar Panel
-        e('div', { className: 'sidebar-panel', style: { width: sidebarWidth } },
+        !sidebarCollapsed && e('div', { className: 'sidebar-panel', style: { width: sidebarWidth } },
           e('div', { className: 'sidebar-resize-handle' + (isResizing ? ' active' : ''), onMouseDown: (ev) => { ev.preventDefault(); setIsResizing(true); } }),
           sidebarTab === 'agents' && e(WorkspacesSidebar, {
             workspaces,
@@ -6190,7 +6225,7 @@
             onRescanAtlas: (workspaceId) => ws.rescanAtlas(workspaceId),
             onResumeAtlas: (workspaceId) => ws.resumeAtlas(workspaceId),
             onDiscardAtlasCandidate: (workspaceId) => ws.discardAtlasCandidate(workspaceId),
-            onOpenAtlasViewer: (workspaceId) => setSidebarTab('atlas'),
+            onOpenAtlasViewer: (workspaceId) => openSidebarTab('atlas'),
             qaLiveShots: ws.qaLiveShots,
             onNewAgent: () => { setEditingAgent(null); setShowModal(true); },
             onEditAgent: (agent) => { setEditingAgent(agent); setShowModal(true); },
@@ -6218,10 +6253,6 @@
         // Main content
         e('div', { className: 'main-content' },
           !connected && e('div', { className: 'connection-error' }, 'Disconnected. Reconnecting...'),
-          connected && runtimeHealth && runtimeHealth.runtime && runtimeHealth.runtime.drift === 'restart-required' && e('div', {
-            className: 'runtime-banner',
-            role: 'status',
-          }, 'Restart required — this window is talking to an older Agent Forge process than the files on disk.'),
 
           // Minimized panels bar (Feature 2)
           !maximizedAgent && minimizedDisplayAgents.length > 0 && e('div', { className: 'minimized-panels-bar' },

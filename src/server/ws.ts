@@ -425,7 +425,7 @@ async function handleMessage(ws: ServerWebSocket<unknown>, message: ClientMessag
 
     case 'refresh_limits': {
       try {
-        await limitsService.refresh();
+        await limitsService.refresh(true, { force: true });
       } catch (e: any) {
         sendTo(ws, { type: 'error', message: e?.message || 'Limits refresh failed' });
       }
