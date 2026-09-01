@@ -4,14 +4,18 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import {
   LIMITS_REFRESH_INTERVAL_MS,
+  chooseCodexLimits,
   limitsService,
   mapClaudeUsageResponse,
   mapCodexAppServerRateLimits,
   mapCodexRateLimitWindows,
   mergeProviderLimits,
   parseRetryAfter,
+  pickCodexAccountRateLimits,
+  preferCodexRateLimitEvent,
   readJsonLineResponse,
   selectClaudeModelWeekly,
+  selectClaudeUsageWindow,
 } from './limits.service';
 
 // Parser regression net for the Limits tab: feeds a synthetic Claude bridge
@@ -88,6 +92,26 @@ beforeAll(() => {
   }) + '\n');
   const futureMtime = new Date(Date.now() + 60_000);
   utimesSync(stalePath, futureMtime, futureMtime);
+
+  // A newer Spark / codex_bengalfox event at 0% must not hide the account Codex windows.
+  const sparkPath = join(dayDir, 'rollout-2026-07-09T16-00-00-spark.jsonl');
+  writeFileSync(sparkPath, JSON.stringify({
+    timestamp: new Date().toISOString(),
+    type: 'event_msg',
+    payload: {
+      type: 'token_count',
+      info: { last_token_usage: { total_tokens: 10 }, model_context_window: 100 },
+      rate_limits: {
+        limit_id: 'codex_bengalfox',
+        primary: { used_percent: 0, window_minutes: 300, resets_at: Math.floor(Date.now() / 1000) + 3600 },
+        secondary: { used_percent: 0, window_minutes: 10080, resets_at: Math.floor(Date.now() / 1000) + 86400 },
+        plan_type: null,
+      },
+    },
+  }) + '\n');
+  const sparkMtime = new Date(Date.now() + 120_000);
+  utimesSync(sparkPath, sparkMtime, sparkMtime);
+
   codexFixturePath = join(dir, 'sessions');
   process.env.AI_HARNESS_CODEX_SESSIONS_DIR = codexFixturePath;
 });
@@ -126,12 +150,53 @@ test('mapClaudeUsageResponse maps the /api/oauth/usage shape', () => {
   expect(snap.modelWeekly.resetsAt).toBe(Date.parse('2026-07-12T02:00:00.000Z'));
 });
 
-test('mapClaudeUsageResponse tolerates missing windows', () => {
+test('mapClaudeUsageResponse treats empty windows as unavailable so merge can keep last good data', () => {
   const snap = mapClaudeUsageResponse({}, null);
-  expect(snap.status).toBe('available');
+  expect(snap.status).toBe('unavailable');
+  expect(snap.detail).toContain('no readable windows');
   expect(snap.fiveHour.usedPercent).toBeNull();
   expect(snap.weekly.usedPercent).toBeNull();
   expect(snap.modelWeekly.usedPercent).toBeNull();
+});
+
+test('mapClaudeUsageResponse reads 5-hour and 7-day from limits[] when flat keys are null', () => {
+  const snap = mapClaudeUsageResponse({
+    five_hour: null,
+    seven_day: null,
+    seven_day_sonnet: null,
+    limits: [
+      { kind: 'session', group: 'session', percent: 12, resets_at: '2026-08-18T04:10:00.000Z', scope: null },
+      { kind: 'weekly_all', group: 'weekly', percent: 41, resets_at: '2026-08-23T02:00:00.000Z', scope: null },
+      {
+        kind: 'weekly_scoped',
+        group: 'weekly',
+        percent: 65,
+        resets_at: '2026-08-23T02:00:00.000Z',
+        scope: { model: { id: null, display_name: 'Fable' } },
+      },
+    ],
+  }, 'max');
+  expect(snap.status).toBe('available');
+  expect(snap.fiveHour.usedPercent).toBe(12);
+  expect(snap.fiveHour.resetsAt).toBe(Date.parse('2026-08-18T04:10:00.000Z'));
+  expect(snap.weekly.usedPercent).toBe(41);
+  expect(snap.weekly.resetsAt).toBe(Date.parse('2026-08-23T02:00:00.000Z'));
+  expect(snap.modelWeekly.usedPercent).toBe(65);
+});
+
+test('selectClaudeUsageWindow finds session and weekly_all entries', () => {
+  const data = {
+    limits: [
+      { kind: 'session', percent: 9, resets_at: '2026-08-18T04:10:00.000Z' },
+      { kind: 'weekly_all', percent: 22, resets_at: '2026-08-23T02:00:00.000Z' },
+    ],
+  };
+  expect(selectClaudeUsageWindow(data, ['session'])).toEqual({
+    usedPercent: 9,
+    resetsAt: Date.parse('2026-08-18T04:10:00.000Z'),
+  });
+  expect(selectClaudeUsageWindow(data, ['weekly_all']).usedPercent).toBe(22);
+  expect(selectClaudeUsageWindow({}, ['session']).usedPercent).toBeNull();
 });
 
 // Anthropic retired the flat `seven_day_sonnet` key: live responses now send it
@@ -243,6 +308,30 @@ test('transient provider errors retain the last successful usage snapshot', () =
   expect(merged.detail).toContain('HTTP 429');
 });
 
+test('empty available Claude snapshots do not wipe the last successful usage', () => {
+  const previous = mapClaudeUsageResponse({
+    five_hour: { utilization: 44, resets_at: '2026-08-11T20:00:00Z' },
+    seven_day: { utilization: 19, resets_at: '2026-08-17T20:00:00Z' },
+    seven_day_sonnet: { utilization: 51, resets_at: '2026-08-17T20:00:00Z' },
+  }, 'max');
+  const emptyAvailable = {
+    ...previous,
+    status: 'available' as const,
+    checkedAt: previous.checkedAt + 60_000,
+    fiveHour: { usedPercent: null, resetsAt: null, windowMinutes: 300 },
+    weekly: { usedPercent: null, resetsAt: null, windowMinutes: 10080 },
+    modelWeekly: { usedPercent: null, resetsAt: null, windowMinutes: 10080 },
+    contextUsedPercent: null,
+    detail: null,
+  };
+
+  const merged = mergeProviderLimits(previous, emptyAvailable);
+  expect(merged.status).toBe('stale');
+  expect(merged.fiveHour.usedPercent).toBe(44);
+  expect(merged.weekly.usedPercent).toBe(19);
+  expect(merged.modelWeekly.usedPercent).toBe(51);
+});
+
 test('Retry-After supports both seconds and HTTP dates', () => {
   const now = Date.parse('2026-08-11T19:00:00Z');
   expect(parseRetryAfter('120', now)).toBe(now + 120_000);
@@ -314,6 +403,83 @@ test('Codex maps the live app-server camelCase rate-limit response', () => {
   expect(snap.weekly.usedPercent).toBe(4);
   expect(snap.weekly.windowMinutes).toBe(10080);
   expect(snap.weekly.resetsAt).toBe(1785258177 * 1000);
+});
+
+test('Codex app-server mapping prefers account windows over Spark zeros', () => {
+  const spark = {
+    limitId: 'codex_bengalfox',
+    primary: { usedPercent: 0, windowDurationMins: 300, resetsAt: 1785258177 },
+    secondary: { usedPercent: 0, windowDurationMins: 10080, resetsAt: 1785258177 },
+  };
+  const account = {
+    limitId: 'codex',
+    planType: 'pro',
+    primary: { usedPercent: 26, windowDurationMins: 10080, resetsAt: 1785258177 },
+    secondary: null,
+  };
+  const picked = pickCodexAccountRateLimits({
+    rateLimits: spark,
+    rateLimitsByLimitId: { codex: account, codex_bengalfox: spark },
+  });
+  expect(picked.limitId).toBe('codex');
+
+  const snap = mapCodexAppServerRateLimits({
+    rateLimits: spark,
+    rateLimitsByLimitId: { codex: account, codex_bengalfox: spark },
+  });
+  expect(snap.status).toBe('available');
+  expect(snap.limitId).toBe('codex');
+  expect(snap.planType).toBe('pro');
+  expect(snap.fiveHour.usedPercent).toBeNull();
+  expect(snap.weekly.usedPercent).toBe(26);
+});
+
+test('Codex live model-specific zeros yield to account rollout windows', () => {
+  const live = mapCodexAppServerRateLimits({
+    rateLimits: {
+      limitId: 'codex_bengalfox',
+      primary: { usedPercent: 0, windowDurationMins: 300, resetsAt: 1785258177 },
+      secondary: { usedPercent: 0, windowDurationMins: 10080, resetsAt: 1785258177 },
+    },
+    rateLimitsByLimitId: null,
+  });
+  expect(live.limitId).toBe('codex_bengalfox');
+  expect(live.fiveHour.usedPercent).toBe(0);
+
+  const fallback = mapCodexAppServerRateLimits({
+    rateLimits: {
+      limitId: 'codex',
+      planType: 'pro',
+      primary: { usedPercent: 26, windowDurationMins: 10080, resetsAt: 1785258177 },
+      secondary: null,
+    },
+    rateLimitsByLimitId: null,
+  });
+  fallback.source = 'rollout files';
+
+  const chosen = chooseCodexLimits(live, fallback);
+  expect(chosen.weekly.usedPercent).toBe(26);
+  expect(chosen.limitId).toBe('codex');
+  expect(chosen.detail).toContain('model-specific');
+});
+
+test('preferCodexRateLimitEvent keeps account Codex over a later Spark zero event', () => {
+  const account = {
+    timestamp: '2026-08-29T13:27:33.000Z',
+    payload: { rate_limits: { limit_id: 'codex', primary: { used_percent: 26, window_minutes: 10080 } } },
+  };
+  const spark = {
+    timestamp: '2026-08-29T14:48:45.000Z',
+    payload: {
+      rate_limits: {
+        limit_id: 'codex_bengalfox',
+        primary: { used_percent: 0, window_minutes: 300 },
+        secondary: { used_percent: 0, window_minutes: 10080 },
+      },
+    },
+  };
+  expect(preferCodexRateLimitEvent(account, spark)).toBe(account);
+  expect(preferCodexRateLimitEvent(spark, account)).toBe(account);
 });
 
 test('limits refresh parses Claude bridge file and Codex rollout events', async () => {
@@ -391,4 +557,51 @@ test('Claude statusline bridge reads the Fable weekly window from a scoped limit
   const written = await Bun.file(outputPath).json();
   expect(written.seven_day_sonnet_used_percentage).toBe(65);
   expect(written.seven_day_sonnet_resets_at).toBe('2026-08-23T02:00:00Z');
+});
+
+test('Claude statusline bridge fills 5-hour and 7-day from limits[] when flat keys are missing', async () => {
+  const outputPath = join(dir, 'statusline-limits-array-only.json');
+  const scriptPath = join(import.meta.dir, '../../../scripts/claude-limits-statusline.ts');
+  const proc = Bun.spawn([process.execPath, scriptPath], {
+    env: { ...process.env, AI_HARNESS_CLAUDE_LIMITS_JSON: outputPath },
+    stdin: 'pipe',
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  proc.stdin.write(JSON.stringify({
+    model: { display_name: 'Fable 5' },
+    rate_limits: {
+      five_hour: null,
+      seven_day: null,
+      seven_day_sonnet: null,
+      limits: [
+        { kind: 'session', group: 'session', percent: 12, resets_at: '2026-08-18T04:10:00Z' },
+        { kind: 'weekly_all', group: 'weekly', percent: 41, resets_at: '2026-08-23T02:00:00Z' },
+        {
+          kind: 'weekly_scoped',
+          group: 'weekly',
+          percent: 65,
+          resets_at: '2026-08-23T02:00:00Z',
+          scope: { model: { id: null, display_name: 'Fable' } },
+        },
+      ],
+    },
+  }));
+  proc.stdin.end();
+
+  const [exitCode, stdout, stderr] = await Promise.all([
+    proc.exited,
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ]);
+  expect(exitCode).toBe(0);
+  expect(stderr).toBe('');
+  expect(stdout).toContain('5h 12%');
+  expect(stdout).toContain('7d 41%');
+  expect(stdout).toContain('Fable 7d 65%');
+
+  const written = await Bun.file(outputPath).json();
+  expect(written.five_hour_used_percentage).toBe(12);
+  expect(written.seven_day_used_percentage).toBe(41);
+  expect(written.seven_day_sonnet_used_percentage).toBe(65);
 });

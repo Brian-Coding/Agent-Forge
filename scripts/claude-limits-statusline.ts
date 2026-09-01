@@ -31,27 +31,34 @@ try {
 const rate = data?.rate_limits ?? {};
 const five = rate?.five_hour ?? {};
 const week = rate?.seven_day ?? {};
+const limitsArr: any[] = Array.isArray(rate?.limits) ? rate.limits : [];
+const pickLimit = (kind: string) => limitsArr.find((entry: any) =>
+  entry && typeof entry === 'object' && entry.kind === kind
+  && typeof (entry.percent ?? entry.used_percentage ?? entry.utilization) === 'number');
+const session = pickLimit('session');
+const weeklyAll = pickLimit('weekly_all');
 // The model-specific weekly allowance (presented as Fable in the usage UI) was
 // historically the flat `seven_day_sonnet` key. Anthropic moved it into a
 // `limits[]` array of scoped windows; prefer that and fall back to the old key
 // so both CLI generations map. Mirrors selectClaudeModelWeekly in
 // src/server/services/limits.service.ts.
-const scopedWeek = (Array.isArray(rate?.limits) ? rate.limits : []).find((entry: any) =>
+const scopedWeek = limitsArr.find((entry: any) =>
   entry && typeof entry === 'object'
   && (entry.kind === 'weekly_scoped' || (entry.group === 'weekly' && entry.scope?.model))
   && typeof (entry.percent ?? entry.used_percentage) === 'number');
 const modelWeek = scopedWeek
   ? { used_percentage: scopedWeek.percent ?? scopedWeek.used_percentage, resets_at: scopedWeek.resets_at }
   : (rate?.seven_day_sonnet ?? {});
+const entryPercent = (entry: any) => entry?.percent ?? entry?.used_percentage ?? entry?.utilization ?? null;
 
 const out = {
   updated_at: Date.now(),
   model: data?.model?.display_name ?? data?.model?.id ?? null,
   context_used_percentage: data?.context_window?.used_percentage ?? null,
-  five_hour_used_percentage: five?.used_percentage ?? null,
-  five_hour_resets_at: five?.resets_at ?? null,
-  seven_day_used_percentage: week?.used_percentage ?? null,
-  seven_day_resets_at: week?.resets_at ?? null,
+  five_hour_used_percentage: five?.used_percentage ?? entryPercent(session),
+  five_hour_resets_at: five?.resets_at ?? session?.resets_at ?? null,
+  seven_day_used_percentage: week?.used_percentage ?? entryPercent(weeklyAll),
+  seven_day_resets_at: week?.resets_at ?? weeklyAll?.resets_at ?? null,
   seven_day_sonnet_used_percentage: modelWeek?.used_percentage ?? null,
   seven_day_sonnet_resets_at: modelWeek?.resets_at ?? null,
 };

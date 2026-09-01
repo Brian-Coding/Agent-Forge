@@ -15,9 +15,11 @@
  *
  * Codex: the CLI app-server's `account/rateLimits/read` method is the primary
  * source. It reflects the live account state used by Codex status surfaces,
- * including manual usage resets. Rollout `token_count.rate_limits` events
- * remain a passive fallback and also yield context-window usage when the live
- * interface is unavailable.
+ * including manual usage resets. Prefer the account `codex` bucket over a
+ * model-specific Spark / `codex_bengalfox` snapshot — those often report 0%
+ * while the weekly Codex window is the number the Limits tab should show.
+ * Rollout `token_count.rate_limits` events remain a passive fallback and also
+ * yield context-window usage when the live interface is unavailable.
  *
  * Both providers refresh every minute plus on demand (refresh_limits).
  * Results are cached per provider so one broken source never blanks the tab.
@@ -43,7 +45,9 @@ export const LIMITS_REFRESH_INTERVAL_MS = 60 * 1000;
 /** Data older than this renders as 'stale' — usage percentages decay, so old reads mislead. */
 const STALE_AFTER_MS = 6 * 60 * 60 * 1000;
 /** How many recent rollout files to scan before giving up (fresh sessions may lack the event). */
-const CODEX_FILE_SCAN_CAP = 6;
+const CODEX_FILE_SCAN_CAP = 24;
+/** Walk this many newest calendar day-directories before sorting by mtime. */
+const CODEX_ROLLOUT_DAY_CAP = 5;
 /** Read only the tail of large rollout files — the last rate_limits event is what matters. */
 const CODEX_TAIL_BYTES = 512 * 1024;
 /** Bound a broken or incompatible app-server instead of blocking refresh forever. */
@@ -93,6 +97,7 @@ function baseSnapshot(provider: 'claude' | 'codex', source: string): ProviderLim
     modelWeekly: emptyWindow(),
     source,
     detail: null,
+    limitId: null,
   };
 }
 
@@ -130,20 +135,35 @@ function hasLimitData(snapshot: ProviderLimitsSnapshot): boolean {
     || snapshot.contextUsedPercent !== null;
 }
 
+function isUsableLimitsSnapshot(snapshot: ProviderLimitsSnapshot): boolean {
+  return (snapshot.status === 'available' || snapshot.status === 'stale') && hasLimitData(snapshot);
+}
+
 /** Keep the last successful provider data visible when a refresh source has a
- * transient failure. The failed attempt remains explicit in detail/checkedAt. */
+ * transient failure. The failed attempt remains explicit in detail/checkedAt.
+ * An `available` snapshot with no readable windows is treated as a failed
+ * refresh so it cannot wipe a previous good read. */
 export function mergeProviderLimits(
   previous: ProviderLimitsSnapshot | null | undefined,
   next: ProviderLimitsSnapshot,
 ): ProviderLimitsSnapshot {
-  if (next.status === 'available' || next.status === 'stale') return next;
-  if (!previous || !hasLimitData(previous) || !['available', 'stale'].includes(previous.status)) return next;
-  return {
-    ...previous,
-    status: 'stale',
-    checkedAt: next.checkedAt,
-    detail: `Latest refresh failed (${next.detail || next.status}); showing the last successful data.`,
-  };
+  if (isUsableLimitsSnapshot(next)) return next;
+  if (previous && isUsableLimitsSnapshot(previous)) {
+    return {
+      ...previous,
+      status: 'stale',
+      checkedAt: next.checkedAt,
+      detail: `Latest refresh failed (${next.detail || next.status}); showing the last successful data.`,
+    };
+  }
+  if ((next.status === 'available' || next.status === 'stale') && !hasLimitData(next)) {
+    return {
+      ...next,
+      status: 'unavailable',
+      detail: next.detail || 'Usage source returned no readable windows.',
+    };
+  }
+  return next;
 }
 
 /** Convert Retry-After (seconds or HTTP date) to an absolute epoch-ms value. */
@@ -222,36 +242,67 @@ async function readClaudeOAuth(): Promise<{ token: string; subscriptionType: str
  * Read the array first and keep the legacy key as a fallback, so an older
  * payload (or the statusline bridge's older shape) still maps.
  */
+function claudeLimitsEntries(data: any): any[] {
+  return Array.isArray(data?.limits) ? data.limits : [];
+}
+
+function claudeEntryPercent(entry: any): number | null {
+  return toPercent(entry?.percent ?? entry?.utilization ?? entry?.used_percentage ?? entry?.used_percent);
+}
+
+function claudeWindowPercent(window: any): number | null {
+  return toPercent(window?.utilization ?? window?.used_percentage ?? window?.used_percent ?? window?.percent);
+}
+
+/** Read a named window from the `limits[]` array Anthropic now uses on live OAuth responses. */
+export function selectClaudeUsageWindow(
+  data: any,
+  kinds: string[],
+): { usedPercent: number | null; resetsAt: number | null } {
+  const match = claudeLimitsEntries(data).find(entry =>
+    entry && typeof entry === 'object'
+    && kinds.includes(entry.kind)
+    && claudeEntryPercent(entry) !== null);
+  if (!match) return { usedPercent: null, resetsAt: null };
+  return { usedPercent: claudeEntryPercent(match), resetsAt: toEpochMs(match.resets_at) };
+}
+
 export function selectClaudeModelWeekly(data: any): { usedPercent: number | null; resetsAt: number | null } {
-  const entries: any[] = Array.isArray(data?.limits) ? data.limits : [];
-  const scoped = entries.find(entry =>
+  const scoped = claudeLimitsEntries(data).find(entry =>
     entry && typeof entry === 'object'
     && (entry.kind === 'weekly_scoped' || (entry.group === 'weekly' && entry.scope?.model))
-    && toPercent(entry.percent) !== null);
+    && claudeEntryPercent(entry) !== null);
   if (scoped) {
-    return { usedPercent: toPercent(scoped.percent), resetsAt: toEpochMs(scoped.resets_at) };
+    return { usedPercent: claudeEntryPercent(scoped), resetsAt: toEpochMs(scoped.resets_at) };
   }
   const legacy = data?.seven_day_sonnet;
-  return { usedPercent: toPercent(legacy?.utilization), resetsAt: toEpochMs(legacy?.resets_at) };
+  return { usedPercent: claudeWindowPercent(legacy), resetsAt: toEpochMs(legacy?.resets_at) };
 }
 
 /**
  * Pure mapping from the /api/oauth/usage JSON to a provider snapshot. Split
  * out so it can be unit-tested without a live network call.
+ *
+ * Live 2026-08 payloads often leave `five_hour` / `seven_day` null and put
+ * those figures in `limits[]` (`session` / `weekly_all`). Mapping only the
+ * flat keys produced an `available` snapshot with no meters, which skipped
+ * the statusline bridge and wiped the last good Claude numbers.
  */
 export function mapClaudeUsageResponse(data: any, subscriptionType: string | null): ProviderLimitsSnapshot {
   const snap = baseSnapshot('claude', `oauth usage → ${CLAUDE_USAGE_URL}`);
+  const fiveFromLimits = selectClaudeUsageWindow(data, ['session']);
+  const weekFromLimits = selectClaudeUsageWindow(data, ['weekly_all']);
   const modelWeekly = selectClaudeModelWeekly(data);
   snap.updatedAt = Date.now();
   snap.planType = subscriptionType;
   snap.fiveHour = {
-    usedPercent: toPercent(data?.five_hour?.utilization),
-    resetsAt: toEpochMs(data?.five_hour?.resets_at),
+    usedPercent: claudeWindowPercent(data?.five_hour) ?? fiveFromLimits.usedPercent,
+    resetsAt: toEpochMs(data?.five_hour?.resets_at) ?? fiveFromLimits.resetsAt,
     windowMinutes: 300,
   };
   snap.weekly = {
-    usedPercent: toPercent(data?.seven_day?.utilization),
-    resetsAt: toEpochMs(data?.seven_day?.resets_at),
+    usedPercent: claudeWindowPercent(data?.seven_day) ?? weekFromLimits.usedPercent,
+    resetsAt: toEpochMs(data?.seven_day?.resets_at) ?? weekFromLimits.resetsAt,
     windowMinutes: 10080,
   };
   snap.modelWeekly = {
@@ -259,6 +310,11 @@ export function mapClaudeUsageResponse(data: any, subscriptionType: string | nul
     resetsAt: modelWeekly.resetsAt,
     windowMinutes: 10080,
   };
+  if (!hasLimitData(snap)) {
+    snap.status = 'unavailable';
+    snap.detail = 'Usage endpoint returned no readable windows.';
+    return snap;
+  }
   snap.status = 'available';
   applyFreshness(snap);
   return snap;
@@ -343,6 +399,11 @@ async function readClaudeLimitsFromBridge(): Promise<ProviderLimitsSnapshot> {
       resetsAt: toEpochMs(data.seven_day_sonnet_resets_at),
       windowMinutes: 10080,
     };
+    if (!hasLimitData(snap)) {
+      snap.status = 'unavailable';
+      snap.detail = 'Statusline bridge file has no readable windows.';
+      return snap;
+    }
     snap.status = 'available';
     applyFreshness(snap);
   } catch (e: any) {
@@ -354,12 +415,13 @@ async function readClaudeLimitsFromBridge(): Promise<ProviderLimitsSnapshot> {
 
 async function readClaudeLimits(): Promise<ProviderLimitsSnapshot> {
   // Primary: the OAuth usage endpoint /status uses — passive, zero inference
-  // cost, works headlessly. Fall back to the statusline bridge only if the
-  // credentials are missing or the token is expired.
+  // cost, works headlessly. Fall back to the statusline bridge when the
+  // credentials are missing, the token is expired, or the live payload has
+  // no readable windows (empty `available` used to skip the bridge).
   const oauth = await readClaudeLimitsFromOAuth();
-  if (oauth && oauth.status === 'available') return oauth;
+  if (oauth && isUsableLimitsSnapshot(oauth)) return oauth;
   const bridge = await readClaudeLimitsFromBridge();
-  if (bridge.status === 'available') return bridge;
+  if (isUsableLimitsSnapshot(bridge)) return bridge;
   // Neither produced usable data — surface the OAuth detail when we have one
   // (it's the more actionable message), otherwise the bridge's.
   return oauth ?? bridge;
@@ -369,15 +431,57 @@ async function readClaudeLimits(): Promise<ProviderLimitsSnapshot> {
 // Codex — live app-server rate limits + rollout fallback
 // ---------------------------------------------------------------------------
 
+function rateLimitId(value: any): string | null {
+  const id = value?.limitId ?? value?.limit_id;
+  return typeof id === 'string' && id ? id : null;
+}
+
+export function isCodexAccountRateLimit(value: any): boolean {
+  const id = rateLimitId(value);
+  return !id || id === 'codex';
+}
+
+export function isCodexAccountLimitsSnapshot(snapshot: ProviderLimitsSnapshot): boolean {
+  return !snapshot.limitId || snapshot.limitId === 'codex';
+}
+
+/**
+ * Prefer the account `codex` bucket over a model-specific Spark /
+ * `codex_bengalfox` snapshot. Live app-server payloads often put the
+ * current model's zeros in `rateLimits` while the weekly Codex number
+ * lives under `rateLimitsByLimitId.codex`.
+ */
+export function pickCodexAccountRateLimits(data: any): any | null {
+  const byLimitId = data?.rateLimitsByLimitId;
+  if (byLimitId && typeof byLimitId === 'object') {
+    if (byLimitId.codex && typeof byLimitId.codex === 'object') return byLimitId.codex;
+    const named = Object.values(byLimitId).find((value: any) => rateLimitId(value) === 'codex');
+    if (named && typeof named === 'object') return named;
+  }
+  const rateLimits = data?.rateLimits;
+  if (rateLimits && typeof rateLimits === 'object' && isCodexAccountRateLimit(rateLimits)) {
+    return rateLimits;
+  }
+  if (byLimitId && typeof byLimitId === 'object') {
+    const first = Object.values(byLimitId).find((value: any) => value && typeof value === 'object');
+    if (first) return first;
+  }
+  return rateLimits && typeof rateLimits === 'object' ? rateLimits : null;
+}
+
+function applyCodexRateLimitWindows(snap: ProviderLimitsSnapshot, rateLimits: any): void {
+  snap.limitId = rateLimitId(rateLimits);
+  const planType = rateLimits?.planType ?? rateLimits?.plan_type;
+  snap.planType = typeof planType === 'string' ? planType : null;
+  const windows = mapCodexRateLimitWindows(rateLimits);
+  snap.fiveHour = windows.fiveHour;
+  snap.weekly = windows.weekly;
+}
+
 /** Map the current Codex app-server response without requiring a live process. */
 export function mapCodexAppServerRateLimits(data: any): ProviderLimitsSnapshot {
   const snap = baseSnapshot('codex', 'Codex app-server account/rateLimits/read');
-  const byLimitId = data?.rateLimitsByLimitId;
-  const rateLimits = byLimitId?.codex
-    ?? (byLimitId && typeof byLimitId === 'object'
-      ? Object.values(byLimitId).find((value: any) => value?.limitId === 'codex')
-      : null)
-    ?? data?.rateLimits;
+  const rateLimits = pickCodexAccountRateLimits(data);
 
   if (!rateLimits || typeof rateLimits !== 'object') {
     snap.status = 'unavailable';
@@ -386,11 +490,7 @@ export function mapCodexAppServerRateLimits(data: any): ProviderLimitsSnapshot {
   }
 
   snap.updatedAt = Date.now();
-  const planType = rateLimits.planType ?? rateLimits.plan_type;
-  snap.planType = typeof planType === 'string' ? planType : null;
-  const windows = mapCodexRateLimitWindows(rateLimits);
-  snap.fiveHour = windows.fiveHour;
-  snap.weekly = windows.weekly;
+  applyCodexRateLimitWindows(snap, rateLimits);
 
   if (snap.fiveHour.usedPercent === null && snap.weekly.usedPercent === null) {
     snap.status = 'unavailable';
@@ -399,7 +499,34 @@ export function mapCodexAppServerRateLimits(data: any): ProviderLimitsSnapshot {
   }
 
   snap.status = 'available';
+  if (!isCodexAccountRateLimit(rateLimits)) {
+    snap.detail = `Showing ${rateLimitId(rateLimits)} limits; account Codex windows were not in this response.`;
+  }
   return snap;
+}
+
+/** Choose live app-server data vs rollout fallback, preferring account Codex windows. */
+export function chooseCodexLimits(
+  live: ProviderLimitsSnapshot,
+  fallback: ProviderLimitsSnapshot,
+): ProviderLimitsSnapshot {
+  if (isUsableLimitsSnapshot(live) && isCodexAccountLimitsSnapshot(live)) return live;
+  if (isUsableLimitsSnapshot(fallback) && isCodexAccountLimitsSnapshot(fallback)) {
+    return {
+      ...fallback,
+      detail: isUsableLimitsSnapshot(live)
+        ? 'Live read returned model-specific limits; showing account Codex windows from rollouts.'
+        : 'Live Codex rate-limit read unavailable; showing rollout fallback.',
+    };
+  }
+  if (isUsableLimitsSnapshot(live)) return live;
+  if (isUsableLimitsSnapshot(fallback)) {
+    return {
+      ...fallback,
+      detail: 'Live Codex rate-limit read unavailable; showing rollout fallback.',
+    };
+  }
+  return live;
 }
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
@@ -588,6 +715,7 @@ function newestRolloutFiles(cap: number): string[] {
   const root = codexSessionsRoot();
   if (!existsSync(root)) return [];
   const files: Array<{ path: string; mtime: number }> = [];
+  let daysVisited = 0;
   outer:
   for (const year of numericDirsDesc(root)) {
     for (const month of numericDirsDesc(join(root, year))) {
@@ -600,11 +728,23 @@ function newestRolloutFiles(cap: number): string[] {
             files.push({ path: p, mtime: statSync(p).mtimeMs });
           }
         } catch {}
-        if (files.length >= cap) break outer;
+        daysVisited += 1;
+        if (daysVisited >= CODEX_ROLLOUT_DAY_CAP) break outer;
       }
     }
   }
   return files.sort((a, b) => b.mtime - a.mtime).slice(0, cap).map(f => f.path);
+}
+
+/** Account `codex` events beat later model-specific Spark zeros; newest wins within the same class. */
+export function preferCodexRateLimitEvent(current: any | null, candidate: any): any {
+  if (!current) return candidate;
+  const currentAccount = isCodexAccountRateLimit(current.payload?.rate_limits);
+  const candidateAccount = isCodexAccountRateLimit(candidate.payload?.rate_limits);
+  if (candidateAccount !== currentAccount) return candidateAccount ? candidate : current;
+  const currentAt = toEpochMs(current.timestamp) ?? 0;
+  const candidateAt = toEpochMs(candidate.timestamp) ?? 0;
+  return candidateAt >= currentAt ? candidate : current;
 }
 
 /** Last `rate_limits`-bearing event in one rollout file's tail, or null. */
@@ -637,25 +777,17 @@ async function readCodexLimitsFromRollouts(): Promise<ProviderLimitsSnapshot> {
       return snap;
     }
     let latestEvent: any | null = null;
-    let latestEventAt = -Infinity;
     for (const path of files) {
       const event = await lastRateLimitEvent(path);
       if (!event) continue;
-      const eventAt = toEpochMs(event.timestamp) ?? 0;
-      if (!latestEvent || eventAt > latestEventAt) {
-        latestEvent = event;
-        latestEventAt = eventAt;
-      }
+      latestEvent = preferCodexRateLimitEvent(latestEvent, event);
     }
 
     if (latestEvent) {
       const payload = latestEvent.payload;
       const rl = payload.rate_limits;
       snap.updatedAt = toEpochMs(latestEvent.timestamp);
-      snap.planType = typeof rl.plan_type === 'string' ? rl.plan_type : null;
-      const windows = mapCodexRateLimitWindows(rl);
-      snap.fiveHour = windows.fiveHour;
-      snap.weekly = windows.weekly;
+      applyCodexRateLimitWindows(snap, rl);
       const info = payload.info;
       if (info?.last_token_usage?.total_tokens && info?.model_context_window) {
         snap.contextUsedPercent = toPercent((info.last_token_usage.total_tokens / info.model_context_window) * 100);
@@ -681,14 +813,9 @@ async function readCodexLimits(): Promise<ProviderLimitsSnapshot> {
   }
 
   const live = await readCodexLimitsFromAppServer();
-  if (live.status === 'available') return live;
-
+  if (isUsableLimitsSnapshot(live) && isCodexAccountLimitsSnapshot(live)) return live;
   const fallback = await readCodexLimitsFromRollouts();
-  if (fallback.status === 'available' || fallback.status === 'stale') {
-    fallback.detail = 'Live Codex rate-limit read unavailable; showing rollout fallback.';
-    return fallback;
-  }
-  return live;
+  return chooseCodexLimits(live, fallback);
 }
 
 // ---------------------------------------------------------------------------
@@ -696,7 +823,15 @@ async function readCodexLimits(): Promise<ProviderLimitsSnapshot> {
 // ---------------------------------------------------------------------------
 
 export const limitsService = {
-  async refresh(broadcastIt = true): Promise<LimitsSnapshot> {
+  async refresh(broadcastIt = true, options: { force?: boolean } = {}): Promise<LimitsSnapshot> {
+    if (options.force) {
+      state.claudeBackoffUntil = 0;
+      const inFlight = state.refreshPromise;
+      if (inFlight) {
+        try { await inFlight; } catch { /* start a new read after the in-flight one */ }
+      }
+      state.refreshPromise = null;
+    }
     if (!state.refreshPromise) {
       state.refreshPromise = (async () => {
         // Providers are independent — one failing source must not blank the other.

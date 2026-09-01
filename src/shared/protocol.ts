@@ -538,6 +538,11 @@ export interface ProviderLimitsSnapshot {
   source: string;
   /** Error text or setup hint when status is unavailable/error. */
   detail: string | null;
+  /**
+   * Codex limit bucket this snapshot came from (`codex` vs a model-specific
+   * id such as `codex_bengalfox`). Absent on Claude snapshots and older cache.
+   */
+  limitId?: string | null;
 }
 
 export interface LimitsSnapshot {
