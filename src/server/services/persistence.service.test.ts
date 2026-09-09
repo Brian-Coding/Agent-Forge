@@ -350,10 +350,48 @@ test('legacy partial state is backed up and replaced by normalized versioned sta
   expect(JSON.parse(await readFile(dataFile, 'utf8')).schemaVersion).toBe(PERSISTED_SCHEMA_VERSION);
 });
 
+test('a legacy schema 2 file is imported as the current schema version', async () => {
+  const directory = await fixtureDirectory();
+  const dataFile = join(directory, 'data.json');
+  const original = JSON.stringify({
+    ...emptyData(),
+    schemaVersion: 2,
+    workspaces: [{
+      id: 'ws-1',
+      name: 'Desk',
+      sortOrder: 0,
+      gridColumns: 3,
+      gridRows: 2,
+      selectedAgentIds: [],
+      lockedAgentIds: [],
+      createdAt: 1,
+      googleDocsTrackerEnabled: false,
+      qaRuns: [],
+      mode: 'studio',
+      studio: { id: 'studio-1', seats: [] },
+    }],
+  });
+  await writeFile(dataFile, original);
+  const service = createPersistenceService({
+    dataFile,
+    pidFile: join(directory, 'pids.json'),
+    ownedFile: join(directory, 'owned-processes.json'),
+    now: () => 789,
+  });
+
+  const loaded = await service.load();
+  expect(loaded?.schemaVersion).toBe(PERSISTED_SCHEMA_VERSION);
+  expect(loaded?.workspaces).toHaveLength(1);
+  expect(loaded?.workspaces[0]).not.toHaveProperty('mode');
+  expect(loaded?.workspaces[0]).not.toHaveProperty('studio');
+  expect(await readFile(`${dataFile}.recovery-789`, 'utf8')).toBe(original);
+  expect(JSON.parse(await readFile(dataFile, 'utf8')).schemaVersion).toBe(PERSISTED_SCHEMA_VERSION);
+});
+
 test('a future schema is rejected while preserving both original and a safety copy', async () => {
   const directory = await fixtureDirectory();
   const dataFile = join(directory, 'data.json');
-  const original = JSON.stringify({ ...emptyData(), schemaVersion: PERSISTED_SCHEMA_VERSION + 1 });
+  const original = JSON.stringify({ ...emptyData(), schemaVersion: 99 });
   await writeFile(dataFile, original);
   const service = createPersistenceService({
     dataFile,

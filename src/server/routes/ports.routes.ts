@@ -2,6 +2,14 @@ import { jsonResponse } from '../utils';
 import { readJsonBody } from '../request-body';
 import { collectBoundedProcess } from '../services/bounded-subprocess';
 import { killProcessTree } from '../utils';
+import { workspaceService } from '../services/workspace.service';
+import { parseServerPort } from '../server-config';
+import {
+  labelListeningPort,
+  parsePowerShellProcessJson,
+  parsePsPidCommandList,
+  parseWmicProcessList,
+} from '../services/port-labels';
 
 async function runPortCommand(args: string[], maxChars = 2 * 1024 * 1024) {
   const proc = Bun.spawn(args, { stdout: 'pipe', stderr: 'pipe' });
@@ -46,6 +54,72 @@ async function getProcessNamesByPidWindows(): Promise<Map<number, string>> {
   return map;
 }
 
+/** One extra spawn for command lines so labels can say "Vite · Acme Store" instead of "node". */
+async function getCommandLinesByPid(): Promise<Map<number, string>> {
+  const isWindows = process.platform === 'win32';
+  try {
+    if (isWindows) {
+      try {
+        const wmic = await runPortCommand(
+          ['wmic', 'process', 'get', 'ProcessId,CommandLine', '/FORMAT:LIST'],
+          4 * 1024 * 1024,
+        );
+        if (wmic.exitCode === 0) {
+          const parsed = parseWmicProcessList(wmic.stdout);
+          if (parsed.size > 0) return parsed;
+        }
+      } catch {
+        // WMIC is gone on many Windows 11 installs — fall through to CIM.
+      }
+      const powershell = await runPortCommand([
+        'powershell',
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        'Get-CimInstance Win32_Process | Select-Object ProcessId,CommandLine | ConvertTo-Json -Compress',
+      ], 4 * 1024 * 1024);
+      if (powershell.exitCode === 0) return parsePowerShellProcessJson(powershell.stdout);
+      return new Map();
+    }
+    const ps = await runPortCommand(['ps', '-ax', '-o', 'pid=,command='], 4 * 1024 * 1024);
+    return ps.exitCode === 0 ? parsePsPidCommandList(ps.stdout) : new Map();
+  } catch {
+    return new Map();
+  }
+}
+
+function listenPort(): number | undefined {
+  try {
+    return parseServerPort(process.env.PORT);
+  } catch {
+    return undefined;
+  }
+}
+
+function decoratePorts(
+  ports: { port: number; pid: number; command: string }[],
+  commandLines: Map<number, string>,
+): {
+  port: number;
+  pid: number;
+  command: string;
+  label: string;
+  self: boolean;
+}[] {
+  const workspaces = workspaceService.getAll();
+  const serverPort = listenPort();
+  return ports.map(port => {
+    const labeled = labelListeningPort({
+      ...port,
+      commandLine: commandLines.get(port.pid) || '',
+      workspaces,
+      listenPort: serverPort,
+      selfPid: process.pid,
+    });
+    return { ...port, label: labeled.label, self: labeled.self };
+  });
+}
+
 // OS services and always-on consumer apps whose listeners are never the
 // user's dev servers. Killing these from the sidebar would also be a footgun
 // (taskkill /F on svchost can blue-screen-adjacent break the session).
@@ -69,16 +143,17 @@ export async function handleGetPorts(req: Request): Promise<Response> {
     const ports: { port: number; pid: number; command: string }[] = [];
 
     if (isWindows) {
-      // Two spawns total: one netstat for the port→pid map, one tasklist for
-      // the pid→name map. Used to be netstat + N PowerShell spawns where N is
-      // the number of listening ports on the machine.
-      const [netstatOut, pidToName] = await Promise.all([
+      // Three bounded spawns: netstat, tasklist, and one command-line table.
+      // Used to be netstat + N PowerShell spawns where N is the number of
+      // listening ports on the machine.
+      const [netstatOut, pidToName, commandLines] = await Promise.all([
         (async () => {
           const result = await runPortCommand(['netstat', '-ano']);
           if (result.exitCode !== 0) throw new Error(result.stderr || 'netstat failed');
           return result.stdout;
         })(),
         getProcessNamesByPidWindows(),
+        getCommandLinesByPid(),
       ]);
 
       const lines = netstatOut.trim().split('\n');
@@ -98,8 +173,13 @@ export async function handleGetPorts(req: Request): Promise<Response> {
         if (WINDOWS_SYSTEM_IMAGES.has(command.toLowerCase())) continue;
         ports.push({ port, pid, command });
       }
+      ports.sort((a, b) => a.port - b.port);
+      return jsonResponse({ ports: decoratePorts(ports, commandLines) });
     } else {
-      const result = await runPortCommand(['lsof', '-iTCP', '-sTCP:LISTEN', '-nP']);
+      const [result, commandLines] = await Promise.all([
+        runPortCommand(['lsof', '-iTCP', '-sTCP:LISTEN', '-nP']),
+        getCommandLinesByPid(),
+      ]);
       if (result.exitCode !== 0) return jsonResponse({ ports: [] });
       const stdout = result.stdout;
       const lines = stdout.trim().split('\n').slice(1);
@@ -123,10 +203,9 @@ export async function handleGetPorts(req: Request): Promise<Response> {
         seen.add(key);
         ports.push({ port, pid, command });
       }
+      ports.sort((a, b) => a.port - b.port);
+      return jsonResponse({ ports: decoratePorts(ports, commandLines) });
     }
-
-    ports.sort((a, b) => a.port - b.port);
-    return jsonResponse({ ports });
   } catch {
     return jsonResponse({ ports: [] });
   }

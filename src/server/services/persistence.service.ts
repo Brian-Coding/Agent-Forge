@@ -11,6 +11,8 @@ import {
 } from './process-ownership';
 
 export const PERSISTED_SCHEMA_VERSION = 1;
+/** Legacy schema version 2 files are readable and are rewritten as schema version 1. */
+const PARKED_STUDIO_SCHEMA_VERSION = 2;
 const MAX_ORPHAN_PIDS = 256;
 const MAX_ACTIVE_PIDS = 4_096;
 const DEFAULT_MAX_DATA_BYTES = 256 * 1024 * 1024;
@@ -44,7 +46,9 @@ export function normalizePersistedData(raw: unknown): PersistedDataNormalization
     if (issues.length < 200) issues.push(message);
     else if (issues.length === 200) issues.push('Additional normalization issues were omitted');
   };
-  if (raw.schemaVersion !== undefined && raw.schemaVersion !== PERSISTED_SCHEMA_VERSION) {
+  if (raw.schemaVersion === PARKED_STUDIO_SCHEMA_VERSION) {
+    issue(`schemaVersion ${PARKED_STUDIO_SCHEMA_VERSION} (legacy schema 2 write) was downgraded to ${PERSISTED_SCHEMA_VERSION}`);
+  } else if (raw.schemaVersion !== undefined && raw.schemaVersion !== PERSISTED_SCHEMA_VERSION) {
     throw new UnsupportedPersistenceVersionError(raw.schemaVersion);
   }
   if (raw.schemaVersion === undefined) issue('schemaVersion was absent');
