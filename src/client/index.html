@@ -1186,7 +1186,8 @@
       const [agents, setAgents] = useState([]);
       const [messages, setMessages] = useState({});
       const [liveOutput, setLiveOutput] = useState({});
-      const [queued, setQueued] = useState({});
+      const [serverQueued, setServerQueued] = useState({});
+      const [offlineQueued, setOfflineQueued] = useState({});
       const [sharedContext, setSharedContext] = useState('');
       const [fileChanges, setFileChanges] = useState({});
       const [thinkingOutput, setThinkingOutput] = useState({});
@@ -1214,12 +1215,13 @@
       const wsRef = useRef(null);
       const agentsRef = useRef([]);
       const workspacesRef = useRef([]);
-      const queueRef = useRef({});
+      // Only full, locally submitted commands enter this outbox. Server queue
+      // previews are display-only and must never become outbound messages.
+      const offlineQueueRef = useRef({});
       const liveTurnStateRef = useRef({});
 
       agentsRef.current = agents;
       workspacesRef.current = workspaces;
-      queueRef.current = queued;
 
       useEffect(() => {
         if (workspaces.length === 0 || workspaces.some(workspace => workspace.id === activeWorkspaceId)) return;
@@ -1256,28 +1258,41 @@
 
       const sendRaw = useCallback((msg) => {
         if (wsRef.current?.readyState === WebSocket.OPEN) {
-          wsRef.current.send(JSON.stringify({
-            protocolVersion: 1,
-            requestId: msg.requestId || (crypto.randomUUID && crypto.randomUUID()) || String(Date.now()) + Math.random(),
-            clientSessionId: clientSessionIdRef.current,
-            sentAt: Date.now(),
-            ...msg,
-          }));
+          try {
+            wsRef.current.send(JSON.stringify({
+              protocolVersion: 1,
+              requestId: msg.requestId || (crypto.randomUUID && crypto.randomUUID()) || String(Date.now()) + Math.random(),
+              clientSessionId: clientSessionIdRef.current,
+              sentAt: Date.now(),
+              ...msg,
+            }));
+            return true;
+          } catch {
+            // Reconnect after a failed write; unsent chat commands retain their
+            // original request IDs in the outbox until a write succeeds.
+            try { wsRef.current.close(); } catch {}
+          }
         }
+        return false;
       }, []);
 
-      const drainQueue = useCallback((agentId) => {
-        const q = queueRef.current[agentId];
-        if (q && q.length > 0) {
-          const next = q[0];
-          setQueued(prev => {
-            const updated = [...(prev[agentId] || [])];
-            updated.shift();
-            return { ...prev, [agentId]: updated };
-          });
-          sendRaw({ type: 'send_message', agentId, content: next });
+      const flushOfflineQueue = useCallback((agentId) => {
+        let pending = offlineQueueRef.current[agentId] || [];
+        while (pending.length > 0 && sendRaw(pending[0])) {
+          pending = pending.slice(1);
+          // Consume synchronously, outside React state updaters, so repeated
+          // hydration frames before a render cannot send the same item twice.
+          offlineQueueRef.current = { ...offlineQueueRef.current, [agentId]: pending };
+          setOfflineQueued(offlineQueueRef.current);
         }
       }, [sendRaw]);
+
+      const clearOfflineQueue = useCallback((agentId) => {
+        const next = { ...offlineQueueRef.current };
+        delete next[agentId];
+        offlineQueueRef.current = next;
+        setOfflineQueued(next);
+      }, []);
 
       const reconnectAttempt = useRef(0);
 
@@ -1298,6 +1313,7 @@
             // a retained running indicator or accepting old snapshot revisions.
             liveTurnStateRef.current = {};
             setLiveTurnState({});
+            setServerQueued({});
             reconnectAttempt.current = 0;
             lastServerActivity = Date.now();
             // App-level heartbeat: after Windows sleep/resume the socket can be
@@ -1355,7 +1371,7 @@
               case 'server_session':
                 break;
               case 'command_queue':
-                setQueued(prev => ({
+                setServerQueued(prev => ({
                   ...prev,
                   [msg.agentId]: (msg.items || []).filter(item => item.status === 'queued').map(item => item.preview),
                 }));
@@ -1367,9 +1383,9 @@
                   // Structured qaRuns are the QA UI's durable source. Do not
                   // download the hidden QA implementation transcript.
                   if (!(a.hideFromGrid && a.name === 'QA Tester')) sendRaw({ type: 'get_history', agentId: a.id });
-                  // Drain messages queued while disconnected once we know the
-                  // agent is actually idle (reconnect resync path).
-                  if (a.status === 'idle') drainQueue(a.id);
+                  // The server owns execution order, including busy agents.
+                  // Only locally unsent commands are submitted on hydration.
+                  flushOfflineQueue(a.id);
                 });
                 sendRaw({ type: 'get_shared_context' });
                 break;
@@ -1404,11 +1420,12 @@
                   return prev.map(a => a.id === msg.agent.id ? msg.agent : a);
                 });
                 if (msg.agent.status === 'idle') {
-                  drainQueue(msg.agent.id);
                   setAgentActivity(prev => { const n = {...prev}; delete n[msg.agent.id]; return n; });
                 }
                 break;
               case 'agent_removed':
+                clearOfflineQueue(msg.agentId);
+                setServerQueued(prev => { const n = {...prev}; delete n[msg.agentId]; return n; });
                 setAgents(prev => prev.filter(a => a.id !== msg.agentId));
                 setMessages(prev => { const n = {...prev}; delete n[msg.agentId]; return n; });
                 setLiveOutput(prev => { const n = {...prev}; delete n[msg.agentId]; return n; });
@@ -1611,7 +1628,7 @@
           if (heartbeatTimer) clearInterval(heartbeatTimer);
           wsRef.current?.close();
         };
-      }, [drainQueue, sendRaw]);
+      }, [clearOfflineQueue, flushOfflineQueue, sendRaw]);
 
       const uploadAndSendImages = useCallback(async (agentId, images, prompt, onProgress) => {
         if (!Array.isArray(images) || images.length === 0) throw new Error('Choose at least one image');
@@ -1662,6 +1679,11 @@
         wsRef.current.send(JSON.stringify({ type: 'send_uploaded_images', agentId, images: uploaded, prompt }));
       }, []);
 
+      const queued = { ...serverQueued };
+      for (const [agentId, commands] of Object.entries(offlineQueued)) {
+        queued[agentId] = [...(queued[agentId] || []), ...commands.map(command => command.content)];
+      }
+
       return {
         connected, agents, messages, liveOutput, queued, sharedContext, fileChanges, thinkingOutput, agentActivity, liveTurnState, settings, workspaces, activeWorkspaceId, providerCatalog, statusStartTimes, tokenUsage, usageReport, limits, terminals, terminalOutput, errorToasts, qaUnread, qaLiveShots, authRecoveries,
         refreshLimits: () => sendRaw({ type: 'refresh_limits' }),
@@ -1679,18 +1701,20 @@
         checkAuth: (agentId) => sendRaw({ type: 'check_auth', agentId }),
         retryAuthPrompt: (agentId, incidentId, confirmSideEffects) => sendRaw({ type: 'retry_auth_prompt', agentId, incidentId, confirmSideEffects: !!confirmSideEffects }),
         sendMessage: (agentId, content) => {
-          const socketOpen = wsRef.current?.readyState === WebSocket.OPEN;
-          // A connected socket hands the prompt to the process-local server
-          // queue. Local queue is only for messages typed while disconnected.
-          if (!socketOpen) {
-            setQueued(prev => ({ ...prev, [agentId]: [...(prev[agentId] || []), content] }));
-          } else {
-            sendRaw({ type: 'send_message', agentId, content });
-          }
+          const command = {
+            type: 'send_message', agentId, content,
+            requestId: (crypto.randomUUID && crypto.randomUUID()) || String(Date.now()) + Math.random(),
+          };
+          offlineQueueRef.current = {
+            ...offlineQueueRef.current,
+            [agentId]: [...(offlineQueueRef.current[agentId] || []), command],
+          };
+          setOfflineQueued(offlineQueueRef.current);
+          flushOfflineQueue(agentId);
         },
-        stopAgent: (agentId) => sendRaw({ type: 'stop_agent', agentId }),
-        killAgent: (agentId) => sendRaw({ type: 'kill_agent', agentId }),
-        removeAgent: (agentId) => sendRaw({ type: 'remove_agent', agentId }),
+        stopAgent: (agentId) => { clearOfflineQueue(agentId); sendRaw({ type: 'stop_agent', agentId }); },
+        killAgent: (agentId) => { clearOfflineQueue(agentId); sendRaw({ type: 'kill_agent', agentId }); },
+        removeAgent: (agentId) => { clearOfflineQueue(agentId); sendRaw({ type: 'remove_agent', agentId }); },
         clearHistory: (agentId) => sendRaw({ type: 'clear_history', agentId }),
         updateSharedContext: (content) => sendRaw({ type: 'update_shared_context', content }),
         clearFileChanges: (agentId) => setFileChanges(prev => ({ ...prev, [agentId]: [] })),
@@ -1711,7 +1735,11 @@
         // Terminals
         createTerminal: (agentId, command) => sendRaw({ type: 'create_terminal', agentId, command }),
         killTerminal: (id) => sendRaw({ type: 'kill_terminal', id }),
-        killAll: () => sendRaw({ type: 'kill_all' }),
+        killAll: () => {
+          offlineQueueRef.current = {};
+          setOfflineQueued({});
+          sendRaw({ type: 'kill_all' });
+        },
       };
     }
 

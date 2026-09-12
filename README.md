@@ -45,6 +45,14 @@ Node + Playwright worker (scripts/browser-worker.mjs)
 
 Provider-specific parsing and launch behavior belongs in `src/server/agents/adapters/`. Shared lifecycle, persistence, QA, Atlas, and prompt behavior belongs in services. The client/server wire contract lives in `src/shared/protocol.ts`.
 
+### Chat message queues
+
+The server owns execution order for accepted chat commands. Browser queue previews are display-only: neither an idle status nor a server queue snapshot submits a prompt. The browser keeps locally unsent text commands in a separate in-memory outbox, preserving their full content and original request IDs through failed socket writes. After reconnect hydrates the agent list, it submits those commands once in order, including for busy agents whose server queue handles scheduling.
+
+Stop, kill, and removal clear the affected agent's local outbox; kill-all clears every local outbox. Reconnect replaces stale server previews without discarding locally unsent commands. The outbox lasts only for the current page lifetime, the server queue is process-local, and a successful socket write is not a durable-delivery acknowledgement. The browser does not automatically replay written commands after reconnect.
+
+`src/client/message-queue.test.ts` executes the browser WebSocket hook against controlled transport events, covering queue/idle feedback, reconnect, multiple frames before a render, offline ordering, failed writes, cancellation, and distinct intentional submissions of identical text. After updating this client, restart Agent Forge and reload every open Agent Forge tab so each browser uses the current queue handling.
+
 ## State and artifacts
 
 - `data.json`: repo-relative application state for the current development installation
