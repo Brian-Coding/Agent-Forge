@@ -374,7 +374,7 @@ export async function killProcessTree(
 
 import { existsSync as _existsSync } from 'fs';
 import { homedir as _homedir } from 'os';
-import { join as _pathJoin } from 'path';
+import { join as _pathJoin, win32 as _pathWin32 } from 'path';
 
 const _binaryCache: Map<string, string> = (globalThis as any).__cliBinaryCache ??= new Map<string, string>();
 
@@ -385,8 +385,8 @@ function _pathDelimiter(isWin: boolean): string {
 export function defaultCliDirs(platform = process.platform, home = _homedir()): string[] {
   if (platform === 'win32') {
     return [
-      _pathJoin(home, '.local', 'bin'),
-      _pathJoin(home, '.bun', 'bin'),
+      _pathWin32.join(home, '.local', 'bin'),
+      _pathWin32.join(home, '.bun', 'bin'),
     ];
   }
 
@@ -415,7 +415,10 @@ function _cliSearchDirsFrom(
   const dirs = pathRaw.split(_pathDelimiter(isWin)).filter(Boolean);
   const seen = new Set<string>();
 
-  return dirs.concat(defaultCliDirs(platform, home)).filter((dir) => {
+  // Prefer user-owned installers over inherited system PATH entries. A GUI or
+  // long-running server can otherwise keep selecting an older global CLI even
+  // after the current user installs an update under ~/.local or ~/.bun.
+  return defaultCliDirs(platform, home).concat(dirs).filter((dir) => {
     const key = isWin ? dir.toLowerCase() : dir;
     if (seen.has(key)) return false;
     seen.add(key);

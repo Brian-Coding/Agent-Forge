@@ -30,6 +30,10 @@ test('CLI environment removes recursive launcher flags, normalizes PATH, and pre
   expect(env.CREDENTIAL_SENTINEL).toBe('preserved');
   expect(env.CUSTOM_SETTING).toBe('enabled');
   expect(Object.keys(env).filter(key => key.toLowerCase() === 'path')).toEqual(['Path']);
+  expect(env.Path?.split(';').slice(0, 2)).toEqual([
+    'C:\\Users\\fixture\\.local\\bin',
+    'C:\\Users\\fixture\\.bun\\bin',
+  ]);
   expect(env.Path?.split(';').filter(path => path.toLowerCase() === 'c:\\tools')).toHaveLength(1);
   expect(env.Path).toContain('C:\\Users\\fixture\\.local\\bin');
   expect(Object.keys(env).some(key => key.toLowerCase() === 'claudecode')).toBe(false);
