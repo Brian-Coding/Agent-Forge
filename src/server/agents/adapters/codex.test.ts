@@ -58,6 +58,28 @@ function makeState() {
   };
 }
 
+test('rollout reports identified goal boundaries without finishing the CLI or forwarding prompt content', () => {
+  const events: AgentEvent[] = [];
+  const ctx = makeContext(events);
+  const state = makeState();
+  for (const [type, turnId, timestamp] of [
+    ['task_complete', 'repair', '2026-09-12T06:29:08.468Z'],
+    ['task_started', 'continuation', '2026-09-12T06:29:08.784Z'],
+    ['turn_aborted', 'continuation', '2026-09-12T06:29:08.991Z'],
+  ]) {
+    handleCodexRolloutEvent(ctx, state, { type: 'event_msg', timestamp, payload: { type, turn_id: turnId, secret: 'not forwarded' } });
+  }
+  expect(events.map(e => e.type === 'provider-turn' && [e.state.status, e.state.id, e.state.at])).toEqual([
+    ['completed', 'repair', Date.parse('2026-09-12T06:29:08.468Z')],
+    ['running', 'continuation', Date.parse('2026-09-12T06:29:08.784Z')],
+    ['stopped', 'continuation', Date.parse('2026-09-12T06:29:08.991Z')],
+  ]);
+  expect(JSON.stringify(events)).not.toContain('not forwarded');
+  handleCodexRolloutEvent(ctx, state, { type: 'event_msg', payload: { type: 'turn_aborted', turn_id: 'bad' } });
+  handleCodexRolloutEvent(ctx, state, { type: 'event_msg', timestamp: new Date().toISOString(), payload: { type: 'turn_aborted' } });
+  expect(events).toHaveLength(3);
+});
+
 test('Codex creates fresh isolated output directories under the platform temp root', () => {
   const ctx = makeContext([]);
   const first = codexAdapter.createState(ctx);
@@ -395,6 +417,7 @@ test('a recovered Codex reconnect stays pane-local and never becomes a terminal 
       maxAttempts: 5,
     },
     { type: 'transport-status', status: 'recovered' },
+    { type: 'provider-turn', state: { status: 'running', source: 'jsonl', at: expect.any(Number) } },
     { type: 'status', status: 'thinking' },
   ]);
   expect(events.some(event => event.type === 'error')).toBe(false);

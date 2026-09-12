@@ -178,6 +178,44 @@ test('normal completion persists one result, one usage row, session ownership, a
   expect(liveTurnStateService.get(id)).toMatchObject({ active: false, phase: 'idle' });
 });
 
+test('completed repair and provider-aborted continuation keep the process owned until exit', async () => {
+  clients.add(fakeClient as any);
+  const id = loadAgent();
+  const waiting = deferred();
+  const exit = deferred();
+  registerTestAdapter((_prompt, ctx) => ({
+    async run() {
+      ctx.emitAgentEvent({ type: 'status', status: 'thinking' });
+      ctx.emitAgentEvent({ type: 'result', text: 'Repair published.', checkpoint: true });
+      ctx.emitAgentEvent({ type: 'provider-turn', state: { status: 'completed', source: 'rollout', id: 'repair', at: 400 } });
+      ctx.emitAgentEvent({ type: 'provider-turn', state: { status: 'running', source: 'rollout', id: 'continuation', at: 420 } });
+      ctx.emitAgentEvent({ type: 'provider-turn', state: { status: 'stopped', source: 'rollout', id: 'continuation', at: 425 } });
+      ctx.emitAgentEvent({ type: 'tool-call-end', toolCallId: 'late-background-command' });
+      waiting.resolve();
+      await exit.promise;
+      return undefined;
+    },
+    stop() { exit.resolve(); },
+    kill() { exit.resolve(); },
+  }));
+  const run = chatService.sendMessage(id, 'Repair.');
+  await waiting.promise;
+  try {
+    expect(agentService.getAgent(id)?.status).toBe('thinking');
+    expect(releases.get(id)).toBeUndefined();
+    expect(liveTurnStateService.get(id)).toMatchObject({ active: true, providerTurn: { status: 'stopped', id: 'continuation' } });
+    expect(messages.some(m => m.type === 'live_turn_state' && m.state.providerTurn?.status === 'stopped')).toBe(true);
+    expect(liveTurnStateService.get(id)?.lastToolCompletedAt).toBeGreaterThan(0);
+    expect(agentMessages(id).filter(m => m.role === 'assistant')).toHaveLength(1);
+  } finally {
+    exit.resolve();
+    await run;
+  }
+  expect(agentService.getAgent(id)).toMatchObject({ status: 'idle', lastTurnOutcome: { status: 'stopped' } });
+  expect(agentMessages(id).at(-1)?.content).toBe('[Stopped: provider interrupted the turn]');
+  expect(releases.get(id)).toBe(1);
+});
+
 test('provider failure becomes a durable failed outcome rather than a successful empty turn', async () => {
   const id = loadAgent();
   registerTestAdapter(() => ({

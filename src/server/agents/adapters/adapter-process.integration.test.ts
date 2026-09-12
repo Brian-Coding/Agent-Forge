@@ -21,6 +21,7 @@ let root = '';
 let originalPath: string | undefined;
 let originalSkipAuth: string | undefined;
 let originalFakeProvider: string | undefined;
+let originalCodexHome: string | undefined;
 let originalTrackPid: typeof persistenceService.trackPid;
 let originalUntrackPid: typeof persistenceService.untrackPid;
 let originalBinaryCache: Map<string, string>;
@@ -85,6 +86,23 @@ process.stdin.setEncoding('utf8');
 process.stdin.on('data', chunk => { prompt += chunk; });
 process.stdin.on('end', () => {
   const emit = value => process.stdout.write(JSON.stringify(value) + '\\n');
+  if (prompt.includes('GOAL_ABORT')) {
+    const session = 'codex-goal-abort';
+    const dir = require('node:path').join(process.env.CODEX_HOME, 'sessions');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(require('node:path').join(dir, 'rollout-test-' + session + '.jsonl'), [
+      { type: 'event_msg', timestamp: '2026-09-12T06:29:08.468Z', payload: { type: 'task_complete', turn_id: 'repair' } },
+      { type: 'event_msg', timestamp: '2026-09-12T06:29:08.784Z', payload: { type: 'task_started', turn_id: 'continuation' } },
+      { type: 'event_msg', timestamp: '2026-09-12T06:29:08.991Z', payload: { type: 'turn_aborted', turn_id: 'continuation', reason: 'interrupted' } },
+    ].map(event => JSON.stringify(event) + '\\n').join(''));
+    emit({ type: 'thread.started', thread_id: session });
+    emit({ type: 'turn.started' });
+    emit({ type: 'item.completed', item: { type: 'agent_message', text: 'Repair published.' } });
+    emit({ type: 'turn.completed' });
+    emit({ type: 'turn.started' });
+    setInterval(() => {}, 60_000);
+    return;
+  }
   if (prompt.includes('HANG')) {
     if (provider === 'claude') emit({ type: 'system', subtype: 'init', session_id: 'claude-hanging-session' });
     else emit({ type: 'thread.started', thread_id: 'codex-hanging-session' });
@@ -146,6 +164,8 @@ process.stdin.on('end', () => {
   originalPath = process.env.PATH;
   originalSkipAuth = process.env.AGENT_FORGE_SKIP_CLAUDE_AUTH_CHECK;
   originalFakeProvider = process.env.AGENT_FORGE_FAKE_PROVIDER;
+  originalCodexHome = process.env.CODEX_HOME;
+  process.env.CODEX_HOME = join(root, 'codex-home');
   process.env.PATH = `${root}${process.platform === 'win32' ? ';' : ':'}${originalPath ?? ''}`;
   process.env.AGENT_FORGE_SKIP_CLAUDE_AUTH_CHECK = '1';
   originalBinaryCache = new Map((globalThis as any).__cliBinaryCache as Map<string, string>);
@@ -173,6 +193,8 @@ afterAll(async () => {
   else process.env.AGENT_FORGE_SKIP_CLAUDE_AUTH_CHECK = originalSkipAuth;
   if (originalFakeProvider === undefined) delete process.env.AGENT_FORGE_FAKE_PROVIDER;
   else process.env.AGENT_FORGE_FAKE_PROVIDER = originalFakeProvider;
+  if (originalCodexHome === undefined) delete process.env.CODEX_HOME;
+  else process.env.CODEX_HOME = originalCodexHome;
   const cache = (globalThis as any).__cliBinaryCache as Map<string, string>;
   cache.clear();
   for (const [name, path] of originalBinaryCache) cache.set(name, path);
@@ -240,5 +262,25 @@ test('adapter cancellation terminates the real child and completes without an or
 
   expect(fixture.events).toContainEqual({ type: 'finish', reason: 'killed' });
   expect(tracked).toHaveLength(1);
+  expect(untracked).toEqual(tracked);
+}, 10_000);
+
+test('a real CLI with an aborted goal continuation exposes stopped while retaining process ownership', async () => {
+  const fixture = makeContext('codex');
+  const state = codexAdapter.createState(fixture.ctx);
+  const handle = codexAdapter.createHandle('GOAL_ABORT', fixture.ctx, state);
+  let finished = false;
+  const run = handle.run().finally(() => { finished = true; });
+  try {
+    await waitFor(() => fixture.events.some(e => e.type === 'provider-turn' && e.state.status === 'stopped'), 5000);
+    expect(finished).toBe(false);
+    expect(untracked).toHaveLength(0);
+    expect(fixture.events.some(e => e.type === 'finish')).toBe(false);
+    expect(fixture.events.filter(e => e.type === 'provider-turn' && e.state.source === 'rollout')
+      .map(e => e.type === 'provider-turn' && e.state.status)).toEqual(['completed', 'running', 'stopped']);
+  } finally {
+    await handle.kill();
+    await run;
+  }
   expect(untracked).toEqual(tracked);
 }, 10_000);

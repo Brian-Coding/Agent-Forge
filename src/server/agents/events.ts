@@ -6,7 +6,10 @@
  *   - `usage`  — token + cost accounting (Claude reports natively; Codex skipped in Phase 3)
  *   - `stderr` — retained for adapter diagnostics; the chat bridge suppresses it live
  */
+import type { ProviderTurnState } from '../../shared/protocol';
+
 export type AgentEvent =
+  | { type: 'provider-turn'; state: ProviderTurnState }
   | { type: 'session'; providerSessionId: string }
   | {
       type: 'status';

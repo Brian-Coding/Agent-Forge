@@ -1,6 +1,6 @@
 import type { AgentEvent } from '../agents/events';
 
-export type TurnAbortReason = 'user' | 'timeout' | 'system';
+export type TurnAbortReason = 'user' | 'timeout' | 'system' | 'provider';
 
 export type InactivityIntervalHandle = ReturnType<typeof setInterval> | number;
 
@@ -87,6 +87,7 @@ export function observeTurnOutputEvent(
 }
 
 export function abortMarker(reason: TurnAbortReason): string {
+  if (reason === 'provider') return '[Stopped: provider interrupted the turn]';
   if (reason === 'timeout') return '[Stopped: configured inactivity limit reached]';
   if (reason === 'system') return '[Stopped by system]';
   return '[Stopped by user]';

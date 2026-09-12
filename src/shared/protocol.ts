@@ -553,12 +553,23 @@ export interface LimitsSnapshot {
 
 export type LiveTurnPhase = 'starting' | 'working' | 'thinking' | 'tool' | 'responding' | 'transport' | 'idle';
 
+/** A provider turn can end while its CLI process is still owned by the harness. */
+export interface ProviderTurnState {
+  status: 'running' | 'completed' | 'stopped' | 'failed';
+  source: 'jsonl' | 'rollout';
+  id?: string;
+  at: number;
+  detail?: string;
+}
+
 export interface LiveTurnStateSnapshot {
   agentId: string;
   turnId: string;
   provider: AgentProvider;
   active: boolean;
   phase: LiveTurnPhase;
+  providerTurn?: ProviderTurnState;
+  lastToolCompletedAt?: number;
   thought: string;
   response: string;
   activity: {

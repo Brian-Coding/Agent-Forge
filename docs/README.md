@@ -12,6 +12,7 @@ This directory contains current operational documentation and detailed design re
 
 ## Current reference with open work
 
+- [Codex execution status — 2026-09-12](./codex-execution-status-2026-09-12.md): provider interruption evidence, targeted status fix, verification, and activation limits.
 - [Long-running agent reliability](./long-running-agent-reliability.md): incident analysis and operational reference; immediate liveness fixes exist, durable orchestration does not.
 - [Model mismatch and CLI stability](./model-mismatch-and-cli-stability.md): multi-machine CLI drift analysis; some parser hardening is implemented, version policy and consistent model normalization remain.
 

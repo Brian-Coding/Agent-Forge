@@ -90,8 +90,8 @@ test('live turn snapshots restore progress and use provider activity for stall d
   expect(clientSource).toContain("case 'live_turn_state':");
   expect(clientSource).toContain('previous.turnId === state.turnId');
   expect(clientSource).toContain('Number(previous.revision || 0) >= Number(state.revision || 0)');
-  expect(clientSource).toContain('activeLiveTurn?.lastProviderEventAt || null');
-  expect(clientSource).toContain("isActive: isWorking");
+  expect(clientSource).toContain('live?.lastProviderEventAt');
+  expect(clientSource).toContain("isActive: execution.active");
   expect(clientSource).toContain('(possibly stalled)');
   expect(clientSource).not.toContain('(may be stuck)');
 });

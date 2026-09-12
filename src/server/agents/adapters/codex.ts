@@ -211,6 +211,21 @@ export function handleCodexRolloutEvent(ctx: AgentRunContext, state: CodexRunSta
   // A sanitized heartbeat proves liveness without forwarding prompts, tool
   // results, encrypted reasoning, or full rollout records.
   ctx.emitChatEvent({ type: 'codex-rollout-liveness', eventType: event?.type, payloadType });
+  // The rollout exposes interrupted goal continuations with a turn ID and
+  // provider timestamp, absent from the public lifecycle handled below. Keep this independent
+  // of process completion: a terminal turn must never unlock a live process.
+  const statuses = {
+    task_started: 'running', task_complete: 'completed', turn_aborted: 'stopped',
+  } as const;
+  const status = statuses[payloadType as keyof typeof statuses];
+  const at = Date.parse(event?.timestamp);
+  if (event?.type === 'event_msg' && status && Number.isFinite(at)
+      && typeof event.payload.turn_id === 'string') {
+    ctx.emitAgentEvent({ type: 'provider-turn', state: {
+      status, source: 'rollout', id: event.payload.turn_id, at,
+      detail: status === 'stopped' ? 'Provider interrupted the turn' : undefined,
+    } });
+  }
   for (const text of extractCodexRolloutCommentary(event)) {
     emitCodexThinking(ctx, state, text);
   }
@@ -530,6 +545,7 @@ export function handleCodexEvent(ctx: AgentRunContext, state: CodexRunState, eve
     if (!normalized || normalized === state.lastTerminalErrorMessage) return;
     state.lastTerminalErrorMessage = normalized;
     ctx.emitAgentEvent({ type: 'error', message: normalized });
+    ctx.emitAgentEvent({ type: 'provider-turn', state: { status: 'failed', source: 'jsonl', at: Date.now() } });
   };
 
   // --- Session lifecycle -----------------------------------------------------
@@ -542,6 +558,7 @@ export function handleCodexEvent(ctx: AgentRunContext, state: CodexRunState, eve
   }
 
   if (event.type === 'turn.started') {
+    ctx.emitAgentEvent({ type: 'provider-turn', state: { status: 'running', source: 'jsonl', at: Date.now() } });
     state.lastTerminalErrorMessage = '';
     state.pendingTurnAssistantMessage = '';
     state.currentTurnCheckpointed = false;
@@ -552,6 +569,7 @@ export function handleCodexEvent(ctx: AgentRunContext, state: CodexRunState, eve
   // Goal-mode rollout compatibility. Current public JSON uses turn.started,
   // while older/internal streams can expose task_started instead.
   if (event.type === 'task_started') {
+    ctx.emitAgentEvent({ type: 'provider-turn', state: { status: 'running', source: 'jsonl', at: Date.now() } });
     state.lastTerminalErrorMessage = '';
     state.pendingTurnAssistantMessage = '';
     state.currentTurnCheckpointed = false;
@@ -567,6 +585,7 @@ export function handleCodexEvent(ctx: AgentRunContext, state: CodexRunState, eve
   // Context fullness comes from the session rollout file after the turn
   // (see emitContextFromRollout); here we only accumulate per-turn spend.
   if (event.type === 'turn.completed') {
+    ctx.emitAgentEvent({ type: 'provider-turn', state: { status: 'completed', source: 'jsonl', at: Date.now() } });
     const completedMessage = state.pendingTurnAssistantMessage.trim();
     if (completedMessage && !state.currentTurnCheckpointed) {
       ctx.emitAgentEvent({ type: 'result', text: completedMessage, checkpoint: true });
@@ -766,6 +785,7 @@ export function handleCodexEvent(ctx: AgentRunContext, state: CodexRunState, eve
 
   // --- Task complete: final assistant text fallback -------------------------
   if (event.type === 'task_complete' && typeof event.last_agent_message === 'string' && event.last_agent_message) {
+    ctx.emitAgentEvent({ type: 'provider-turn', state: { status: 'completed', source: 'jsonl', at: Date.now() } });
     const completedMessage = event.last_agent_message.trim();
     if (
       completedMessage

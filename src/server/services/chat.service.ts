@@ -227,6 +227,13 @@ function handleEvent(agentId: string, event: AgentEvent): void {
   if (activeTurn) liveTurnStateService.touch(agentId, activeTurn.liveTurnId);
 
   switch (event.type) {
+    case 'provider-turn': {
+      if (activeTurn) {
+        const next = liveTurnStateService.observeProviderTurn(agentId, activeTurn.liveTurnId, event.state);
+        if (next) broadcastLiveTurnState(agentId, true);
+      }
+      return;
+    }
     case 'text-delta': {
       const turn = activeTurn;
       if (turn) turn.accumulatedText = appendBoundedChatText(turn.accumulatedText, event.text);
@@ -277,7 +284,10 @@ function handleEvent(agentId: string, event: AgentEvent): void {
     case 'tool-call-end': {
       // Tool results are surfaced by the next assistant turn's narrative; no
       // separate wire event needed.
-      if (activeTurn) liveTurnStateService.clearActivity(agentId, activeTurn.liveTurnId, 'tool');
+      if (activeTurn) {
+        liveTurnStateService.clearActivity(agentId, activeTurn.liveTurnId, 'tool');
+        liveTurnStateService.toolCompleted(agentId, activeTurn.liveTurnId);
+      }
       broadcast({ type: 'agent_activity', agentId, label: '', timestamp: Date.now(), kind: 'tool', clear: true });
       broadcastLiveTurnState(agentId, true);
       return;
@@ -774,6 +784,11 @@ async function runChatTurn(agentId: string, content: string, source?: 'qa', opti
     // Use the local `turn` (not the map) so this turn always flushes its own
     // buffer even if a newer turn has since replaced the map entry.
     const turnState = turn;
+    const providerSnapshot = liveTurnStateService.get(agentId);
+    if (!turnState.abortReason && providerSnapshot?.turnId === turn.liveTurnId
+        && providerSnapshot.providerTurn?.status === 'stopped') {
+      turnState.abortReason = 'provider';
+    }
     const finalization = resolveTurnFinalization({
       provider,
       accumulatedText: turnState.accumulatedText,

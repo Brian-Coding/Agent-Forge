@@ -1,4 +1,4 @@
-import type { AgentProvider, LiveTurnStateSnapshot } from '../../shared/protocol';
+import type { AgentProvider, LiveTurnStateSnapshot, ProviderTurnState } from '../../shared/protocol';
 
 const MAX_THOUGHT_CHARS = 16_000;
 const MAX_RESPONSE_CHARS = 256_000;
@@ -25,6 +25,7 @@ function clone(snapshot: LiveTurnStateSnapshot): LiveTurnStateSnapshot {
   return {
     ...snapshot,
     activity: snapshot.activity ? { ...snapshot.activity } : null,
+    ...(snapshot.providerTurn ? { providerTurn: { ...snapshot.providerTurn } } : {}),
   };
 }
 
@@ -66,6 +67,28 @@ export const liveTurnStateService = {
     return update(agentId, turnId, current => {
       current.lastProviderEventAt = at;
     });
+  },
+
+  observeProviderTurn(agentId: string, turnId: string, next: ProviderTurnState): LiveTurnStateSnapshot | null {
+    const current = store.records.get(agentId);
+    if (!current || current.turnId !== turnId || !current.active) return null;
+    const previous = current.providerTurn;
+    // The two streams arrive independently. Timestamped, identified rollout
+    // boundaries win over unidentifiable JSONL boundaries, including late ones.
+    // JSONL failure is definitive and may be the only terminal error signal.
+    if (previous?.source === 'rollout' && next.source === 'jsonl' && next.status !== 'failed') return null;
+    if (previous?.source === 'jsonl' && previous.status === 'failed' && next.at < previous.at) return null;
+    if (previous?.source === next.source && next.at < previous.at) return null;
+    if (previous?.id && next.id === previous.id && previous.status !== 'running' && next.status === 'running') return null;
+    return update(agentId, turnId, snapshot => {
+      snapshot.providerTurn = { ...next };
+      snapshot.activity = null;
+      if (next.status === 'running') snapshot.phase = 'working';
+    });
+  },
+
+  toolCompleted(agentId: string, turnId: string, at = Date.now()): void {
+    update(agentId, turnId, current => { current.lastToolCompletedAt = at; });
   },
 
   setPhase(
