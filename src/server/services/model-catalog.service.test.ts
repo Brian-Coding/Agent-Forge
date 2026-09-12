@@ -17,7 +17,7 @@ test('valid Claude models observed through OAuth CLI runs become selectable', ()
   expect(getAgentDefinition('claude').models.some(model => model.id === '<synthetic>')).toBe(false);
 });
 
-test('Codex discovery puts the GPT-5.6 family ahead of GPT-5.5 and keeps descriptions', () => {
+test('Codex discovery puts GPT-6 ahead of GPT-5.6 and keeps provider capabilities', () => {
   const discovered: ModelOption[] = [
     { id: 'gpt-5.5', label: 'GPT-5.5' },
     {
@@ -28,20 +28,32 @@ test('Codex discovery puts the GPT-5.6 family ahead of GPT-5.5 and keeps descrip
       defaultReasoningLevel: 'medium',
     },
     { id: 'gpt-5.6-terra', label: 'GPT-5.6-Terra', description: 'CLI Terra description' },
+    {
+      id: 'gpt-6-astra',
+      label: 'GPT-6-Astra',
+      description: 'CLI Astra description',
+      supportedReasoningLevels: ['medium', 'high'],
+      defaultReasoningLevel: 'high',
+    },
   ];
 
   const definition = buildCodexDefinition(discovered, true);
 
   expect(definition.models.map(model => model.id)).toEqual([
+    'gpt-6-astra',
     'gpt-5.6-sol',
     'gpt-5.6-terra',
     'gpt-5.5',
   ]);
-  expect(definition.models[0]?.label).toBe('GPT-5.6 Sol');
-  expect(definition.models[0]?.description).toBe('CLI Sol description');
-  expect(definition.models[0]?.supportedReasoningLevels).toContain('max');
-  expect(definition.models[0]?.supportedReasoningLevels).toContain('ultra');
-  expect(definition.models[0]?.defaultReasoningLevel).toBe('medium');
+  expect(definition.models[0]?.label).toBe('GPT-6 Astra');
+  expect(definition.models[0]?.description).toBe('CLI Astra description');
+  expect(definition.models[0]?.supportedReasoningLevels).toEqual(['medium', 'high']);
+  expect(definition.models[0]?.defaultReasoningLevel).toBe('high');
+  expect(definition.models[1]?.label).toBe('GPT-5.6 Sol');
+  expect(definition.models[1]?.description).toBe('CLI Sol description');
+  expect(definition.models[1]?.supportedReasoningLevels).toContain('max');
+  expect(definition.models[1]?.supportedReasoningLevels).toContain('ultra');
+  expect(definition.models[1]?.defaultReasoningLevel).toBe('medium');
   expect(definition.defaultModel).toBe('gpt-5.6-sol');
 });
 
@@ -53,13 +65,15 @@ test('successful Codex discovery does not append unsupported static models', () 
 
   expect(definition.models.map(model => model.id)).toEqual(['gpt-5.5', 'gpt-5.4']);
   expect(definition.models.some(model => model.id === 'gpt-5.6-sol')).toBe(false);
+  expect(definition.models.some(model => model.id === 'gpt-6-astra')).toBe(false);
 });
 
-test('failed Codex discovery uses the static Sol and Terra fallback', () => {
+test('failed Codex discovery includes Astra in the static fallback', () => {
   const definition = buildCodexDefinition([], false);
 
   expect(definition.models).toEqual(STATIC_AGENT_DEFINITIONS.codex.models);
-  expect(definition.models.slice(0, 2).map(model => model.id)).toEqual([
+  expect(definition.models.slice(0, 3).map(model => model.id)).toEqual([
+    'gpt-6-astra',
     'gpt-5.6-sol',
     'gpt-5.6-terra',
   ]);

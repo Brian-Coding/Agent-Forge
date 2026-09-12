@@ -48,7 +48,11 @@ function dedupeModels(primary: readonly ModelOption[], fallback: readonly ModelO
 
 function prioritizeCodexModels(models: readonly ModelOption[]): ModelOption[] {
   return models
-    .map((model, index) => ({ model, index, rank: model.id.startsWith('gpt-5.6-') ? 0 : 1 }))
+    .map((model, index) => ({
+      model,
+      index,
+      rank: model.id.startsWith('gpt-6-') ? 0 : model.id.startsWith('gpt-5.6-') ? 1 : 2,
+    }))
     .sort((a, b) => a.rank - b.rank || a.index - b.index)
     .map(({ model }) => model);
 }

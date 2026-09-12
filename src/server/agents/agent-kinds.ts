@@ -53,13 +53,18 @@ export const STATIC_AGENT_DEFINITIONS: Record<ChatAgentKind, AgentDefinition> = 
     supportsResume: true,
     supportsReasoningLevel: true,
     models: [
-      // GPT-5.6 ids confirmed against the OpenAI model docs (gpt-5.6-sol /
-      // gpt-5.6-terra; Luna deliberately omitted — not requested). Static
-      // fallback until `codex debug models` discovery lists the 5.6 family.
+      // Used when `codex debug models` discovery is unavailable.
+      {
+        id: 'gpt-6-astra',
+        label: 'GPT-6 Astra',
+        description: 'Most capable model for complex, demanding work.',
+        supportedReasoningLevels: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
+        defaultReasoningLevel: 'medium',
+      },
       {
         id: 'gpt-5.6-sol',
         label: 'GPT-5.6 Sol',
-        description: 'Latest frontier agentic coding model.',
+        description: 'Previous frontier agentic coding model.',
         supportedReasoningLevels: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
         defaultReasoningLevel: 'medium',
       },
