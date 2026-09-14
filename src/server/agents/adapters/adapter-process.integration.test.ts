@@ -170,8 +170,10 @@ process.stdin.on('end', () => {
   process.env.AGENT_FORGE_SKIP_CLAUDE_AUTH_CHECK = '1';
   originalBinaryCache = new Map((globalThis as any).__cliBinaryCache as Map<string, string>);
   const cache = (globalThis as any).__cliBinaryCache as Map<string, string>;
-  cache.delete('claude');
-  cache.delete('codex');
+  // Pin fixtures so preferred user-local installations cannot run in this test.
+  for (const provider of ['claude', 'codex']) {
+    cache.set(provider, join(root, process.platform === 'win32' ? `${provider}.cmd` : provider));
+  }
 
   originalTrackPid = persistenceService.trackPid;
   originalUntrackPid = persistenceService.untrackPid;

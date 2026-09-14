@@ -62,8 +62,10 @@ test('Vercel status and configuration execute both real CLI boundaries without c
     }
 
     process.env.PATH = `${root}${process.platform === 'win32' ? ';' : ':'}${originalPath ?? ''}`;
-    cache.delete('claude');
-    cache.delete('codex');
+    // Pin fixtures so preferred user-local installations cannot run in this test.
+    for (const provider of ['claude', 'codex']) {
+      cache.set(provider, join(root, process.platform === 'win32' ? `${provider}.cmd` : provider));
+    }
 
     const before = await vercelIntegrationService.getStatus();
     expect(before.ready).toBe(false);
