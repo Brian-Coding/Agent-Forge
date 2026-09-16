@@ -18,6 +18,11 @@ const MAX_DISCOVERED_MODELS = 512;
 let cached: { at: number; definitions: Record<ChatAgentKind, AgentDefinition> } | null = null;
 let refreshPromise: Promise<Record<ChatAgentKind, AgentDefinition>> | null = null;
 
+interface CodexModelDiscovery {
+  models: ModelOption[];
+  succeeded: boolean;
+}
+
 const observedModels: Record<ChatAgentKind, Set<string>> = (globalThis as any).__observedProviderModels ??= {
   claude: new Set<string>(),
   codex: new Set<string>(),
@@ -153,7 +158,7 @@ export function parseClaudeModelDiscovery(parsed: unknown): ModelOption[] {
     .filter((m: ModelOption) => m.id.startsWith('claude-') && !!m.label);
 }
 
-async function discoverCodexModels(): Promise<{ models: ModelOption[]; succeeded: boolean }> {
+async function discoverCodexModelsOnce(): Promise<CodexModelDiscovery> {
   try {
     const proc = Bun.spawn([resolveCliBinary('codex'), 'debug', 'models'], {
       stdout: 'pipe',
@@ -173,6 +178,36 @@ async function discoverCodexModels(): Promise<{ models: ModelOption[]; succeeded
   } catch {
     return { models: [], succeeded: false };
   }
+}
+
+/**
+ * `codex debug models` can return the pre-refresh disk catalog on its first
+ * invocation after boot while refreshing that cache for the next invocation.
+ * That made Forge accept the old response as authoritative for the whole UI
+ * session and silently replace a persisted Astra selection with Sol.
+ *
+ * Retry once when the otherwise-valid result omits Forge's preferred static
+ * Codex model. The second successful result remains capability-authoritative,
+ * so an older CLI or an account without access still does not get unsupported
+ * static entries appended to its catalog.
+ */
+export async function stabilizeCodexModelDiscovery(
+  first: CodexModelDiscovery,
+  retry: () => Promise<CodexModelDiscovery>,
+): Promise<CodexModelDiscovery> {
+  const preferredModel = STATIC_AGENT_DEFINITIONS.codex.models[0]?.id;
+  const needsRetry = first.succeeded
+    && !!preferredModel
+    && !first.models.some(model => model.id === preferredModel);
+  if (!needsRetry) return first;
+
+  const second = await retry();
+  return second.succeeded ? second : first;
+}
+
+async function discoverCodexModels(): Promise<CodexModelDiscovery> {
+  const first = await discoverCodexModelsOnce();
+  return stabilizeCodexModelDiscovery(first, discoverCodexModelsOnce);
 }
 
 async function discoverClaudeModels(): Promise<ModelOption[]> {

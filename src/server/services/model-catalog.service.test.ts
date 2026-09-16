@@ -6,6 +6,7 @@ import {
   observeProviderModel,
   parseClaudeModelDiscovery,
   parseCodexModelDiscovery,
+  stabilizeCodexModelDiscovery,
 } from './model-catalog.service';
 
 test('valid Claude models observed through OAuth CLI runs become selectable', () => {
@@ -77,6 +78,59 @@ test('failed Codex discovery includes Astra in the static fallback', () => {
     'gpt-5.6-sol',
     'gpt-5.6-terra',
   ]);
+});
+
+test('Codex discovery retries a successful stale cold-start catalog once', async () => {
+  const stale = {
+    models: [{ id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol' }],
+    succeeded: true,
+  };
+  const refreshed = {
+    models: [
+      { id: 'gpt-6-astra', label: 'GPT-6 Astra' },
+      { id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol' },
+    ],
+    succeeded: true,
+  };
+  let attempts = 0;
+
+  const result = await stabilizeCodexModelDiscovery(stale, async () => {
+    attempts++;
+    return refreshed;
+  });
+
+  expect(attempts).toBe(1);
+  expect(result).toEqual(refreshed);
+});
+
+test('Codex discovery keeps the first usable catalog if its stabilization retry fails', async () => {
+  const stale = {
+    models: [{ id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol' }],
+    succeeded: true,
+  };
+
+  const result = await stabilizeCodexModelDiscovery(stale, async () => ({
+    models: [],
+    succeeded: false,
+  }));
+
+  expect(result).toEqual(stale);
+});
+
+test('Codex discovery does not retry a catalog that already includes Astra', async () => {
+  const current = {
+    models: [{ id: 'gpt-6-astra', label: 'GPT-6 Astra' }],
+    succeeded: true,
+  };
+  let attempts = 0;
+
+  const result = await stabilizeCodexModelDiscovery(current, async () => {
+    attempts++;
+    return { models: [], succeeded: false };
+  });
+
+  expect(attempts).toBe(0);
+  expect(result).toEqual(current);
 });
 
 test('model discovery rejects malformed payloads and bounds hostile fields', () => {
