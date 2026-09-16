@@ -25,6 +25,8 @@ import { createProcessProbe } from './platform/process-probe';
 import { inspectExistingServerLock, reportOccupiedPorts, waitUntilProcessMissing } from './process-startup';
 import { createShutdownCoordinator } from './services/shutdown-coordinator';
 import { parseServerPort } from './server-config';
+import { existsSync } from 'fs';
+import { monitorLauncher } from './services/launch-lifecycle';
 
 import { websocketHandlers } from './ws';
 
@@ -350,6 +352,19 @@ export const shutdown = createShutdownCoordinator({
   releaseLock: releaseProcessLock,
   exit: code => process.exit(code),
 });
+
+// Watch the actual launcher identity as well as signals. Also allow the
+// desktop restart script to request the normal persistence/cleanup path.
+if (process.platform === 'win32') {
+  const launcherPid = Number(process.env.AGENT_FORGE_LAUNCHER_PID ?? process.ppid);
+  if (Number.isSafeInteger(launcherPid) && launcherPid > 0) {
+    monitorLauncher({
+      probe: () => processProbe.probe(launcherPid),
+      stopRequested: () => !!processLockHandle && existsSync(`${LOCK_FILE}.stop-${processLockHandle.owner.token}`),
+      shutdown: reason => { void shutdown({ reason }); },
+    });
+  }
+}
 
 process.on('unhandledRejection', reason => {
   console.error('Unhandled rejection; initiating fatal shutdown:', reason);
