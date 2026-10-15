@@ -71,7 +71,9 @@ test('three agents sharing one project create one source watcher and one plan wa
   const { watch, watchers } = createFakeWatch();
   const hub = createProjectWatcherHub({
     watch,
-    realpath: path => resolve(path),
+    // Simulated Windows: every alias resolves to the same real directory. The
+    // host's POSIX resolve() cannot canonicalize drive-letter paths on Linux.
+    realpath: () => 'C:\\shared\\project',
     exists: () => true,
     debounceSourceMs: 15,
     debouncePlanMs: 15,
