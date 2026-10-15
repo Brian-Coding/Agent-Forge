@@ -290,6 +290,10 @@ function startServer(preferredPort: number) {
         // is a restart-driven local harness, so serve the stable bundled page
         // without the dev overlay/HMR client.
         development: false,
+        // Bun enables SO_REUSEPORT by default when development is false, which
+        // lets a second instance bind this port and split traffic with us.
+        // Keep the bind exclusive so the port fallback above kicks in.
+        reusePort: false,
         error(err) {
           console.error('Server error:', err);
           return new Response('Internal error', { status: 500 });
