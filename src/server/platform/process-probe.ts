@@ -137,8 +137,35 @@ async function lookupPosixIdentity(pid: number): Promise<ProcessIdentity | null>
     terminate: () => killProcessTree(proc),
   });
   if (result.timedOut) throw new Error('POSIX process probe timed out');
+  return interpretPosixPsResult(pid, result);
+}
+
+export interface PosixPsResult {
+  exitCode: number | null;
+  stdout: string;
+  stderr: string;
+}
+
+/** Returns true when the PID is known not to exist (kill(pid, 0) fails with ESRCH). */
+export function posixPidIsGone(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return false;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException)?.code === 'ESRCH';
+  }
+}
+
+export function interpretPosixPsResult(
+  pid: number,
+  result: PosixPsResult,
+  isGone: (pid: number) => boolean = posixPidIsGone,
+): ProcessIdentity | null {
   if (result.exitCode !== 0) {
     if (/no such process|not found/i.test(result.stderr || result.stdout)) return null;
+    // procps `ps -p <pid>` exits 1 with no output at all when the PID does not exist.
+    // Confirm with kill(pid, 0) so a silent ps failure on a live PID stays ambiguous.
+    if (result.exitCode === 1 && !result.stdout.trim() && !result.stderr.trim() && isGone(pid)) return null;
     throw new Error(result.stderr || `ps exited ${result.exitCode}`);
   }
   const line = result.stdout.trim();
