@@ -23,16 +23,16 @@ test('resolveAgentModel falls back to the provider default for a model outside t
   // others (claude-mythos-5, restricted access). The fallback is no longer
   // silent: chat.service emits a system message whenever the resolved model
   // differs from the configured one.
-  expect(resolveAgentModel('claude', 'claude-sonnet-5')).toBe('claude-opus-4-8');
-  expect(resolveAgentModel('claude', 'totally-made-up-model')).toBe('claude-opus-4-8');
+  expect(resolveAgentModel('claude', 'claude-sonnet-5')).toBe('claude-opus-5-5');
+  expect(resolveAgentModel('claude', 'totally-made-up-model')).toBe('claude-opus-5-5');
   expect(resolveAgentModel('codex', 'totally-made-up-model')).toBe('gpt-5.6-sol');
 });
 
 test('resolveAgentModel falls back to the provider default when no model is requested', () => {
   // An unset model must resolve to the SAME default the UI now displays, so the
   // selector and the spawned CLI can never disagree for a fresh agent.
-  expect(resolveAgentModel('claude', undefined)).toBe('claude-opus-4-8');
-  expect(resolveAgentModel('claude', '')).toBe('claude-opus-4-8');
+  expect(resolveAgentModel('claude', undefined)).toBe('claude-opus-5-5');
+  expect(resolveAgentModel('claude', '')).toBe('claude-opus-5-5');
   expect(resolveAgentModel('codex', undefined)).toBe('gpt-5.6-sol');
 });
 
@@ -48,11 +48,11 @@ test('stripModelTier removes only a trailing [tier] suffix', () => {
   // The mismatch latch compares tier-stripped ids: opus-4-8 vs opus-4-8[1m] is
   // the same model at a different context tier — NOT a mismatch. Fable vs Opus
   // is a mismatch regardless of tier (the 2026-07-01 silent substitution).
-  expect(stripModelTier('claude-opus-4-8[1m]')).toBe('claude-opus-4-8');
-  expect(stripModelTier('claude-opus-4-8')).toBe('claude-opus-4-8');
+  expect(stripModelTier('claude-opus-4-8[1m]')).toBe('claude-opus-5-5');
+  expect(stripModelTier('claude-opus-4-8')).toBe('claude-opus-5-5');
   expect(stripModelTier('claude-fable-5[1m]')).toBe('claude-fable-5');
   expect(stripModelTier('gpt-5.5')).toBe('gpt-5.5');
-  expect(stripModelTier(stripModelTier('claude-opus-4-8[1m]'))).toBe('claude-opus-4-8');
+  expect(stripModelTier(stripModelTier('claude-opus-4-8[1m]'))).toBe('claude-opus-5-5');
 });
 
 test('Claude model identity rejects accounting-only pseudo-models', () => {

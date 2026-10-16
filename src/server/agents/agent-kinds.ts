@@ -38,14 +38,17 @@ export const STATIC_AGENT_DEFINITIONS: Record<ChatAgentKind, AgentDefinition> = 
       // hard-errors others (claude-mythos-5). The runtime modelRan-divergence warning
       // in the claude adapter is the backstop if a listed id ever rots. When
       // ANTHROPIC_API_KEY is set, discovered models are merged in ahead of these.
+      { id: 'claude-opus-5-5',           label: 'Opus 5.5' },
+      { id: 'claude-fable-5-1',          label: 'Fable 5.1' },
       { id: 'claude-fable-5',            label: 'Fable 5' },
       { id: 'claude-opus-4-8',           label: 'Opus 4.8' },
       { id: 'claude-opus-4-7',           label: 'Opus 4.7' },
       { id: 'claude-opus-4-6',           label: 'Opus 4.6' },
+      { id: 'claude-sonnet-5-5',         label: 'Sonnet 5.5' },
       { id: 'claude-sonnet-4-6',         label: 'Sonnet 4.6' },
       { id: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5' },
     ],
-    defaultModel: 'claude-opus-4-8',
+    defaultModel: 'claude-opus-5-5',
   },
   codex: {
     kind: 'codex',
