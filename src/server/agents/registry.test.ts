@@ -48,11 +48,11 @@ test('stripModelTier removes only a trailing [tier] suffix', () => {
   // The mismatch latch compares tier-stripped ids: opus-4-8 vs opus-4-8[1m] is
   // the same model at a different context tier — NOT a mismatch. Fable vs Opus
   // is a mismatch regardless of tier (the 2026-07-01 silent substitution).
-  expect(stripModelTier('claude-opus-4-8[1m]')).toBe('claude-opus-5-5');
-  expect(stripModelTier('claude-opus-4-8')).toBe('claude-opus-5-5');
+  expect(stripModelTier('claude-opus-4-8[1m]')).toBe('claude-opus-4-8');
+  expect(stripModelTier('claude-opus-4-8')).toBe('claude-opus-4-8');
   expect(stripModelTier('claude-fable-5[1m]')).toBe('claude-fable-5');
   expect(stripModelTier('gpt-5.5')).toBe('gpt-5.5');
-  expect(stripModelTier(stripModelTier('claude-opus-4-8[1m]'))).toBe('claude-opus-5-5');
+  expect(stripModelTier(stripModelTier('claude-opus-4-8[1m]'))).toBe('claude-opus-4-8');
 });
 
 test('Claude model identity rejects accounting-only pseudo-models', () => {
