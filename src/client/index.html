@@ -594,34 +594,6 @@
     .workspace-test-url-input:focus { border-color: var(--accent); color: var(--text-primary); }
     .workspace-test-url-open { color: var(--accent); font-size: 10px; font-weight: 600; text-decoration: none; padding: 2px 4px; }
     .workspace-test-url-open:hover { text-decoration: underline; }
-    .workspace-tracker-toggle { grid-column: 1 / -1; display: inline-flex; align-items: center; gap: 5px; width: fit-content; color: var(--text-muted); font-size: 10px; cursor: pointer; user-select: none; }
-    .workspace-tracker-toggle input { margin: 0; accent-color: var(--accent); }
-    .workspace-tracker-toggle:hover { color: var(--text-secondary); }
-    .workspace-atlas { padding: 2px 12px 6px; }
-    .workspace-atlas-btn { width: 100%; background: var(--bg-tertiary); border: 1px solid var(--border); color: var(--text-secondary); padding: 4px 8px; border-radius: 4px; font-size: 11px; cursor: pointer; transition: all 0.15s; }
-    .workspace-atlas-btn:hover:not(:disabled) { background: rgba(86, 211, 100, 0.1); border-color: var(--qa-accent); color: var(--text-primary); }
-    .workspace-atlas-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-    .workspace-atlas-hint { margin-top: 3px; color: var(--text-muted); font-size: 10px; line-height: 1.35; }
-    .workspace-atlas-running { padding: 4px 12px 6px; }
-    .workspace-atlas-idle { padding: 4px 12px 6px; }
-    .workspace-atlas-partial { padding: 4px 12px 6px; }
-    .workspace-atlas-status { display: flex; align-items: center; gap: 6px; padding: 5px 8px; border-radius: 4px; font-size: 11px; font-weight: 500; }
-    .workspace-atlas-running .workspace-atlas-status { background: rgba(86, 211, 100, 0.1); border: 1px solid var(--qa-accent-strong); color: var(--qa-accent); }
-    .workspace-atlas-partial .workspace-atlas-status { background: rgba(210, 153, 34, 0.1); border: 1px solid rgba(210, 153, 34, 0.35); color: var(--warning); }
-    .workspace-atlas-idle.workspace-atlas-fresh .workspace-atlas-status { background: rgba(86, 211, 100, 0.08); border: 1px solid rgba(86, 211, 100, 0.3); color: var(--qa-accent); }
-    .workspace-atlas-idle.workspace-atlas-aging .workspace-atlas-status { background: rgba(210, 153, 34, 0.08); border: 1px solid rgba(210, 153, 34, 0.3); color: var(--warning); }
-    .workspace-atlas-idle.workspace-atlas-stale .workspace-atlas-status { background: rgba(248, 81, 73, 0.08); border: 1px solid rgba(248, 81, 73, 0.3); color: var(--error); }
-    .workspace-atlas-pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--qa-accent); flex-shrink: 0; box-shadow: 0 0 0 0 var(--qa-accent); animation: qa-pulse 2.5s infinite; }
-    .workspace-atlas-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .workspace-atlas-age { font-weight: 600; }
-    .workspace-atlas-stale-hint { color: var(--error); font-size: 10px; }
-    .workspace-atlas-stop { background: none; border: 1px solid var(--qa-accent-strong); color: var(--qa-accent); cursor: pointer; padding: 0 6px; border-radius: 3px; font-size: 11px; flex-shrink: 0; }
-    .workspace-atlas-stop:hover { background: var(--error); color: white; border-color: var(--error); }
-    .workspace-atlas-actions { display: flex; gap: 4px; margin-top: 4px; }
-    .workspace-atlas-action-btn { flex: 1; background: var(--bg-tertiary); border: 1px solid var(--border); color: var(--text-secondary); padding: 3px 8px; border-radius: 3px; font-size: 10px; cursor: pointer; transition: all 0.15s; }
-    .workspace-atlas-action-btn:hover:not(:disabled) { background: rgba(86, 211, 100, 0.1); border-color: var(--qa-accent); color: var(--text-primary); }
-    .workspace-atlas-action-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-    .workspace-atlas-discard:hover:not(:disabled) { background: rgba(248, 81, 73, 0.12); border-color: var(--error); color: var(--error); }
     .sidebar-ports { margin-top: auto; border-top: 1px solid var(--border); flex-shrink: 0; }
     .sidebar-ports-header { width: 100%; display: flex; align-items: center; gap: 6px; padding: 7px 12px; color: var(--text-secondary); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; background: transparent; border: 0; cursor: pointer; text-align: left; }
     .sidebar-ports-header:hover { color: var(--text-primary); }
@@ -636,339 +608,8 @@
     .sidebar-port-stop:hover { background: rgba(248, 81, 73, 0.12); border-color: var(--error); }
     .sidebar-port-stop:disabled { opacity: 0.45; cursor: default; }
 
-    /* Atlas viewer panel */
-    .atlas-panel { display: flex; flex-direction: column; height: 100%; overflow: hidden; }
-    .atlas-header { display: flex; flex-direction: column; gap: 4px; padding: 12px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
-    .atlas-title { font-size: 13px; font-weight: 600; color: var(--text-primary); }
-    .atlas-status { font-size: 11px; padding: 3px 8px; border-radius: 4px; align-self: flex-start; }
-    .atlas-status-fresh { background: rgba(86, 211, 100, 0.12); color: var(--qa-accent); border: 1px solid rgba(86, 211, 100, 0.3); }
-    .atlas-status-aging { background: rgba(210, 153, 34, 0.12); color: var(--warning); border: 1px solid rgba(210, 153, 34, 0.3); }
-    .atlas-status-stale { background: rgba(248, 81, 73, 0.12); color: var(--error); border: 1px solid rgba(248, 81, 73, 0.3); }
-    .atlas-status-running { background: rgba(86, 211, 100, 0.12); color: var(--qa-accent); border: 1px solid rgba(86, 211, 100, 0.3); }
-    .atlas-rescan-btn { align-self: flex-start; background: var(--bg-tertiary); border: 1px solid var(--border); color: var(--text-secondary); padding: 3px 10px; border-radius: 4px; font-size: 11px; cursor: pointer; }
-    .atlas-rescan-btn:hover { background: rgba(86, 211, 100, 0.1); border-color: var(--qa-accent); color: var(--text-primary); }
-    .atlas-search-row { display: flex; align-items: center; gap: 4px; padding: 8px 12px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
-    .atlas-search { flex: 1; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 4px; color: var(--text-primary); padding: 4px 8px; font-size: 12px; outline: none; }
-    .atlas-search:focus { border-color: var(--accent); }
-    .atlas-search-clear { background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 0 6px; font-size: 14px; }
-    .atlas-body { flex: 1; overflow-y: auto; padding: 12px; font-size: 13px; line-height: 1.55; scroll-behavior: smooth; }
-    .atlas-body img { max-width: 100%; height: auto; border: 1px solid var(--qa-accent-strong); border-radius: 4px; margin: 4px 0; cursor: zoom-in; }
-    .atlas-body img:hover { border-color: var(--qa-accent); }
-    .atlas-body img:focus-visible { outline: 2px solid var(--qa-accent); outline-offset: 3px; }
-    .atlas-anchor { display: block; position: relative; top: -8px; visibility: hidden; height: 0; }
-    .atlas-coverage-strip { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px 12px; border-bottom: 1px solid var(--border); flex-shrink: 0; background: var(--bg-secondary); }
-    .atlas-coverage-pill { font-size: 10.5px; padding: 2px 8px; border-radius: 10px; background: var(--bg-tertiary); border: 1px solid var(--border); color: var(--text-secondary); white-space: nowrap; }
-    .atlas-toc { border-bottom: 1px solid var(--border); flex-shrink: 0; max-height: 220px; display: flex; flex-direction: column; }
-    .atlas-toc.collapsed { max-height: none; }
-    .atlas-toc-header { display: flex; align-items: center; gap: 6px; width: 100%; padding: 6px 12px; border: 0; background: var(--bg-secondary); text-align: left; font-size: 10.5px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; cursor: pointer; user-select: none; }
-    .atlas-toc-header:hover { color: var(--text-secondary); }
-    .atlas-toc-chevron { font-size: 10px; }
-    .atlas-toc-list { display: flex; flex-direction: column; padding: 0 8px 6px; overflow-y: auto; }
-    .atlas-toc-link { background: none; border: none; color: var(--text-secondary); text-align: left; padding: 3px 8px; font-size: 12px; cursor: pointer; border-radius: 3px; }
-    .atlas-toc-link:hover { background: var(--bg-tertiary); color: var(--text-primary); }
-    .atlas-empty { padding: 20px 12px; color: var(--text-muted); font-size: 12px; }
-    .atlas-error { color: var(--error); }
-    .atlas-running-body { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 12px; }
-    .atlas-running-explainer { font-size: 11px; color: var(--text-muted); padding: 8px 10px; background: var(--bg-secondary); border-left: 2px solid var(--qa-accent); border-radius: 4px; line-height: 1.5; }
-    .atlas-run-banner { padding: 9px 12px; border-bottom: 1px solid var(--border); background: rgba(86, 211, 100, 0.06); flex-shrink: 0; }
-    .atlas-run-banner-paused, .atlas-run-banner-failed { background: rgba(210, 153, 34, 0.07); }
-    .atlas-run-banner-failed { border-left: 3px solid var(--error); }
-    .atlas-run-banner-head { display: flex; align-items: center; gap: 8px; color: var(--text-primary); font-size: 11px; }
-    .atlas-run-banner-head > span { margin-left: auto; color: var(--text-muted); font-size: 10px; }
-    .atlas-run-summary { margin-top: 4px; color: var(--text-secondary); font-size: 10.5px; line-height: 1.45; }
-    .atlas-run-actions { display: flex; gap: 5px; margin-left: auto; }
-    .atlas-run-actions .atlas-rescan-btn { align-self: auto; }
-    .atlas-discard-btn:hover { border-color: var(--error); color: var(--error); background: rgba(248, 81, 73, 0.1); }
-    .atlas-validation-errors { margin: 6px 0 0 16px; padding: 0; color: var(--error); font-size: 10px; line-height: 1.4; max-height: 100px; overflow: auto; }
-    .atlas-activity-compact { margin-top: 7px; max-height: 120px; overflow: auto; }
-    .atlas-activity-compact .atlas-activity-msg { padding: 4px 6px; }
-    .atlas-activity-feed { display: flex; flex-direction: column; gap: 6px; }
-    .atlas-activity-heading { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; }
-    .atlas-activity-msg { padding: 6px 8px; border-radius: 4px; font-size: 11px; line-height: 1.4; }
-    .atlas-activity-user { background: rgba(47, 129, 247, 0.06); border-left: 2px solid var(--accent); }
-    .atlas-activity-assistant { background: rgba(86, 211, 100, 0.04); border-left: 2px solid var(--qa-accent); }
-    .atlas-activity-role { font-size: 10px; font-weight: 600; color: var(--text-muted); margin-bottom: 2px; }
-    .atlas-activity-text { color: var(--text-secondary); white-space: pre-wrap; word-wrap: break-word; }
-    .atlas-header-top { display: flex; align-items: flex-start; gap: 8px; flex-wrap: wrap; }
-    .atlas-header-main { display: flex; flex-direction: column; gap: 5px; min-width: 0; flex: 1; }
-    .atlas-header-actions { display: flex; gap: 5px; flex-wrap: wrap; }
-    .atlas-view-tabs { display: flex; gap: 3px; padding: 7px 8px; overflow-x: auto; border-bottom: 1px solid var(--border); background: var(--bg-secondary); flex-shrink: 0; scrollbar-width: thin; }
-    .atlas-view-tab { border: 1px solid transparent; background: transparent; color: var(--text-muted); padding: 4px 8px; border-radius: 4px; font-size: 10.5px; cursor: pointer; white-space: nowrap; }
-    .atlas-view-tab:hover { color: var(--text-primary); background: var(--bg-tertiary); }
-    .atlas-view-tab.active { color: var(--qa-accent); border-color: var(--qa-accent-strong); background: rgba(86, 211, 100, 0.1); }
-    .atlas-filter-strip { display: flex; align-items: center; gap: 4px; padding: 6px 10px; border-bottom: 1px solid var(--border); overflow-x: auto; flex-shrink: 0; }
-    .atlas-filter-label { color: var(--text-muted); font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.5px; margin-right: 2px; }
-    .atlas-filter-chip { border: 1px solid var(--border); background: var(--bg-tertiary); color: var(--text-muted); border-radius: 12px; padding: 2px 7px; font-size: 9.5px; cursor: pointer; white-space: nowrap; }
-    .atlas-filter-chip:hover { color: var(--text-primary); border-color: var(--text-muted); }
-    .atlas-filter-chip.active { color: var(--qa-accent); border-color: var(--qa-accent-strong); background: rgba(86, 211, 100, 0.1); }
-    .atlas-view-body { flex: 1; overflow-y: auto; min-height: 0; padding: 10px; }
-    .atlas-dashboard { display: flex; flex-direction: column; gap: 10px; }
-    .atlas-metric-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(105px, 1fr)); gap: 6px; }
-    .atlas-metric { border: 1px solid var(--border); border-radius: 6px; padding: 9px; background: var(--bg-secondary); min-width: 0; text-align: left; font: inherit; }
-    button.atlas-metric { cursor: pointer; transition: border-color 0.15s, background 0.15s, transform 0.15s; }
-    button.atlas-metric:hover { border-color: var(--qa-accent-strong); background: rgba(86, 211, 100, 0.05); transform: translateY(-1px); }
-    .atlas-metric-value { color: var(--text-primary); font-size: 18px; font-weight: 700; line-height: 1.1; }
-    .atlas-metric-label { color: var(--text-muted); font-size: 9.5px; margin-top: 4px; text-transform: uppercase; letter-spacing: 0.45px; }
-    .atlas-section { border: 1px solid var(--border); border-radius: 6px; background: var(--bg-secondary); overflow: hidden; }
-    .atlas-section-head { display: flex; align-items: center; gap: 7px; padding: 8px 10px; border-bottom: 1px solid var(--border); }
-    .atlas-section-title { color: var(--text-primary); font-weight: 600; font-size: 11px; flex: 1; }
-    .atlas-section-meta { color: var(--text-muted); font-size: 9.5px; }
-    .atlas-section-content { padding: 9px 10px; color: var(--text-secondary); font-size: 11px; line-height: 1.5; }
-    .atlas-progress { height: 7px; overflow: hidden; border-radius: 6px; background: var(--bg-tertiary); margin-top: 7px; }
-    .atlas-progress-fill { height: 100%; background: var(--qa-accent); border-radius: inherit; }
-    .atlas-card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(235px, 1fr)); gap: 8px; }
-    .atlas-card { border: 1px solid var(--border); border-radius: 6px; background: var(--bg-secondary); padding: 9px; min-width: 0; scroll-margin-top: 8px; }
-    .atlas-card.selected { border-color: var(--qa-accent); box-shadow: 0 0 0 1px var(--qa-accent-strong); }
-    .atlas-card-head { display: flex; align-items: flex-start; gap: 7px; margin-bottom: 5px; }
-    .atlas-card-title { color: var(--text-primary); font-size: 11.5px; font-weight: 600; flex: 1; line-height: 1.35; }
-    .atlas-card-status { font-size: 9px; padding: 2px 6px; border-radius: 8px; text-transform: uppercase; letter-spacing: 0.35px; border: 1px solid var(--border); color: var(--text-muted); }
-    .atlas-card-status.verified { color: var(--qa-accent); border-color: var(--qa-accent-strong); }
-    .atlas-card-status.gap { color: var(--warning); border-color: rgba(210, 153, 34, 0.4); }
-    .atlas-id-row { display: flex; align-items: center; gap: 3px; margin-bottom: 7px; min-width: 0; }
-    .atlas-id-link { border: 0; background: none; padding: 0; color: var(--accent); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 9.5px; cursor: pointer; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-    .atlas-id-link:hover { text-decoration: underline; }
-    .atlas-icon-btn { border: 1px solid transparent; background: none; color: var(--text-muted); border-radius: 3px; padding: 1px 4px; font-size: 9px; cursor: pointer; flex-shrink: 0; }
-    .atlas-icon-btn:hover { color: var(--text-primary); border-color: var(--border); background: var(--bg-tertiary); }
-    .atlas-card-block { margin-top: 7px; }
-    .atlas-card-label { color: var(--text-muted); font-size: 8.5px; text-transform: uppercase; letter-spacing: 0.45px; margin-bottom: 3px; }
-    .atlas-card-list { margin: 0; padding-left: 16px; color: var(--text-secondary); font-size: 10px; line-height: 1.45; }
-    .atlas-card-list li + li { margin-top: 2px; }
-    .atlas-chip-row { display: flex; flex-wrap: wrap; gap: 3px; }
-    .atlas-link-chip { border: 1px solid var(--border); background: var(--bg-tertiary); color: var(--text-secondary); border-radius: 10px; padding: 2px 6px; font-size: 8.5px; cursor: pointer; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .atlas-link-chip:hover { color: var(--accent); border-color: var(--accent); }
-    .atlas-trait-chip { border: 1px solid var(--border); color: var(--text-muted); border-radius: 8px; padding: 1px 5px; font-size: 8px; }
-    .atlas-code-ref { display: block; color: var(--text-muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 8.5px; overflow-wrap: anywhere; }
-    .atlas-thumb-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(92px, 1fr)); gap: 5px; margin-top: 7px; }
-    .atlas-thumb { width: 100%; aspect-ratio: 16 / 10; object-fit: cover; object-position: top; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-primary); cursor: zoom-in; }
-    .atlas-thumb:hover { border-color: var(--qa-accent); }
-    .atlas-gallery-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(165px, 1fr)); gap: 8px; }
-    .atlas-gallery-item { margin: 0; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-secondary); overflow: hidden; }
-    .atlas-gallery-item img { display: block; width: 100%; aspect-ratio: 16 / 10; object-fit: cover; object-position: top; cursor: zoom-in; background: var(--bg-primary); }
-    .atlas-gallery-caption { padding: 7px; display: flex; flex-direction: column; gap: 3px; }
-    .atlas-gallery-name { color: var(--text-primary); font-size: 10.5px; font-weight: 600; }
-    .atlas-empty-view { color: var(--text-muted); text-align: center; padding: 28px 12px; font-size: 11px; }
-    .atlas-findings-stack { display: flex; flex-direction: column; gap: 9px; }
-    .atlas-findings-stack .chat-turn-content { font-size: 11px; line-height: 1.55; }
-    .atlas-ask { display: flex; flex-direction: column; gap: 12px; }
-    .atlas-ask-toolbar { display: flex; align-items: flex-start; gap: 10px; }
-    .atlas-ask-heading { flex: 1; min-width: 0; }
-    .atlas-ask-title { color: var(--text-primary); font-size: 14px; font-weight: 650; }
-    .atlas-ask-subtitle { margin-top: 3px; color: var(--text-muted); font-size: 10px; line-height: 1.45; }
-    .atlas-ask-trust-row { display: flex; flex-wrap: wrap; gap: 4px; }
-    .atlas-ask-trust { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--qa-accent-strong); background: rgba(86, 211, 100, 0.06); color: var(--text-secondary); border-radius: 12px; padding: 3px 7px; font-size: 9px; }
-    .atlas-ask-trust::before { content: ''; width: 5px; height: 5px; border-radius: 50%; background: var(--qa-accent); }
-    .atlas-ask-composer { border: 1px solid var(--border); border-radius: 7px; background: var(--bg-secondary); padding: 10px; }
-    .atlas-ask-intro { color: var(--text-secondary); font-size: 10.5px; line-height: 1.5; margin-bottom: 8px; }
-    .atlas-ask-form { display: flex; flex-direction: column; gap: 7px; }
-    .atlas-ask-input { width: 100%; min-height: 82px; resize: vertical; background: var(--bg-primary); border: 1px solid var(--border); border-radius: 5px; color: var(--text-primary); padding: 9px; font: inherit; font-size: 11px; line-height: 1.5; outline: none; box-sizing: border-box; }
-    .atlas-ask-input:focus { border-color: var(--qa-accent); }
-    .atlas-ask-actions { display: flex; align-items: center; gap: 6px; }
-    .atlas-ask-submit { border: 1px solid var(--qa-accent-strong); background: rgba(86, 211, 100, 0.12); color: var(--qa-accent); border-radius: 4px; padding: 5px 10px; font-size: 10.5px; cursor: pointer; }
-    .atlas-ask-submit:disabled { opacity: 0.45; cursor: not-allowed; }
-    .atlas-ask-meta { color: var(--text-muted); font-size: 9px; margin-left: auto; }
-    .atlas-ask-suggestions { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
-    .atlas-ask-suggestion { border: 1px solid var(--border); background: var(--bg-tertiary); color: var(--text-secondary); border-radius: 12px; padding: 3px 8px; font-size: 9px; cursor: pointer; }
-    .atlas-ask-suggestion:hover { color: var(--text-primary); border-color: var(--text-muted); }
-    .atlas-ask-progress { display: flex; align-items: flex-start; gap: 9px; border: 1px solid var(--qa-accent-strong); border-radius: 6px; background: rgba(86, 211, 100, 0.06); padding: 9px 10px; }
-    .atlas-ask-spinner { width: 14px; height: 14px; flex-shrink: 0; margin-top: 1px; border: 2px solid rgba(86, 211, 100, 0.22); border-top-color: var(--qa-accent); border-radius: 50%; animation: atlas-spin 0.8s linear infinite; }
-    @keyframes atlas-spin { to { transform: rotate(360deg); } }
-    .atlas-ask-progress-title { color: var(--text-primary); font-size: 10.5px; font-weight: 600; }
-    .atlas-ask-progress-detail { color: var(--text-muted); font-size: 9.5px; line-height: 1.45; margin-top: 2px; }
-    .atlas-ask-error { color: var(--error); font-size: 10px; border: 1px solid rgba(248, 81, 73, 0.35); background: rgba(248, 81, 73, 0.07); padding: 7px; border-radius: 4px; }
-    .atlas-ask-results-head { display: flex; align-items: center; gap: 8px; padding-top: 2px; }
-    .atlas-ask-results-title { color: var(--text-primary); font-size: 11px; font-weight: 600; }
-    .atlas-ask-results-count { color: var(--text-muted); font-size: 9px; }
-    .atlas-answer { border: 1px solid var(--border); border-radius: 7px; background: var(--bg-secondary); overflow: hidden; }
-    .atlas-answer-head { padding: 7px 9px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 7px; color: var(--text-muted); font-size: 9.5px; background: rgba(86, 211, 100, 0.035); }
-    .atlas-answer-status { display: inline-flex; align-items: center; gap: 5px; color: var(--qa-accent); font-weight: 600; }
-    .atlas-answer-status::before { content: '✓'; display: grid; place-items: center; width: 13px; height: 13px; border-radius: 50%; background: rgba(86, 211, 100, 0.14); font-size: 9px; }
-    .atlas-answer-model { margin-left: auto; white-space: nowrap; }
-    .atlas-answer-question { padding: 9px; border-bottom: 1px solid var(--border); color: var(--text-primary); font-size: 10.5px; line-height: 1.45; }
-    .atlas-answer-label { display: block; color: var(--text-muted); font-size: 8.5px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 3px; }
-    .atlas-answer-citations { padding: 8px 9px; border-bottom: 1px solid var(--border); display: flex; align-items: flex-start; flex-wrap: wrap; gap: 5px; }
-    .atlas-answer-citations .atlas-answer-label { width: 100%; margin: 0; }
-    .atlas-answer-body { padding: 10px 11px; overflow-wrap: anywhere; }
-    .atlas-answer-body .chat-turn-content { font-size: 11px; line-height: 1.65; }
-    .atlas-answer-body .chat-turn-content > :first-child { margin-top: 0; }
-    .atlas-answer-body .chat-turn-content > :last-child { margin-bottom: 0; }
-    .atlas-answer-body .chat-turn-content ol, .atlas-answer-body .chat-turn-content ul { padding-left: 20px; }
-    .atlas-lightbox { position: fixed; inset: 0; z-index: 10000; background: rgba(0, 0, 0, 0.9); display: flex; align-items: center; justify-content: center; padding: 20px; }
-    .atlas-lightbox-dialog { width: min(1400px, 96vw); height: min(920px, 94vh); display: grid; grid-template-rows: auto minmax(0, 1fr) auto; background: var(--bg-primary); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; box-shadow: 0 20px 80px rgba(0,0,0,0.6); }
-    .atlas-lightbox-head, .atlas-lightbox-foot { display: flex; align-items: center; gap: 8px; padding: 8px 10px; background: var(--bg-secondary); }
-    .atlas-lightbox-head { border-bottom: 1px solid var(--border); }
-    .atlas-lightbox-foot { border-top: 1px solid var(--border); }
-    .atlas-lightbox-title { color: var(--text-primary); font-size: 11px; font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .atlas-lightbox-stage { position: relative; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 12px 52px; overflow: auto; }
-    .atlas-lightbox-stage img { max-width: 100%; max-height: 100%; object-fit: contain; border: 1px solid var(--border); background: #05070a; }
-    .atlas-lightbox-nav { position: absolute; top: 50%; transform: translateY(-50%); width: 34px; height: 52px; border: 1px solid var(--border); border-radius: 5px; background: rgba(22, 27, 34, 0.86); color: var(--text-primary); cursor: pointer; font-size: 20px; }
-    .atlas-lightbox-nav.prev { left: 9px; }
-    .atlas-lightbox-nav.next { right: 9px; }
-    .atlas-lightbox-button { border: 1px solid var(--border); background: var(--bg-tertiary); color: var(--text-secondary); border-radius: 4px; padding: 4px 8px; font-size: 10px; cursor: pointer; }
-    .atlas-lightbox-button:hover { color: var(--text-primary); border-color: var(--text-muted); }
-    .atlas-lightbox-count { color: var(--text-muted); font-size: 9.5px; margin-left: auto; }
-    @media (max-width: 700px) {
-      .atlas-header-top { flex-direction: column; }
-      .atlas-card-grid { grid-template-columns: 1fr; }
-      .atlas-gallery-grid { grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); }
-      .atlas-lightbox { padding: 6px; }
-      .atlas-lightbox-dialog { width: 100%; height: 96vh; }
-      .atlas-lightbox-stage { padding: 8px 38px; }
-      .atlas-lightbox-head, .atlas-lightbox-foot { flex-wrap: wrap; }
-    }
-
-    /* QA testing button in panel header */
-    .qa-header-btn.active { background: rgba(86, 211, 100, 0.18); color: var(--qa-accent); }
-    .qa-header-btn.qa-header-btn-empty { opacity: 0.5; }
-    .qa-header-btn.qa-has-unread { position: relative; }
-    .qa-header-btn.qa-has-unread::after { content: ''; position: absolute; top: 1px; right: 1px; width: 7px; height: 7px; background: var(--qa-accent); border: 1px solid var(--bg-secondary); border-radius: 50%; box-shadow: 0 0 4px var(--qa-accent); animation: qa-pulse 2.5s infinite; }
-
-    .qa-subpanel-working { padding: 8px 4px; font-size: 11px; color: var(--qa-accent); font-style: italic; text-align: center; }
-    .qa-activity-toggle { display: flex; align-items: center; gap: 8px; padding: 4px 0 8px; border-bottom: 1px dashed var(--border); margin-bottom: 8px; }
-    .qa-activity-toggle-btn { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 10px; padding: 2px 6px; border-radius: 3px; text-transform: uppercase; letter-spacing: 0.5px; }
-    .qa-activity-toggle-btn:hover { color: var(--qa-accent); background: rgba(86, 211, 100, 0.08); }
-    .qa-activity-meta { font-size: 10px; color: var(--text-muted); margin-left: auto; }
-
-    /* ChatTurn styling for QA-originated messages in the coding agent's chat */
-    .chat-turn[data-source="qa"] { border-left: 2px solid var(--qa-accent); padding-left: 8px; background: rgba(86, 211, 100, 0.04); }
-    .chat-turn[data-source="qa"] .chat-turn-role { color: var(--qa-accent); }
-    .chat-turn[data-source="qa"] .chat-turn-role::before { content: '🧪 '; }
-
-    /* QA verdict dashboard — three pills always visible; the agent's chosen
-       verdict lights up with summary, the other two stay grey/dim. */
-    .qa-verdict-row { display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; }
-    .qa-verdict { display: inline-block; padding: 3px 10px; border-radius: 4px; font-size: 12px; font-weight: 700; letter-spacing: 0.3px; white-space: nowrap; }
-    .qa-verdict-active.qa-verdict-pass { background: rgba(86, 211, 100, 0.18); color: var(--qa-accent); border: 1px solid var(--qa-accent-strong); }
-    .qa-verdict-active.qa-verdict-warn { background: rgba(210, 153, 34, 0.18); color: var(--warning); border: 1px solid rgba(210, 153, 34, 0.4); }
-    .qa-verdict-active.qa-verdict-fail { background: rgba(248, 81, 73, 0.18); color: var(--error); border: 1px solid rgba(248, 81, 73, 0.4); }
-    .qa-verdict-active.qa-verdict-inconclusive { background: rgba(139, 148, 158, 0.14); color: var(--text-secondary); border: 1px solid var(--border); }
-
-    /* QA test stats strip — renders directly under the QA panel header */
-    .qa-subpanel-stats { display: flex; gap: 14px; padding: 4px 12px; background: rgba(86, 211, 100, 0.05); border-bottom: 1px solid var(--qa-accent-strong); font-size: 10px; color: var(--text-secondary); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; flex-shrink: 0; }
-
-    /* Inline screenshots in QA panel content */
-    .qa-inline-shots { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; padding-top: 8px; border-top: 1px dashed var(--qa-accent-strong); }
-    .qa-inline-shot { max-width: 100%; border: 1px solid var(--qa-accent-strong); border-radius: 4px; cursor: zoom-in; }
-    .qa-inline-shot-caption { font-size: 10px; color: var(--text-muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-all; }
-
-    /* Verdict-change note (shown under the pill row when a previous run exists) */
-    .qa-verdict-change { display: inline-block; font-size: 10px; padding: 1px 6px; border-radius: 3px; margin-bottom: 8px; font-weight: 500; letter-spacing: 0.3px; }
-    .qa-verdict-change-same { background: var(--bg-tertiary); color: var(--text-muted); }
-    .qa-verdict-change-better { background: rgba(86, 211, 100, 0.12); color: var(--qa-accent); }
-    .qa-verdict-change-worse { background: rgba(248, 81, 73, 0.12); color: var(--error); }
-    .qa-verdict-change-inconclusive { background: rgba(139, 148, 158, 0.12); color: var(--text-muted); }
-
-    /* Structured QA run presentation. These cards render only persisted,
-       schema-validated run data; the hidden QA agent's raw transcript stays hidden. */
-    .qa-run-request { display: flex; flex-direction: column; gap: 3px; margin: 0 0 10px; padding: 8px 10px; border: 1px solid var(--border); border-left: 3px solid var(--qa-accent); border-radius: 4px; background: var(--bg-secondary); color: var(--text-secondary); font-size: 11px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
-    .qa-run-request > span { color: var(--qa-accent); font-size: 9px; font-weight: 700; letter-spacing: 0.6px; text-transform: uppercase; }
-    .qa-run-request small { color: var(--text-muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
-    .qa-structured-section { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; padding-top: 9px; border-top: 1px dashed var(--border); }
-    .qa-structured-heading { color: var(--text-secondary); font-size: 10px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; }
-    .qa-assertion, .qa-finding { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 7px; align-items: start; padding: 7px 8px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-secondary); font-size: 11px; }
-    .qa-assertion-status { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 50%; color: var(--text-muted); background: var(--bg-tertiary); font-weight: 700; }
-    .qa-assertion-passed { border-left: 3px solid var(--success); }
-    .qa-assertion-passed .qa-assertion-status { color: var(--success); background: rgba(86, 211, 100, 0.12); }
-    .qa-assertion-warning { border-left: 3px solid var(--warning); }
-    .qa-assertion-warning .qa-assertion-status { color: var(--warning); background: rgba(210, 153, 34, 0.12); }
-    .qa-assertion-failed { border-left: 3px solid var(--error); }
-    .qa-assertion-failed .qa-assertion-status { color: var(--error); background: rgba(248, 81, 73, 0.12); }
-    .qa-assertion-not_run { border-left: 3px solid var(--text-muted); }
-    .qa-assertion-observed { margin-top: 2px; color: var(--text-secondary); line-height: 1.4; }
-    .qa-assertion small { display: block; margin-top: 3px; color: var(--text-muted); }
-    .qa-finding { grid-template-columns: minmax(52px, auto) minmax(0, 1fr); }
-    .qa-finding-severity { padding: 2px 5px; border-radius: 3px; background: var(--bg-tertiary); color: var(--text-muted); font-size: 9px; font-weight: 700; text-align: center; text-transform: uppercase; }
-    .qa-finding-critical, .qa-finding-major { border-left: 3px solid var(--error); }
-    .qa-finding-critical .qa-finding-severity, .qa-finding-major .qa-finding-severity { color: var(--error); background: rgba(248, 81, 73, 0.12); }
-    .qa-finding-minor { border-left: 3px solid var(--warning); }
-    .qa-finding-minor .qa-finding-severity { color: var(--warning); background: rgba(210, 153, 34, 0.12); }
-    .qa-finding-note { border-left: 3px solid var(--accent); }
-    .qa-validation-box { margin-top: 12px; padding: 8px 10px; border: 1px solid rgba(210, 153, 34, 0.4); border-radius: 4px; background: rgba(210, 153, 34, 0.08); color: var(--warning); font-size: 11px; }
-    .qa-validation-box ul { margin: 5px 0 0; padding-left: 18px; color: var(--text-secondary); }
-    .qa-run-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 12px; }
-    .qa-handoff-btn { border-left-color: var(--accent); }
-    .qa-history-list { display: flex; flex-direction: column; gap: 6px; }
-    .qa-history-item { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 7px; align-items: center; width: 100%; padding: 7px 8px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-secondary); color: var(--text-secondary); cursor: pointer; text-align: left; }
-    .qa-history-item:hover, .qa-history-item.selected { border-color: var(--qa-accent); background: rgba(86, 211, 100, 0.08); }
-    .qa-history-verdict { min-width: 70px; color: var(--text-muted); font-size: 9px; font-weight: 700; letter-spacing: 0.4px; text-transform: uppercase; }
-    .qa-history-item[data-verdict="pass"] .qa-history-verdict { color: var(--success); }
-    .qa-history-item[data-verdict="warnings"] .qa-history-verdict { color: var(--warning); }
-    .qa-history-item[data-verdict="fail"] .qa-history-verdict { color: var(--error); }
-    .qa-history-prompt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .qa-history-time { max-width: 96px; overflow: hidden; text-overflow: ellipsis; color: var(--text-muted); font-size: 9px; white-space: nowrap; }
-
-    /* Continue-testing follow-up buttons under a completed report */
-    .qa-continue-row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 12px; padding-top: 8px; border-top: 1px dashed var(--border); }
-    .qa-continue-btn { background: var(--bg-secondary); border: 1px solid var(--border); border-left: 2px solid var(--qa-accent); color: var(--text-secondary); cursor: pointer; padding: 5px 10px; border-radius: 4px; font-size: 11px; transition: all 0.15s; }
-    .qa-continue-btn:hover { background: rgba(86, 211, 100, 0.08); border-color: var(--qa-accent); color: var(--text-primary); }
-
-    /* Live-streaming screenshots strip during in-flight tests */
-    .qa-live-shots { padding: 6px 0 10px; border-bottom: 1px dashed var(--qa-accent-strong); margin-bottom: 8px; }
-    .qa-live-shots-heading { font-size: 10px; color: var(--error); text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; margin-bottom: 6px; }
-    .qa-live-shots-row { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; }
-    .qa-live-shot { height: 80px; width: auto; border: 1px solid var(--qa-accent-strong); border-radius: 3px; cursor: zoom-in; flex-shrink: 0; }
-    .qa-live-shot:hover { border-color: var(--qa-accent); }
-
-    /* Split body: when QA is open, terminal panel splits coding | QA columns */
     .panel-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
-    .panel-body.qa-split { flex-direction: row; }
     .panel-main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; position: relative; }
-
-    /* Resizer between coding panel and QA panel */
-    .qa-resizer { width: 5px; background: var(--bg-tertiary); border-left: 1px solid var(--border); border-right: 1px solid var(--border); cursor: col-resize; flex-shrink: 0; transition: background 0.15s; position: relative; }
-    .qa-resizer:hover, .qa-resizer.dragging { background: var(--qa-accent); }
-    .qa-resizer::after { content: ''; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 2px; height: 28px; background: var(--text-muted); border-radius: 1px; opacity: 0.4; }
-
-    /* QA agent — distinct lime/test-pass green identity so it never reads as "just another panel" */
-    :root { --qa-accent: #56d364; --qa-accent-dim: rgba(86, 211, 100, 0.12); --qa-accent-strong: rgba(86, 211, 100, 0.28); }
-    .qa-subpanel { display: flex; flex-direction: column; flex-shrink: 0; min-width: 240px; min-height: 180px; background: var(--bg-primary); border-left: 3px solid var(--qa-accent); border-right: 3px solid var(--qa-accent); box-shadow: inset 0 0 0 1px rgba(86, 211, 100, 0.08); }
-    /* When stacked (QA below coding) */
-    .panel-body:not(.qa-split) > .qa-subpanel { width: 100%; max-height: 45%; border-left: none; border-right: none; border-top: 3px solid var(--qa-accent); border-bottom: 3px solid var(--qa-accent); }
-    .panel-body:not(.qa-split) > .qa-resizer { display: none; }
-
-    /* Distinctive striped header so the QA panel is instantly recognizable across the grid */
-    .qa-subpanel-header { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 4px; padding: 7px 10px; background: linear-gradient(135deg, rgba(86, 211, 100, 0.16) 0%, rgba(86, 211, 100, 0.06) 100%), repeating-linear-gradient(45deg, transparent 0 6px, rgba(86, 211, 100, 0.05) 6px 7px); border-bottom: 1px solid var(--qa-accent-strong); font-size: 12px; color: var(--qa-accent); font-weight: 600; flex-shrink: 0; letter-spacing: 0.3px; }
-    .qa-subpanel-status { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1; overflow: hidden; }
-    .qa-subpanel-status > span:not(:first-child) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .qa-subpanel-badge { display: inline-flex; align-items: center; padding: 1px 5px; background: var(--qa-accent); color: #0d1117; font-size: 9px; font-weight: 700; border-radius: 3px; letter-spacing: 0.5px; flex-shrink: 0; }
-    .qa-subpanel-pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--qa-accent); flex-shrink: 0; box-shadow: 0 0 0 0 var(--qa-accent); animation: qa-pulse 2.5s infinite; }
-    @keyframes qa-pulse { 0% { box-shadow: 0 0 0 0 rgba(86, 211, 100, 0.55); } 70% { box-shadow: 0 0 0 6px rgba(86, 211, 100, 0); } 100% { box-shadow: 0 0 0 0 rgba(86, 211, 100, 0); } }
-    .qa-subpanel-close { background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 0 4px; font-size: 14px; line-height: 1; flex-shrink: 0; }
-    .qa-subpanel-close:hover { color: var(--text-primary); }
-
-    .qa-subpanel-content { flex: 1; overflow-y: auto; padding: 8px 12px; min-height: 0; background: linear-gradient(180deg, rgba(86, 211, 100, 0.03) 0%, transparent 60px); }
-    .qa-subpanel-empty { color: var(--text-muted); font-size: 11px; text-align: center; padding: 12px 4px; }
-    .qa-subpanel-empty-heading { color: var(--text-secondary); font-size: 11px; font-weight: 500; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px; }
-    .qa-suggestions { display: flex; flex-direction: column; gap: 6px; }
-    .qa-suggestion { background: var(--bg-secondary); border: 1px solid var(--border); border-left: 2px solid var(--qa-accent); border-radius: 4px; padding: 7px 10px; cursor: pointer; text-align: left; color: var(--text-secondary); font-size: 11px; font-style: normal; transition: all 0.15s; line-height: 1.4; }
-    .qa-suggestion:hover { background: rgba(86, 211, 100, 0.08); border-color: var(--qa-accent); color: var(--text-primary); }
-    .qa-suggestion-title { color: var(--qa-accent); font-weight: 500; margin-bottom: 2px; }
-    .qa-suggestion-desc { color: var(--text-muted); font-size: 10px; }
-
-    /* Status pill in QA header — only rendered for non-idle states to avoid clutter */
-    .qa-status-pill { display: inline-flex; align-items: center; gap: 4px; padding: 1px 6px; background: rgba(86, 211, 100, 0.2); color: var(--qa-accent); font-size: 9px; font-weight: 500; border-radius: 8px; letter-spacing: 0.4px; text-transform: uppercase; flex-shrink: 0; }
-    .qa-status-pill.error { background: rgba(248, 81, 73, 0.2); color: var(--error); }
-
-    /* QA test URL link — ellipsizes on narrow panels */
-    .qa-test-url { font-size: 10px; color: var(--text-muted); font-weight: 400; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; text-decoration: none; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .qa-test-url:hover { color: var(--qa-accent); text-decoration: underline; }
-
-    /* Run-again button in QA header — icon-only to save space */
-    .qa-rerun-btn { background: none; border: 1px solid var(--qa-accent-strong); color: var(--qa-accent); cursor: pointer; padding: 1px 6px; border-radius: 3px; font-size: 11px; font-weight: 500; flex-shrink: 0; transition: all 0.15s; line-height: 1; }
-    .qa-rerun-btn:hover:not(:disabled) { background: var(--qa-accent); color: #0d1117; }
-    .qa-rerun-btn.active { background: var(--qa-accent); color: #0d1117; }
-    .qa-rerun-btn:disabled { opacity: 0.35; cursor: not-allowed; }
-
-    /* Abort-test button — only visible when a test is in flight */
-    .qa-abort-btn { background: rgba(248, 81, 73, 0.15); border: 1px solid rgba(248, 81, 73, 0.5); color: var(--error); cursor: pointer; padding: 1px 8px; border-radius: 3px; font-size: 11px; font-weight: 600; flex-shrink: 0; transition: all 0.15s; line-height: 1; }
-    .qa-abort-btn:hover { background: var(--error); color: white; }
-
-    .qa-subpanel-input-wrapper { display: flex; align-items: flex-end; padding: 6px 8px; border-top: 1px solid var(--qa-accent-strong); background: var(--qa-accent-dim); gap: 6px; flex-shrink: 0; }
-    .qa-subpanel-input { flex: 1; min-width: 0; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 4px; color: var(--text-primary); padding: 4px 8px; font-size: 12px; outline: none; resize: none; font-family: inherit; line-height: 1.4; max-height: 80px; }
-    .qa-subpanel-input:focus { border-color: var(--qa-accent); }
-    .qa-subpanel-input:disabled { opacity: 0.5; }
-    .qa-subpanel-send { background: var(--qa-accent); border: none; color: #0d1117; cursor: pointer; padding: 4px 10px; border-radius: 4px; font-size: 11px; font-weight: 600; flex-shrink: 0; }
-    .qa-subpanel-send:hover:not(:disabled) { background: #6ddb78; }
-    .qa-subpanel-send:disabled { opacity: 0.4; cursor: not-allowed; }
 
     /* Empty grid slot */
     .slot-empty { display: flex; align-items: center; justify-content: center; background: var(--bg-primary); }
@@ -1124,7 +765,6 @@
     }
 
     const ACTIVE_WORKSPACE_STORAGE_KEY = 'agent-forge:active-workspace-id';
-    const ATLAS_RESCAN_CONFIRMATION = 'Re-scan the UI Atlas now?\n\nThis can use substantial model time and browser automation. The current published Atlas will stay available until a replacement passes validation.';
 
     function readStoredActiveWorkspaceId() {
       try { return localStorage.getItem(ACTIVE_WORKSPACE_STORAGE_KEY); }
@@ -1210,8 +850,6 @@
       const [terminalOutput, setTerminalOutput] = useState({});
       const [errorToasts, setErrorToasts] = useState([]);
       const [authRecoveries, setAuthRecoveries] = useState([]);
-      const [qaUnread, setQaUnread] = useState({}); // sourceAgentId -> true when QA results arrived for that agent
-      const [qaLiveShots, setQaLiveShots] = useState({}); // workspaceId -> [{path, timestamp}]
       const wsRef = useRef(null);
       const agentsRef = useRef([]);
       const workspacesRef = useRef([]);
@@ -1237,12 +875,6 @@
         setActiveWorkspaceId(id);
         storeActiveWorkspaceId(id);
       }, []);
-
-      const isHiddenQaAgent = (agentId) => {
-        const agent = agentsRef.current.find(item => item.id === agentId);
-        return (agent?.hideFromGrid && agent?.name === 'QA Tester')
-          || workspacesRef.current.some(workspace => workspace.qaAgentId === agentId);
-      };
 
       const clientSessionIdRef = useRef((() => {
         try {
@@ -1380,9 +1012,7 @@
                 setAgents(msg.agents);
                 setConnected(true);
                 msg.agents.forEach(a => {
-                  // Structured qaRuns are the QA UI's durable source. Do not
-                  // download the hidden QA implementation transcript.
-                  if (!(a.hideFromGrid && a.name === 'QA Tester')) sendRaw({ type: 'get_history', agentId: a.id });
+                  sendRaw({ type: 'get_history', agentId: a.id });
                   // The server owns execution order, including busy agents.
                   // Only locally unsent commands are submitted on hydration.
                   flushOfflineQueue(a.id);
@@ -1435,7 +1065,6 @@
                 setLiveTurnState(prev => { const n = {...prev}; delete n[msg.agentId]; return n; });
                 break;
               case 'message':
-                if (isHiddenQaAgent(msg.message.agentId)) break;
                 setMessages(prev => ({
                   ...prev,
                   [msg.message.agentId]: [...(prev[msg.message.agentId] || []), msg.message]
@@ -1445,7 +1074,6 @@
                 }
                 break;
               case 'history':
-                if (isHiddenQaAgent(msg.agentId)) break;
                 setMessages(prev => ({ ...prev, [msg.agentId]: msg.messages }));
                 break;
               case 'history_cleared':
@@ -1457,7 +1085,6 @@
                 setLiveTurnState(prev => { const n = {...prev}; delete n[msg.agentId]; return n; });
                 break;
               case 'output': {
-                if (isHiddenQaAgent(msg.agentId)) break;
                 const MAX_LIVE_OUTPUT = 512000; // 500KB cap
                 setLiveOutput(prev => {
                   let updated = (prev[msg.agentId] || '') + msg.content;
@@ -1469,7 +1096,6 @@
                 break;
               }
               case 'agent_activity':
-                if (isHiddenQaAgent(msg.agentId)) break;
                 if (msg.clear) {
                   setAgentActivity(prev => {
                     const current = prev[msg.agentId];
@@ -1486,7 +1112,6 @@
                 }
                 break;
               case 'thinking_output': {
-                if (isHiddenQaAgent(msg.agentId)) break;
                 const MAX_THINKING_OUTPUT = 16000;
                 setThinkingOutput(prev => {
                   let updated = (prev[msg.agentId] || '') + msg.content;
@@ -1499,7 +1124,7 @@
               }
               case 'live_turn_state': {
                 const state = msg.state;
-                if (!state || isHiddenQaAgent(state.agentId)) break;
+                if (!state) break;
                 const previous = liveTurnStateRef.current[state.agentId];
                 const sameTurn = previous && previous.turnId === state.turnId;
                 if (sameTurn && Number(previous.revision || 0) >= Number(state.revision || 0)) break;
@@ -1554,33 +1179,6 @@
               case 'workspace_deleted':
                 setWorkspaces(prev => prev.filter(w => w.id !== msg.id));
                 break;
-              case 'qa_results_ready':
-                setQaUnread(prev => ({ ...prev, [msg.sourceAgentId]: true }));
-                // Retire only this completed run's live strip. Atlas and a
-                // subsequently queued QA run use separate browser sessions.
-                setQaLiveShots(prev => {
-                  const kept = (prev[msg.workspaceId] || []).filter(shot => shot.browserSessionId !== 'qa-' + msg.runId);
-                  if (kept.length > 0) return { ...prev, [msg.workspaceId]: kept };
-                  const { [msg.workspaceId]: _, ...rest } = prev;
-                  return rest;
-                });
-                break;
-              case 'qa_screenshot_taken':
-                setQaLiveShots(prev => ({
-                  ...prev,
-                  [msg.workspaceId]: [...(prev[msg.workspaceId] || []), { path: msg.path, timestamp: msg.timestamp, browserSessionId: msg.browserSessionId }].slice(-200),
-                }));
-                break;
-              case 'qa_stuck_warning': {
-                const toastId = 'stuck-' + Date.now() + Math.random();
-                const text = '⚠️ QA agent looping: /' + msg.endpoint + ' called ' + msg.repeatCount + 'x with same args. Try /evaluate or skip this surface.';
-                setErrorToasts(prev => {
-                  const next = [...prev, { id: toastId, message: text }];
-                  return next.slice(-5);
-                });
-                setTimeout(() => setErrorToasts(prev => prev.filter(t => t.id !== toastId)), 12000);
-                break;
-              }
               // Terminals
               case 'terminals_list':
                 setTerminals(msg.terminals);
@@ -1685,19 +1283,11 @@
       }
 
       return {
-        connected, agents, messages, liveOutput, queued, sharedContext, fileChanges, thinkingOutput, agentActivity, liveTurnState, settings, workspaces, activeWorkspaceId, providerCatalog, statusStartTimes, tokenUsage, usageReport, limits, terminals, terminalOutput, errorToasts, qaUnread, qaLiveShots, authRecoveries,
+        connected, agents, messages, liveOutput, queued, sharedContext, fileChanges, thinkingOutput, agentActivity, liveTurnState, settings, workspaces, activeWorkspaceId, providerCatalog, statusStartTimes, tokenUsage, usageReport, limits, terminals, terminalOutput, errorToasts, authRecoveries,
         refreshLimits: () => sendRaw({ type: 'refresh_limits' }),
         createAgent: (name, cwd, referencePaths, systemPrompt, workspaceId) => {
           sendRaw({ type: 'create_agent', name, cwd, referencePaths, systemPrompt, workspaceId });
         },
-        sendQaMessage: (workspaceId, sourceAgentId, content, rerunOf) => sendRaw({ type: 'send_qa_message', workspaceId, sourceAgentId, content, rerunOf }),
-        abortQaTest: (workspaceId) => sendRaw({ type: 'abort_qa_test', workspaceId }),
-        handoffQaRun: (workspaceId, runId) => sendRaw({ type: 'handoff_qa_run', workspaceId, runId }),
-        provisionAtlasAgent: (workspaceId, projectCwd) => sendRaw({ type: 'provision_atlas_agent', workspaceId, projectCwd }),
-        rescanAtlas: (workspaceId) => sendRaw({ type: 'rescan_atlas', workspaceId }),
-        resumeAtlas: (workspaceId) => sendRaw({ type: 'resume_atlas', workspaceId }),
-        discardAtlasCandidate: (workspaceId) => sendRaw({ type: 'discard_atlas_candidate', workspaceId }),
-        clearQaUnread: (sourceAgentId) => setQaUnread(prev => { if (!prev[sourceAgentId]) return prev; const { [sourceAgentId]: _, ...rest } = prev; return rest; }),
         checkAuth: (agentId) => sendRaw({ type: 'check_auth', agentId }),
         retryAuthPrompt: (agentId, incidentId, confirmSideEffects) => sendRaw({ type: 'retry_auth_prompt', agentId, incidentId, confirmSideEffects: !!confirmSideEffects }),
         sendMessage: (agentId, content) => {
@@ -2045,40 +1635,13 @@
     // Shared Context Modal
     function SharedContextModal({ isOpen, onClose, content, onSave }) {
       const [text, setText] = useState(content);
-      const [vercelStatus, setVercelStatus] = useState(null);
-      const [vercelLoading, setVercelLoading] = useState(false);
-      const [vercelError, setVercelError] = useState('');
-      const [googleDocsStatus, setGoogleDocsStatus] = useState(null);
-      const [googleDocsLoading, setGoogleDocsLoading] = useState(false);
-      const [googleDocsError, setGoogleDocsError] = useState('');
-      const [googleDocsUrl, setGoogleDocsUrl] = useState('');
-      const [googleDocsCredentialPath, setGoogleDocsCredentialPath] = useState('');
       const [instructionManifest, setInstructionManifest] = useState(null);
       const [instructionError, setInstructionError] = useState('');
       useEffect(() => { setText(content); }, [content]);
       useEffect(() => {
         if (!isOpen) return;
         let active = true;
-        setVercelLoading(true);
-        setGoogleDocsLoading(true);
-        setVercelError('');
-        setGoogleDocsError('');
         setInstructionError('');
-        fetch('/api/integrations/vercel')
-          .then(r => r.ok ? r.json() : Promise.reject(new Error('Status check failed')))
-          .then(data => { if (active) setVercelStatus(data); })
-          .catch(err => { if (active) setVercelError(err.message || 'Status check failed'); })
-          .finally(() => { if (active) setVercelLoading(false); });
-        fetch('/api/integrations/google-docs')
-          .then(r => r.ok ? r.json() : Promise.reject(new Error('Google Docs status check failed')))
-          .then(data => {
-            if (!active) return;
-            setGoogleDocsStatus(data);
-            setGoogleDocsUrl(data.documentUrl || '');
-            setGoogleDocsCredentialPath(data.credentialPath || '');
-          })
-          .catch(err => { if (active) setGoogleDocsError(err.message || 'Google Docs status check failed'); })
-          .finally(() => { if (active) setGoogleDocsLoading(false); });
         fetch('/api/harness/instructions')
           .then(r => r.ok ? r.json() : Promise.reject(new Error('Instruction manifest failed to load')))
           .then(data => { if (active) setInstructionManifest(data); })
@@ -2086,36 +1649,6 @@
         return () => { active = false; };
       }, [isOpen]);
       if (!isOpen) return null;
-      const configureVercel = () => {
-        setVercelLoading(true);
-        setVercelError('');
-        fetch('/api/integrations/vercel', { method: 'POST' })
-          .then(r => r.ok ? r.json() : Promise.reject(new Error('Configuration failed')))
-          .then(setVercelStatus)
-          .catch(err => setVercelError(err.message || 'Configuration failed'))
-          .finally(() => setVercelLoading(false));
-      };
-      const configureGoogleDocs = () => {
-        setGoogleDocsLoading(true);
-        setGoogleDocsError('');
-        fetch('/api/integrations/google-docs', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ documentUrl: googleDocsUrl, credentialPath: googleDocsCredentialPath }),
-        })
-          .then(async r => {
-            const data = await r.json().catch(() => ({}));
-            if (!r.ok) throw new Error(data.error || 'Google Docs configuration failed');
-            return data;
-          })
-          .then(data => {
-            setGoogleDocsStatus(data);
-            setGoogleDocsUrl(data.documentUrl || googleDocsUrl);
-            setGoogleDocsCredentialPath(data.credentialPath || googleDocsCredentialPath);
-          })
-          .catch(err => setGoogleDocsError(err.message || 'Google Docs configuration failed'))
-          .finally(() => setGoogleDocsLoading(false));
-      };
       return e('div', { className: 'modal-overlay', onClick: (ev) => ev.target === ev.currentTarget && onClose() },
         e('div', { className: 'modal harness-settings-modal' },
           e('h2', { className: 'modal-title' }, 'Harness Settings'),
@@ -2127,37 +1660,6 @@
             e('div', { className: 'form-hint' }, 'Agent Forge builds one context package for every turn. Inherent safety rules come first and cannot be edited here; project- and task-specific information is layered on afterward.'),
             instructionManifest?.assemblyOrder && e('ol', { className: 'settings-assembly-list' },
               instructionManifest.assemblyOrder.map((step, index) => e('li', { key: index }, step))
-            )
-          ),
-          e('details', { className: 'settings-card settings-card-collapsible' },
-            e('summary', { className: 'settings-card-header' },
-              e('div', { className: 'settings-card-title' }, 'Google Docs project tracker'),
-              e('span', { className: 'settings-badge' }, googleDocsStatus?.connected ? 'Connected' : 'Not configured')
-            ),
-            e('div', { className: 'settings-card-collapsible-body' },
-              e('div', { className: 'form-hint' }, 'Connects agents to one explicitly shared Google Doc. Enable it only in the workspace that needs the tracker. The credential remains on the server and is never sent to agents or stored in this repository.'),
-              e('div', { className: 'form-group', style: { marginTop: 10 } },
-                e('label', { className: 'form-label' }, 'Google Doc URL'),
-                e('input', { className: 'form-input', value: googleDocsUrl, onChange: ev => setGoogleDocsUrl(ev.target.value), placeholder: 'https://docs.google.com/document/d/.../edit' })
-              ),
-              e('div', { className: 'form-group' },
-                e('label', { className: 'form-label' }, 'Service-account credential path'),
-                e('input', { className: 'form-input', value: googleDocsCredentialPath, onChange: ev => setGoogleDocsCredentialPath(ev.target.value), placeholder: 'Defaults to the secure .agent-forge credentials directory' })
-              ),
-              googleDocsStatus && e('div', { className: 'settings-status-row' },
-                e('div', { className: 'settings-status-item' },
-                  e('strong', null, 'Credential'),
-                  e('span', { className: googleDocsStatus.credentialFound ? 'settings-status-ok' : 'settings-status-pending' }, googleDocsStatus.credentialFound ? 'Found' : 'Missing')
-                ),
-                e('div', { className: 'settings-status-item' },
-                  e('strong', null, 'Document'),
-                  e('span', { className: googleDocsStatus.connected ? 'settings-status-ok' : 'settings-status-pending' }, googleDocsStatus.connected ? (googleDocsStatus.title || 'Connected') : 'Not connected')
-                )
-              ),
-              googleDocsStatus?.tabTitle && e('div', { className: 'form-hint', style: { marginTop: 8 } }, 'Selected tab: ' + googleDocsStatus.tabTitle),
-              googleDocsError && e('div', { className: 'form-hint', style: { color: 'var(--error)' } }, googleDocsError),
-              googleDocsStatus?.error && !googleDocsError && e('div', { className: 'form-hint', style: { color: 'var(--error)' } }, googleDocsStatus.error),
-              e('button', { type: 'button', className: 'btn btn-secondary', disabled: googleDocsLoading || !googleDocsUrl.trim(), onClick: configureGoogleDocs, style: { marginTop: 8 } }, googleDocsLoading ? 'Testing connection...' : googleDocsStatus?.connected ? 'Re-test and save' : 'Test and save')
             )
           ),
           e('div', { className: 'settings-card' },
@@ -2176,36 +1678,6 @@
                 ),
                 e('pre', { className: 'settings-instruction-content' }, section.content)
               ))
-            )
-          ),
-          e('div', { className: 'settings-card' },
-            e('div', { className: 'settings-card-header' },
-              e('div', { className: 'settings-card-title' }, 'Vercel MCP'),
-              e('span', { className: 'settings-badge' }, 'Global / all projects')
-            ),
-            e('div', { className: 'form-hint' }, 'The official remote MCP makes Vercel project, deployment, log, and documentation tools discoverable to agents in every Agent Forge workspace.'),
-            e('ul', { className: 'settings-detail-list' },
-              e('li', null, 'Scope: stored in each provider CLI\'s user-level configuration, not in this repository.'),
-              e('li', null, 'Authentication: a configured entry does not necessarily mean that CLI has completed its one-time Vercel sign-in.'),
-              e('li', null, 'Safety: inspection is read-only by default; deployments and other Vercel changes still require an explicit request.')
-            ),
-            vercelStatus && e('div', { className: 'settings-status-row' },
-              e('div', { className: 'settings-status-item' },
-                e('strong', null, 'Codex'),
-                e('span', { className: vercelStatus.codex?.configured ? 'settings-status-ok' : 'settings-status-pending' }, vercelStatus.codex?.configured ? 'Configured' : vercelStatus.codex?.available ? 'Not configured' : 'CLI unavailable')
-              ),
-              e('div', { className: 'settings-status-item' },
-                e('strong', null, 'Claude'),
-                e('span', { className: vercelStatus.claude?.configured ? 'settings-status-ok' : 'settings-status-pending' }, vercelStatus.claude?.configured ? 'Configured' : vercelStatus.claude?.available ? 'Not configured' : 'CLI unavailable')
-              )
-            ),
-            vercelStatus?.endpoint && e('div', { className: 'settings-endpoint' }, 'Endpoint: ' + vercelStatus.endpoint),
-            vercelError && e('div', { className: 'form-hint', style: { color: 'var(--error)' } }, vercelError),
-            e('button', { type: 'button', className: 'btn btn-secondary', disabled: vercelLoading || vercelStatus?.ready, onClick: configureVercel, style: { marginTop: 8 } }, vercelLoading ? 'Checking...' : vercelStatus?.ready ? 'Configured in both CLIs' : 'Configure available CLIs'),
-            vercelStatus?.ready && e(React.Fragment, null,
-              e('div', { className: 'form-hint', style: { marginTop: 8 } }, 'One-time authentication may still be required in each CLI:'),
-              e('div', { className: 'settings-command' }, vercelStatus.authentication.codex),
-              e('div', { className: 'settings-command' }, vercelStatus.authentication.claude)
             )
           ),
           e('div', { className: 'settings-card' },
@@ -2241,47 +1713,6 @@
     }
 
     // Chat Turn (memoized for performance)
-    // Render the verdict dashboard — three pills always visible, the active one
-    // (matching the agent's verdict) lit; the other two greyed. Returns null if
-    // the agent didn't emit a parseable verdict.
-    const QA_VERDICT_KINDS = [
-      { kind: 'pass', label: 'PASS', emoji: '✅' },
-      { kind: 'warn', label: 'WARN', emoji: '⚠️' },
-      { kind: 'fail', label: 'FAIL', emoji: '❌' },
-      { kind: 'inconclusive', label: 'INCONCLUSIVE', emoji: '⚪' },
-    ];
-    function renderQaVerdictRow(verdict) {
-      if (!verdict) return null;
-      const meta = QA_VERDICT_KINDS.find(item => item.kind === verdict.kind);
-      if (!meta) return null;
-      return e('div', { className: 'qa-verdict-row' },
-        e('div', { className: 'qa-verdict qa-verdict-active qa-verdict-' + meta.kind },
-          meta.emoji + ' ' + meta.label + (verdict.summary ? ' — ' + verdict.summary : '')
-        )
-      );
-    }
-
-    // Find the verdict header anywhere in a QA agent's output (the agent often writes
-    // a preamble + tool calls before the report). Tolerates an optional markdown
-    // header prefix (#, ##, ###). Returns { verdict, body } where body is everything
-    // AFTER the verdict line (preamble before is dropped as noise).
-    function parseQaVerdict(text) {
-      if (!text) return { verdict: null, body: text || '' };
-      // Tolerant matcher: optional markdown # prefix, optional bold **, optional emoji,
-      // then PASS / WARNINGS / FAIL (case-insensitive), then optional summary.
-      // The agent has been inconsistent \u2014 sometimes "# \u2705 PASS \u2014 ...", sometimes just
-      // "PASS \u2014 ..." or "**PASS**: ...". This catches all of those shapes.
-      const re = /^[ \t]*#{0,3}[ \t]*\*{0,2}[ \t]*(?:\u2705\s*)?(?:\u26A0\uFE0F\s*)?(?:\u274C\s*)?(?:\u26AA\s*)?(PASS|WARNINGS?|FAIL|INCONCLUSIVE)\b[ \t]*\*{0,2}\s*[\u2014:\-]?\s*([^\n]*)/im;
-      const m = re.exec(text);
-      if (!m) return { verdict: null, body: text };
-      const raw = m[1].toUpperCase();
-      const kind = raw.includes('PASS') ? 'pass' : raw.includes('FAIL') ? 'fail' : raw.includes('INCONCLUSIVE') ? 'inconclusive' : 'warn';
-      const summary = m[2].trim();
-      const verdictEnd = m.index + m[0].length;
-      const body = text.substring(verdictEnd).replace(/^\n+/, '');
-      return { verdict: { kind, summary, raw: m[1].trim() }, body };
-    }
-
     const RECONNECT_PROGRESS_RE = /Reconnecting(?:\.{3}|…)?\s*(\d+)\s*\/\s*(\d+)/i;
 
     function parseSystemTurnOutcome(content) {
@@ -2360,10 +1791,9 @@
       return Math.floor(seconds / 86400) + 'd ago';
     }
 
-    const ChatTurn = React.memo(function ChatTurn({ role, content, timestamp, isStreaming, imageData, imageMimeType, imageAttachments, showToolMessages, searchQuery, showRetry, retryDisabled, onRetry, onOutcomeRetry, outcomeRetryDisabled, source, provider, model, agentId, authRecovery, onCheckAuth, onRetryPreserved, recoveryDisabled }) {
+    const ChatTurn = React.memo(function ChatTurn({ role, content, timestamp, isStreaming, imageData, imageMimeType, imageAttachments, showToolMessages, searchQuery, showRetry, retryDisabled, onRetry, onOutcomeRetry, outcomeRetryDisabled, provider, model, agentId, authRecovery, onCheckAuth, onRetryPreserved, recoveryDisabled }) {
       const [copied, setCopied] = useState(false);
       const [confirmSideEffect, setConfirmSideEffect] = useState(false);
-      const isQa = source === 'qa';
       // Per-message provider stamp (newer messages); fall back to 'Claude' for
       // legacy messages that pre-date the per-provider stamping. Look up the
       // provider definition so we can prefix with the icon (✦ Claude / ⚙ Codex).
@@ -2372,14 +1802,13 @@
       const assistantModelLabel = model && providerDef?.models
         ? (providerDef.models.find(m => m.id === model)?.label || model)
         : model;
-      const roleLabels = { user: isQa ? 'QA Tester' : 'You', assistant: assistantLabel, system: 'System' };
+      const roleLabels = { user: 'You', assistant: assistantLabel, system: 'System' };
       const systemOutcome = role === 'system' ? parseSystemTurnOutcome(content) : null;
       const turnClass = (isStreaming ? 'chat-turn chat-turn-streaming' : 'chat-turn chat-turn-' + role)
         + (systemOutcome ? ' chat-turn-outcome chat-turn-outcome-' + systemOutcome.kind : '');
       const messageTime = formatMessageTime(timestamp);
-      // Filter [Using tool: ...] annotations for assistant messages AND for QA-source
-      // messages regardless of role (since QA reports are relayed as role=user).
-      const shouldFilterTools = role === 'assistant' || isStreaming || isQa;
+      // Filter [Using tool: ...] annotations for assistant and streaming messages.
+      const shouldFilterTools = role === 'assistant' || isStreaming;
       let displayContent = shouldFilterTools ? filterToolMessages(content, showToolMessages) : content;
       const hiddenCount = shouldFilterTools && !showToolMessages ? countToolMessages(content) : 0;
       let assistantStopLabel = null;
@@ -2396,22 +1825,13 @@
         }
       }
 
-      // For QA messages, peel the verdict header off the top so it can render as a pill.
-      let verdict = null;
-      if (isQa) {
-        const parsed = parseQaVerdict(displayContent);
-        verdict = parsed.verdict;
-        displayContent = parsed.body;
-      }
-
       const handleCopy = () => {
         navigator.clipboard.writeText(content);
         setCopied(true);
         setTimeout(() => setCopied(false), 1500);
       };
 
-      // Render the body as markdown for QA messages too, so the report's headings / lists
-      // / code blocks come out nicely (regular user messages stay as plain text).
+      // Assistant replies render as markdown; user messages stay plain text.
       const renderBody = () => {
         if (systemOutcome) {
           return e('div', { className: 'turn-outcome-card' },
@@ -2433,7 +1853,7 @@
             )
           );
         }
-        if (isQa || (role === 'assistant' && !isStreaming)) {
+        if (role === 'assistant' && !isStreaming) {
           return e(React.Fragment, null,
             e(MarkdownContent, { content: displayContent, searchQuery, agentId }),
             hiddenCount > 0 && e('div', { className: 'tool-hidden-count' }, hiddenCount + ' tool call' + (hiddenCount > 1 ? 's' : '') + ' hidden'),
@@ -2447,7 +1867,7 @@
         );
       };
 
-      return e('div', { className: turnClass, 'data-source': source || undefined },
+      return e('div', { className: turnClass },
         e('button', { className: 'copy-msg-btn', onClick: handleCopy, 'aria-label': 'Copy message' }, copied ? 'Copied!' : 'Copy'),
         e('div', { className: 'chat-turn-heading' },
           e('div', { className: 'chat-turn-role', title: role === 'assistant' && assistantModelLabel ? 'Actual model: ' + model : undefined },
@@ -2455,7 +1875,6 @@
           ),
           messageTime && e('time', { className: 'chat-turn-time', dateTime: messageTime.dateTime, title: messageTime.title }, messageTime.label)
         ),
-        renderQaVerdictRow(verdict),
         imageData && e('img', { className: 'chat-image', src: 'data:' + (imageMimeType || 'image/png') + ';base64,' + imageData, alt: 'Uploaded image', onClick: () => window.open('data:' + (imageMimeType || 'image/png') + ';base64,' + imageData) }),
         imageAttachments?.length > 0 && e('div', { className: 'chat-image-gallery', 'aria-label': imageAttachments.length + ' attached images' },
           imageAttachments.map((image, index) => {
@@ -2512,7 +1931,7 @@
     });
 
     // Terminal Panel
-    function TerminalPanel({ agent, messages, liveOutput, queuedMessages, fileChanges, thinkingOutput, agentActivity, liveTurnState, statusStartTime, tokenUsage, terminals, terminalOutput, workspace, qaRuns, qaHasUnread, qaLiveShots, onQaSend, onQaAbort, onQaHandoff, onClearQaUnread, onSendMessage, onSendImages, onStop, onClearHistory, onClearFileChanges, onMinimize, onMaximize, isMaximized, onFocus, isFocused, onCreateTerminal, onKillTerminal, onUpdateAgent, onResolveModelMismatch, isLocked, onToggleLock, isDragging, isDragOver, onDragStart, onDragEnd, onDragOver, onDragLeave, onDrop, authRecoveries, onCheckAuth, onRetryAuthPrompt }) {
+    function TerminalPanel({ agent, messages, liveOutput, queuedMessages, fileChanges, thinkingOutput, agentActivity, liveTurnState, statusStartTime, tokenUsage, terminals, terminalOutput, workspace, onSendMessage, onSendImages, onStop, onClearHistory, onClearFileChanges, onMinimize, onMaximize, isMaximized, onFocus, isFocused, onCreateTerminal, onKillTerminal, onUpdateAgent, onResolveModelMismatch, isLocked, onToggleLock, isDragging, isDragOver, onDragStart, onDragEnd, onDragOver, onDragLeave, onDrop, authRecoveries, onCheckAuth, onRetryAuthPrompt }) {
       const [input, setInput] = useState('');
       const [inputHistory, setInputHistory] = useState([]);
       const [historyIdx, setHistoryIdx] = useState(-1);
@@ -2545,130 +1964,7 @@
         setHistoryIdx(-1);
         requestAnimationFrame(() => inputRef.current?.focus());
       };
-      // QA panel open/close persists per-agent across page reloads via localStorage
-      const qaOpenKey = agent ? `qa-panel-open-${agent.id}` : null;
-      const [qaPanelOpen, setQaPanelOpen] = useState(() => {
-        if (!qaOpenKey) return false;
-        try { return localStorage.getItem(qaOpenKey) === 'true'; } catch { return false; }
-      });
-      useEffect(() => {
-        if (!qaOpenKey) return;
-        try {
-          if (qaPanelOpen) localStorage.setItem(qaOpenKey, 'true');
-          else localStorage.removeItem(qaOpenKey);
-        } catch {}
-      }, [qaPanelOpen, qaOpenKey]);
-
-      const [qaInput, setQaInput] = useState('');
-      const [qaPanelWidthPct, setQaPanelWidthPct] = useState(40);
-      const [qaResizing, setQaResizing] = useState(false);
-      const [qaHistoryOpen, setQaHistoryOpen] = useState(false);
-      const [selectedQaRunId, setSelectedQaRunId] = useState(null);
-      const qaContentRef = useRef(null);
-      const orderedQaRuns = useMemo(() => [...(qaRuns || [])].sort((a, b) => a.createdAt - b.createdAt), [qaRuns]);
-      const latestQaRun = orderedQaRuns.length > 0 ? orderedQaRuns[orderedQaRuns.length - 1] : null;
-      const activeQaRun = [...orderedQaRuns].reverse().find(run => run.status === 'queued' || run.status === 'running') || null;
-      const selectedQaRun = orderedQaRuns.find(run => run.id === selectedQaRunId) || latestQaRun;
-      const qaShowActivity = qaHistoryOpen;
-      const setQaShowActivity = setQaHistoryOpen;
-
-      const scrollQaToBottom = () => {
-        const el = qaContentRef.current;
-        if (el) el.scrollTop = el.scrollHeight;
-      };
-
-      // Follow a newly-created run while still allowing the user to select an
-      // older result from history afterward.
-      useEffect(() => {
-        if (latestQaRun?.id) setSelectedQaRunId(latestQaRun.id);
-        scrollQaToBottom();
-      }, [latestQaRun?.id]);
-
-      const qaDurationMs = (selectedQaRun?.startedAt && selectedQaRun?.finishedAt)
-        ? selectedQaRun.finishedAt - selectedQaRun.startedAt
-        : 0;
-      const qaFmtDuration = (ms) => {
-        if (ms <= 0) return null;
-        if (ms < 1000) return ms + 'ms';
-        if (ms < 60000) return (ms / 1000).toFixed(1) + 's';
-        const m = Math.floor(ms / 60000);
-        const s = Math.round((ms % 60000) / 1000);
-        return m + 'm ' + s + 's';
-      };
-      const qaFmtTokens = (n) => {
-        if (n >= 1_000_000) return (n / 1_000_000).toFixed(2) + 'M';
-        if (n >= 1000) return (n / 1000).toFixed(1) + 'k';
-        return String(n);
-      };
-      const qaFmtCost = (c) => c < 0.01 ? '<$0.01' : '$' + c.toFixed(2);
-      const qaTokens = selectedQaRun?.usage ? (selectedQaRun.usage.inputTokens + selectedQaRun.usage.outputTokens) : 0;
-      const qaCost = selectedQaRun?.usage?.costUsd || 0;
-      const qaHasStats = qaDurationMs > 0 || qaTokens > 0 || qaCost > 0;
       const panelBodyRef = useRef(null);
-      const [qaStacked, setQaStacked] = useState(false);
-
-      // A grid cell can be narrow even on a wide monitor, so respond to this
-      // panel's own width instead of the browser viewport.
-      useEffect(() => {
-        const el = panelBodyRef.current;
-        if (!el || typeof ResizeObserver === 'undefined') return;
-        const observer = new ResizeObserver(entries => {
-          const width = entries[0]?.contentRect?.width || el.getBoundingClientRect().width;
-          setQaStacked(width < 760);
-        });
-        observer.observe(el);
-        return () => observer.disconnect();
-      }, []);
-
-      // QA suggestion prompts shown on empty state
-      const QA_SUGGESTIONS = [
-        { title: 'Test most recent development', desc: 'Review recent chat history and test the latest changes', prompt: 'Test the most recent changes I just made. Review my recent conversation with the coding agent for context, then navigate to the test URL, screenshot the relevant areas, test any new interactions, and report any issues you find.' },
-        { title: 'Explore everything', desc: 'Walk through the entire app, click every nav element, screenshot each state', prompt: 'Explore the entire app exhaustively. Navigate to the test URL, then visit every top-level navigation element (tabs, primary buttons, menu items) in turn. For each: click it, wait for the page to settle, take a screenshot, and briefly describe what you see. Within each major area, also exercise at least one secondary interactive element (sub-tab, button, form). Report a comprehensive summary of every distinct state you observed, with screenshot references.' },
-        { title: 'Take a screenshot', desc: 'Quick visual check of the current page', prompt: 'Navigate to the test URL, take a full-page screenshot, and describe what you see. Highlight anything that looks broken or unusual.' },
-        { title: 'Check console for errors', desc: 'Inspect runtime errors and warnings', prompt: 'Navigate to the test URL, wait for the page to load, then check the browser console for any errors or warnings. Report what you find with screenshots if helpful.' },
-      ];
-
-      const qaStatus = activeQaRun?.status || 'idle';
-      const qaStatusLabel = qaStatus === 'queued' ? 'Queued' : qaStatus === 'running' ? 'Running' : 'Ready';
-      const activeQaShots = activeQaRun
-        ? (qaLiveShots || []).filter(shot => !shot.browserSessionId || shot.browserSessionId === activeQaRun.browserSessionId)
-        : [];
-
-      const sendQaMessage = (explicitPrompt, rerunOf) => {
-        const trimmed = (explicitPrompt != null ? explicitPrompt : qaInput).trim();
-        if (!trimmed || !workspace || !workspace.testUrl) return;
-        setQaInput('');
-        if (onQaSend) onQaSend(workspace.id, agent.id, trimmed, rerunOf);
-      };
-
-      // Clear the unread badge when the panel is opened.
-      useEffect(() => {
-        if (qaPanelOpen && qaHasUnread && onClearQaUnread && agent) onClearQaUnread(agent.id);
-      }, [qaPanelOpen, qaHasUnread, agent?.id]);
-
-      // Drag-to-resize the QA panel split
-      useEffect(() => {
-        if (!qaResizing) return;
-        const onMove = (ev) => {
-          const el = panelBodyRef.current;
-          if (!el) return;
-          const rect = el.getBoundingClientRect();
-          const pct = ((rect.right - ev.clientX) / rect.width) * 100;
-          // Clamp 25%..70% so neither side disappears
-          setQaPanelWidthPct(Math.max(25, Math.min(70, pct)));
-        };
-        const onUp = () => setQaResizing(false);
-        window.addEventListener('mousemove', onMove);
-        window.addEventListener('mouseup', onUp);
-        document.body.style.cursor = 'col-resize';
-        document.body.style.userSelect = 'none';
-        return () => {
-          window.removeEventListener('mousemove', onMove);
-          window.removeEventListener('mouseup', onUp);
-          document.body.style.cursor = '';
-          document.body.style.userSelect = '';
-        };
-      }, [qaResizing]);
       // Search state (Feature 1)
       const [searchVisible, setSearchVisible] = useState(false);
       const [searchQuery, setSearchQuery] = useState('');
@@ -3068,16 +2364,6 @@
               title: isLocked ? 'Unlock position' : 'Lock position',
               'aria-label': isLocked ? 'Unlock panel position' : 'Lock panel position',
             }, isLocked ? '\uD83D\uDD12' : '\uD83D\uDD13'),
-            workspace && e('button', {
-              className: 'panel-btn qa-header-btn' + (qaPanelOpen ? ' active' : '') + (!workspace.testUrl ? ' qa-header-btn-empty' : '') + (qaHasUnread ? ' qa-has-unread' : ''),
-              onClick: () => setQaPanelOpen(o => !o),
-              title: !workspace.testUrl
-                ? 'Set a Test URL on this workspace to start QA testing'
-                : qaHasUnread
-                  ? 'QA results ready \u2014 click to view'
-                  : (qaPanelOpen ? 'Close QA testing panel' : 'Open QA testing panel for this agent'),
-              'aria-label': qaPanelOpen ? 'Close QA testing panel' : 'Open QA testing panel',
-            }, '\uD83E\uDDEA'),
             e('button', { className: 'panel-btn', onClick: () => { setSearchVisible(prev => !prev); setTimeout(() => searchInputRef.current?.focus(), 50); }, title: 'Search messages (Ctrl+F)', 'aria-label': 'Search messages' }, '\uD83D\uDD0D'),
             isWorking && e('button', { className: 'panel-btn panel-btn-stop', onClick: () => onStop(agent.id), title: 'Stop current turn (Esc)' }, 'Stop turn'),
             !isMaximized && onMinimize && e('button', { className: 'panel-btn panel-minimize-btn', onClick: () => onMinimize(agent.id), title: 'Minimize panel', 'aria-label': 'Minimize panel' }, '\u2014'),
@@ -3183,10 +2469,9 @@
             fileDiff.loading ? 'Loading Git diff\u2026' : fileDiff.error || fileDiff.text || 'No diff available.'
           )
         ),
-        // Body \u2014 splits into [coding | resizer | QA] when QA panel is open and panel is wide enough; stacks otherwise
         e('div', {
           ref: panelBodyRef,
-          className: 'panel-body' + (qaPanelOpen && !qaStacked ? ' qa-split' : ''),
+          className: 'panel-body',
         },
           e('div', { className: 'panel-main' },
             // Drop zone overlay (Feature 3)
@@ -3227,7 +2512,6 @@
                         imageData: m.imageData,
                         imageMimeType: m.imageMimeType,
                         imageAttachments: m.imageAttachments,
-                        source: m.source,
                         provider: m.provider,
                         model: m.model,
                         agentId: agent.id,
@@ -3459,269 +2743,6 @@
             );
           })()
         )
-          ),
-          // Resizer (only meaningful when split — CSS hides it when stacked)
-          qaPanelOpen && e('div', {
-            className: 'qa-resizer' + (qaResizing ? ' dragging' : ''),
-            onMouseDown: (ev) => { ev.preventDefault(); setQaResizing(true); },
-            title: 'Drag to resize QA panel',
-          }),
-          // QA sub-panel — sibling of .panel-main inside .panel-body
-          qaPanelOpen && e('div', {
-            className: 'qa-subpanel',
-            style: qaStacked ? undefined : { width: qaPanelWidthPct + '%', flexBasis: qaPanelWidthPct + '%' },
-          },
-            e('div', { className: 'qa-subpanel-header' },
-              e('div', { className: 'qa-subpanel-status' },
-                e('span', { className: 'qa-subpanel-pulse' }),
-                e('span', { className: 'qa-subpanel-badge' }, '🧪 QA'),
-                qaStatus !== 'idle' && e('span', { className: 'qa-status-pill' + (qaStatus === 'error' ? ' error' : '') }, qaStatusLabel),
-                workspace && workspace.testUrl && e('a', {
-                  className: 'qa-test-url',
-                  href: workspace.testUrl,
-                  target: '_blank',
-                  rel: 'noopener noreferrer',
-                  onClick: (ev) => ev.stopPropagation(),
-                  title: 'Open ' + workspace.testUrl + ' in a new tab',
-                }, workspace.testUrl)
-              ),
-              e('button', {
-                className: 'qa-rerun-btn',
-                disabled: orderedQaRuns.length === 0,
-                onClick: scrollQaToBottom,
-                title: 'Scroll to latest run',
-              }, '↓'),
-              e('button', {
-                className: 'qa-rerun-btn' + (qaHistoryOpen ? ' active' : ''),
-                disabled: orderedQaRuns.length === 0,
-                onClick: () => setQaHistoryOpen(value => !value),
-                title: 'Show structured QA run history',
-              }, 'History' + (orderedQaRuns.length ? ' ' + orderedQaRuns.length : '')),
-              e('button', {
-                className: 'qa-rerun-btn',
-                disabled: !selectedQaRun || !!activeQaRun || !(workspace && workspace.testUrl),
-                onClick: () => selectedQaRun && sendQaMessage(selectedQaRun.prompt, selectedQaRun.id),
-                title: selectedQaRun ? 'Execute the same request as a linked rerun' : 'No previous test to rerun',
-              }, '↻ Run again'),
-              qaStatus === 'running' && e('button', {
-                className: 'qa-abort-btn',
-                onClick: () => { if (workspace && onQaAbort) onQaAbort(workspace.id); },
-                title: 'Abort the in-flight QA run; it will be recorded as inconclusive',
-              }, '◼ Abort'),
-              e('button', { className: 'qa-subpanel-close', onClick: () => setQaPanelOpen(false), title: 'Close QA panel' }, '×')
-            ),
-            qaHasStats && e('div', { className: 'qa-subpanel-stats' },
-              qaDurationMs > 0 && e('span', null, '⏱ ' + qaFmtDuration(qaDurationMs)),
-              qaTokens > 0 && e('span', null, '🪙 ' + qaFmtTokens(qaTokens) + ' tokens'),
-              qaCost > 0 && e('span', null, '💰 ' + qaFmtCost(qaCost))
-            ),
-            e('div', { className: 'qa-subpanel-content', ref: qaContentRef },
-              // Live evidence is filtered to this run's isolated browser session.
-              qaStatus === 'running' && activeQaShots.length > 0 && e('div', { className: 'qa-live-shots' },
-                e('div', { className: 'qa-live-shots-heading' }, '🔴 Live screenshots (' + activeQaShots.length + ')'),
-                e('div', { className: 'qa-live-shots-row' },
-                  activeQaShots.map((shot, i) => e('img', {
-                    key: shot.timestamp + '-' + i,
-                    className: 'qa-live-shot',
-                    src: '/api/qa/screenshot?path=' + encodeURIComponent(shot.path),
-                    alt: 'Live screenshot ' + (i + 1),
-                    title: 'Click to open full-size',
-                    onClick: () => window.open('/api/qa/screenshot?path=' + encodeURIComponent(shot.path)),
-                  }))
-                )
-              ),
-              !(workspace && workspace.testUrl)
-                ? e('div', { className: 'qa-subpanel-empty' }, e('span', { style: { fontStyle: 'italic' } }, 'Set a Test URL on this workspace (left sidebar) to start a structured QA run.'))
-                : orderedQaRuns.length > 0
-                  ? (() => {
-                      // Use the top-level parseQaVerdict so the QA panel and ChatTurn stay in sync.
-                      const parseVerdict = parseQaVerdict;
-                      const selectedIndex = orderedQaRuns.findIndex(run => run.id === selectedQaRun?.id);
-                      const previousQaRun = selectedIndex > 0 ? orderedQaRuns[selectedIndex - 1] : null;
-
-                      // Screenshot evidence comes from the validated envelope,
-                      // never by scraping arbitrary prose for path-like text.
-                      const screenshotPaths = [...new Set((selectedQaRun?.evidence || [])
-                        .filter(item => item.kind === 'screenshot' && item.ref)
-                        .map(item => item.ref))];
-
-                      // Render a persisted structured run. The hidden agent transcript
-                      // never reaches this presentation layer.
-                      const renderReport = () => {
-                        if (!selectedQaRun) return null;
-                        const reportText = selectedQaRun.report || (selectedQaRun.status === 'queued'
-                          ? 'Run queued…'
-                          : selectedQaRun.status === 'running'
-                            ? 'Structured QA run is executing…'
-                            : 'No report was persisted.');
-                        const { verdict, body } = parseVerdict(reportText);
-                        const prevVerdict = previousQaRun?.report ? parseVerdict(previousQaRun.report).verdict : null;
-                        // Strip any [Using tool: ...] annotations from the body so they don't render literally.
-                        const cleanBody = filterToolMessages(body, false);
-                        const isIdle = qaStatus === 'idle';
-                        // Verdict-change indicator
-                        let verdictChangeNote = null;
-                        if (verdict && prevVerdict) {
-                          if (verdict.kind === 'inconclusive' || prevVerdict.kind === 'inconclusive') {
-                            verdictChangeNote = e('span', { className: 'qa-verdict-change qa-verdict-change-inconclusive' },
-                              '— not comparable with the previous run'
-                            );
-                          } else if (verdict.kind === prevVerdict.kind) {
-                            verdictChangeNote = e('span', { className: 'qa-verdict-change qa-verdict-change-same' },
-                              '↔ same as last run'
-                            );
-                          } else {
-                            const verdictRank = { fail: 1, warn: 2, pass: 3 };
-                            const direction = verdictRank[verdict.kind] > verdictRank[prevVerdict.kind] ? 'better' : 'worse';
-                            verdictChangeNote = e('span', { className: 'qa-verdict-change qa-verdict-change-' + direction },
-                              (direction === 'better' ? '↗ improved: ' : '↘ regressed: ') + prevVerdict.kind.toUpperCase() + ' → ' + verdict.kind.toUpperCase()
-                            );
-                          }
-                        }
-                        return e('div', { className: 'chat-turn chat-turn-assistant' },
-                          e('div', { className: 'chat-turn-role' }, 'QA Tester'),
-                          selectedQaRun && e('div', { className: 'qa-run-request' },
-                            e('span', null, 'Request'),
-                            selectedQaRun.prompt,
-                            selectedQaRun.rerunOf && e('small', null, 'Linked rerun of ' + selectedQaRun.rerunOf)
-                          ),
-                          renderQaVerdictRow(verdict),
-                          verdictChangeNote,
-                          e(MarkdownContent, { content: cleanBody }),
-                          screenshotPaths.length > 0 && e('div', { className: 'qa-inline-shots' },
-                            screenshotPaths.map((p, i) => e('div', { key: i },
-                              e('img', {
-                                className: 'qa-inline-shot',
-                                src: '/api/qa/screenshot?path=' + encodeURIComponent(p),
-                                alt: 'QA screenshot ' + (i + 1),
-                                onClick: () => window.open('/api/qa/screenshot?path=' + encodeURIComponent(p)),
-                              }),
-                              e('div', { className: 'qa-inline-shot-caption' }, p)
-                            ))
-                          ),
-                          selectedQaRun?.assertions && selectedQaRun.assertions.length > 0 && e('div', { className: 'qa-structured-section' },
-                            e('div', { className: 'qa-structured-heading' }, 'Assertions (' + selectedQaRun.assertions.length + ')'),
-                            selectedQaRun.assertions.map(assertion => e('div', { key: assertion.id, className: 'qa-assertion qa-assertion-' + assertion.status },
-                              e('span', { className: 'qa-assertion-status' }, assertion.status === 'passed' ? '✓' : assertion.status === 'failed' ? '✕' : assertion.status === 'warning' ? '!' : '—'),
-                              e('div', null,
-                                e('strong', null, assertion.name),
-                                assertion.observed && e('div', { className: 'qa-assertion-observed' }, assertion.observed),
-                                e('small', null, (assertion.evidenceIds || []).length + ' evidence item' + ((assertion.evidenceIds || []).length === 1 ? '' : 's'))
-                              )
-                            ))
-                          ),
-                          selectedQaRun?.findings && selectedQaRun.findings.length > 0 && e('div', { className: 'qa-structured-section' },
-                            e('div', { className: 'qa-structured-heading' }, 'Findings (' + selectedQaRun.findings.length + ')'),
-                            selectedQaRun.findings.map(finding => e('div', { key: finding.id, className: 'qa-finding qa-finding-' + finding.severity },
-                              e('span', { className: 'qa-finding-severity' }, finding.severity),
-                              e('div', null, e('strong', null, finding.title), e('div', null, finding.details))
-                            ))
-                          ),
-                          selectedQaRun?.validationErrors && selectedQaRun.validationErrors.length > 0 && e('div', { className: 'qa-validation-box' },
-                            e('strong', null, 'Why this result is not authoritative'),
-                            e('ul', null, selectedQaRun.validationErrors.map((message, index) => e('li', { key: index }, message)))
-                          ),
-                          isIdle && selectedQaRun?.report && e('div', { className: 'qa-run-actions' },
-                            e('button', {
-                              className: 'qa-continue-btn',
-                              disabled: !!activeQaRun,
-                              onClick: () => sendQaMessage(selectedQaRun.prompt, selectedQaRun.id),
-                              title: 'Run the same request as a linked structured rerun',
-                            }, '↻ Run again'),
-                            e('button', {
-                              className: 'qa-continue-btn qa-handoff-btn',
-                              disabled: !!selectedQaRun.handedOffAt || !!selectedQaRun.handoffStartedAt,
-                              onClick: () => workspace && onQaHandoff && onQaHandoff(workspace.id, selectedQaRun.id),
-                              title: selectedQaRun.handedOffAt
-                                ? 'Already sent to the coding agent'
-                                : selectedQaRun.handoffStartedAt
-                                  ? 'The coding agent is receiving this QA evidence'
-                                  : 'Send this validated run as explicitly delimited, untrusted QA evidence',
-                            }, selectedQaRun.handedOffAt ? '✓ Sent to coding agent' : selectedQaRun.handoffStartedAt ? 'Sending…' : 'Send to coding agent')
-                          ),
-                          selectedQaRun?.handoffError && e('div', { className: 'qa-validation-box' }, selectedQaRun.handoffError),
-                          // Continue-testing nudge — only after a completed test
-                          isIdle && e('div', { className: 'qa-continue-row' },
-                            e('button', {
-                              className: 'qa-continue-btn',
-                              onClick: () => setQaInput('Building on what you just tested, dig deeper. Look for edge cases I missed, click less obvious elements, check error states, exercise interactive elements you skipped, and report anything new you find. Do not re-do the same checks you already covered.'),
-                              title: 'Load a follow-up prompt that continues from this test’s context',
-                            }, '↳ Continue testing'),
-                            e('button', {
-                              className: 'qa-continue-btn',
-                              onClick: () => setQaInput('Take a fresh screenshot of the current page state and tell me what changed, if anything, since the last screenshot you reported.'),
-                              title: 'Re-screenshot and diff against the previous state',
-                            }, '↻ Re-check current state')
-                          )
-                        );
-                      };
-
-                      return e(React.Fragment, null,
-                        e('div', { className: 'qa-activity-toggle' },
-                          e('button', {
-                            className: 'qa-activity-toggle-btn',
-                            onClick: () => setQaShowActivity(v => !v),
-                            title: qaShowActivity ? 'Show only the latest structured run' : 'Show structured run history for this coding agent',
-                          }, qaShowActivity ? '▴ Hide history' : '▾ Show run history'),
-                          e('span', { className: 'qa-activity-meta' },
-                            orderedQaRuns.length + ' run' + (orderedQaRuns.length === 1 ? '' : 's')
-                          )
-                        ),
-                        qaShowActivity
-                          ? e('div', { className: 'qa-history-list' }, [...orderedQaRuns].reverse().map(run => e('button', {
-                              key: run.id,
-                              className: 'qa-history-item' + (run.id === selectedQaRun?.id ? ' selected' : ''),
-                              'data-verdict': run.verdict || run.status,
-                              onClick: () => { setSelectedQaRunId(run.id); setQaHistoryOpen(false); },
-                              title: 'Open this persisted QA run',
-                            },
-                              e('span', { className: 'qa-history-verdict' }, run.verdict || run.status),
-                              e('span', { className: 'qa-history-prompt' }, run.prompt),
-                              e('time', { className: 'qa-history-time', dateTime: new Date(run.createdAt).toISOString() }, new Date(run.createdAt).toLocaleString())
-                            )))
-                          : renderReport(),
-                        qaStatus === 'running' && e('div', { className: 'qa-subpanel-working' }, 'Structured QA run is executing in an isolated browser session...')
-                      );
-                    })()
-                  : e('div', { className: 'qa-subpanel-empty' },
-                      e('div', { className: 'qa-subpanel-empty-heading' }, 'Try one of these to start'),
-                      e('div', { className: 'qa-suggestions' },
-                        QA_SUGGESTIONS.map((s, i) => e('button', {
-                          key: i,
-                          className: 'qa-suggestion',
-                          onClick: () => setQaInput(s.prompt),
-                          title: 'Click to load this prompt into the input',
-                        },
-                          e('div', { className: 'qa-suggestion-title' }, s.title),
-                          e('div', { className: 'qa-suggestion-desc' }, s.desc)
-                        ))
-                      )
-                    )
-            ),
-            e('div', { className: 'qa-subpanel-input-wrapper' },
-              e('textarea', {
-                className: 'qa-subpanel-input',
-                value: qaInput,
-                onChange: (ev) => setQaInput(ev.target.value),
-                onKeyDown: (ev) => {
-                  if (ev.key === 'Enter' && !ev.shiftKey) {
-                    ev.preventDefault();
-                    sendQaMessage();
-                  }
-                },
-                placeholder: (workspace && workspace.testUrl)
-                  ? 'Describe what you want QA to test...'
-                  : 'Set a Test URL first',
-                rows: 1,
-                disabled: !(workspace && workspace.testUrl),
-              }),
-              e('button', {
-                className: 'qa-subpanel-send',
-                disabled: !qaInput.trim() || !(workspace && workspace.testUrl),
-                onClick: () => sendQaMessage(),
-                title: 'Start a structured QA run',
-              }, 'Send')
-            )
           )
         )
       );
@@ -3878,7 +2899,7 @@
       );
     }
 
-    function WorkspacesSidebar({ workspaces, agents, activeWorkspaceId, onSelectWorkspace, onCreateWorkspace, onDeleteWorkspace, onRenameWorkspace, onReorderWorkspaces, onUpdateWorkspaceTesting, onProvisionAtlas, onStopAtlas, onRescanAtlas, onResumeAtlas, onDiscardAtlasCandidate, onOpenAtlasViewer, qaLiveShots, onNewAgent, onEditAgent, onRemoveAgent, statusStartTimes, liveTurnState }) {
+    function WorkspacesSidebar({ workspaces, agents, activeWorkspaceId, onSelectWorkspace, onCreateWorkspace, onDeleteWorkspace, onRenameWorkspace, onReorderWorkspaces, onUpdateWorkspaceTesting, onNewAgent, onEditAgent, onRemoveAgent, statusStartTimes, liveTurnState }) {
       const [showNewModal, setShowNewModal] = useState(false);
       const [renamingId, setRenamingId] = useState(null);
       const [renameValue, setRenameValue] = useState('');
@@ -3919,7 +2940,7 @@
           workspaces.length === 0
             ? e('div', { style: { padding: 12, color: 'var(--text-muted)', fontSize: 12 } }, 'No workspaces yet.')
             : workspaces.map(ws => {
-                const wsAgents = agents.filter(a => a.workspaceId === ws.id && !a.hideFromGrid);
+                const wsAgents = agents.filter(a => a.workspaceId === ws.id);
                 const activeAgents = agents.filter(a => a.workspaceId === ws.id && (a.status === 'working' || a.status === 'thinking'));
                 const failedAgents = wsAgents.filter(a => agentPresentationStatus(a) === 'error');
                 const isActive = ws.id === activeWorkspaceId;
@@ -3980,14 +3001,14 @@
                     }, '\u00D7')
                   ),
                   isActive && e('div', { className: 'workspace-testing', onClick: (ev) => ev.stopPropagation() },
-                    e('span', { className: 'workspace-testing-label' }, 'Test URL'),
+                    e('span', { className: 'workspace-testing-label' }, 'App URL'),
                     e('input', {
                       type: 'text',
                       className: 'workspace-test-url-input',
                       placeholder: 'http://localhost:5173',
                       defaultValue: ws.testUrl || '',
                       key: 'testurl-' + ws.id + '-' + (ws.testUrl || ''),
-                      title: 'URL the QA testing agent will navigate to',
+                      title: 'Where this workspace\'s app runs locally. Used for the Open link and to label its port.',
                       onBlur: (ev) => {
                         const val = ev.target.value.trim();
                         if (val !== (ws.testUrl || '')) onUpdateWorkspaceTesting(ws.id, { testUrl: val });
@@ -3999,126 +3020,9 @@
                       href: ws.testUrl,
                       target: '_blank',
                       rel: 'noopener noreferrer',
-                      title: 'Open workspace Test URL',
-                    }, 'Open'),
-                    e('label', { className: 'workspace-tracker-toggle', title: 'Give normal agents in this workspace access to the configured Google Docs project tracker' },
-                      e('input', {
-                        type: 'checkbox',
-                        checked: !!ws.googleDocsTrackerEnabled,
-                        onChange: (ev) => onUpdateWorkspaceTesting(ws.id, { googleDocsTrackerEnabled: ev.target.checked }),
-                      }),
-                      e('span', null, 'Use Google Docs tracker')
-                    )
+                      title: 'Open the workspace app URL',
+                    }, 'Open')
                   ),
-                  isActive && (() => {
-                    const atlasAgent = ws.atlasAgentId ? agents.find(a => a.id === ws.atlasAgentId) : null;
-                    const atlasRun = ws.atlasRun;
-                    const atlasRunActive = atlasRun && (atlasRun.status === 'running' || atlasRun.status === 'validating');
-                    const allShots = atlasRunActive ? (qaLiveShots && qaLiveShots[ws.id]) || [] : [];
-                    const runStartedAt = atlasRunActive ? atlasRun.startedAt : 0;
-                    const runShots = allShots.filter(s =>
-                      (!runStartedAt || s.timestamp >= runStartedAt)
-                      && (!s.browserSessionId || s.browserSessionId === atlasRun.browserSessionId)
-                    );
-                    const elapsedMs = runStartedAt ? Date.now() - runStartedAt : 0;
-                    if (atlasRunActive) {
-                      return e('div', { className: 'workspace-atlas workspace-atlas-running', onClick: (ev) => ev.stopPropagation() },
-                        e('div', { className: 'workspace-atlas-status' },
-                          e('span', { className: 'workspace-atlas-pulse' }),
-                          e('span', { className: 'workspace-atlas-label', title: atlasRun.phase || '' },
-                            '🗺️ ' + (atlasRun.status === 'validating' ? 'Validating' : 'Scanning') + ': ' + runShots.length + ' shots · ' + formatElapsedDuration(elapsedMs / 1000)
-                          ),
-                          atlasAgent && (atlasAgent.status === 'working' || atlasAgent.status === 'thinking') && e('button', {
-                            className: 'workspace-atlas-stop',
-                            onClick: (ev) => { ev.stopPropagation(); if (confirm('Pause this Atlas scan? The published Atlas stays available and the candidate can be resumed.')) onStopAtlas(atlasAgent.id); },
-                            title: 'Stop current Atlas scan',
-                          }, 'Pause')
-                        )
-                      );
-                    }
-                    if (atlasRun && (atlasRun.status === 'paused' || atlasRun.status === 'failed')) {
-                      return e('div', { className: 'workspace-atlas workspace-atlas-partial', onClick: (ev) => ev.stopPropagation() },
-                        e('div', { className: 'workspace-atlas-status' },
-                          e('span', { className: 'workspace-atlas-label', title: atlasRun.error || '' },
-                            '🗺️ Candidate ' + (atlasRun.status === 'paused' ? 'paused' : 'needs attention')
-                          )
-                        ),
-                        e('div', { className: 'workspace-atlas-actions' },
-                          e('button', {
-                            className: 'workspace-atlas-action-btn',
-                            onClick: (ev) => { ev.stopPropagation(); onResumeAtlas(ws.id); },
-                            title: 'Continue from the saved candidate checkpoint',
-                          }, 'Resume'),
-                          ws.atlasLastScanAt && e('button', {
-                            className: 'workspace-atlas-action-btn',
-                            onClick: (ev) => { ev.stopPropagation(); if (onOpenAtlasViewer) onOpenAtlasViewer(ws.id); },
-                          }, 'View current'),
-                          e('button', {
-                            className: 'workspace-atlas-action-btn workspace-atlas-discard',
-                            onClick: (ev) => {
-                              ev.stopPropagation();
-                              if (confirm('Discard only the partial Atlas candidate? The published Atlas will not be changed.')) onDiscardAtlasCandidate(ws.id);
-                            },
-                            title: 'Delete the partial candidate and keep the published Atlas',
-                          }, 'Discard')
-                        )
-                      );
-                    }
-                    if (ws.atlasLastScanAt) {
-                      const ageMs = Date.now() - ws.atlasLastScanAt;
-                      const ageBucket = ageMs < 24 * 60 * 60 * 1000 ? 'fresh'
-                        : ageMs < 7 * 24 * 60 * 60 * 1000 ? 'aging'
-                        : 'stale';
-                      const fmtAgo = (ms) => {
-                        if (ms < 60_000) return 'just now';
-                        if (ms < 60 * 60_000) return Math.round(ms / 60_000) + 'm ago';
-                        if (ms < 24 * 60 * 60_000) return Math.round(ms / (60 * 60_000)) + 'h ago';
-                        return Math.round(ms / (24 * 60 * 60_000)) + 'd ago';
-                      };
-                      return e('div', { className: 'workspace-atlas workspace-atlas-idle workspace-atlas-' + ageBucket, onClick: (ev) => ev.stopPropagation() },
-                        e('div', { className: 'workspace-atlas-status' },
-                          e('span', { className: 'workspace-atlas-label' },
-                            '🗺️ Atlas · ',
-                            e('span', { className: 'workspace-atlas-age' }, fmtAgo(ageMs)),
-                            ageBucket === 'stale' && e('span', { className: 'workspace-atlas-stale-hint', title: 'Atlas is older than 7 days; re-scan recommended' }, ' · stale')
-                          )
-                        ),
-                        e('div', { className: 'workspace-atlas-actions' },
-                          e('button', {
-                            className: 'workspace-atlas-action-btn',
-                            disabled: !ws.testUrl,
-                            onClick: (ev) => { ev.stopPropagation(); if (window.confirm(ATLAS_RESCAN_CONFIRMATION)) onRescanAtlas(ws.id); },
-                            title: !ws.testUrl ? 'Set a Test URL first' : 'Build and validate a replacement without removing the current Atlas',
-                          }, 'Re-scan'),
-                          e('button', {
-                            className: 'workspace-atlas-action-btn',
-                            onClick: (ev) => { ev.stopPropagation(); if (onOpenAtlasViewer) onOpenAtlasViewer(ws.id); },
-                            title: 'Open the atlas viewer',
-                          }, 'View')
-                        )
-                      );
-                    }
-                    return e('div', { className: 'workspace-atlas', onClick: (ev) => ev.stopPropagation() },
-                      e('button', {
-                        className: 'workspace-atlas-btn',
-                        disabled: !ws.testUrl,
-                        title: !ws.testUrl
-                          ? 'Set a Test URL first — the Atlas Agent walks the live app at that URL'
-                          : 'Build the UI Atlas for this workspace. You will be prompted for the project repo path.',
-                        onClick: () => {
-                          if (!ws.testUrl) return;
-                          const firstAgent = wsAgents[0];
-                          const defaultCwd = ws.atlasProjectCwd || (firstAgent ? firstAgent.cwd : '');
-                          const cwd = window.prompt(
-                            'Path to the project repo for the Atlas Agent to read code from:\n\n(The agent will read source files in this directory and write the atlas to docs/ui-atlas/atlas.md inside it. The atlas will start building automatically once you confirm.)',
-                            defaultCwd
-                          );
-                          if (cwd && cwd.trim()) onProvisionAtlas(ws.id, cwd.trim());
-                        },
-                      }, '🗺️ Build UI Atlas'),
-                      !ws.testUrl && e('div', { className: 'workspace-atlas-hint' }, 'Set a Test URL above to enable UI Atlas.')
-                    );
-                  })(),
                   isActive && wsAgents.length > 0 && e('div', { className: 'workspace-agents' },
                     wsAgents.map(agent =>
                       e('div', { key: agent.id, className: 'workspace-agent-chip' + (agentPresentationStatus(agent) === 'error' ? ' has-attention' : '') },
@@ -4197,1030 +3101,6 @@
             e('button', { type: 'button', className: 'btn btn-primary', disabled: !name.trim() || !cwd.trim(), onClick: handleSubmit }, 'Create Workspace')
           )
         )
-      );
-    }
-
-    // Notes Panel
-    // Slug-ify heading text the same way Github / common-mark anchor schemes do —
-    // lowercase, alphanumerics + dashes only. Used to wire TOC links to anchors.
-    function atlasSlug(text) {
-      return String(text || '').toLowerCase().trim()
-        .replace(/[^\w\s-]/g, '')
-        .replace(/[\s_]+/g, '-')
-        .replace(/^-+|-+$/g, '');
-    }
-
-    // Parse atlas.md text for the coverage header + TOC. Pulls YAML frontmatter
-    // counts (total_surfaces, total_entities, last_full_scan), counts "Last
-    // verified" entries by freshness bucket, and extracts h2/h3 headings.
-    function parseAtlasOverview(text) {
-      const out = {
-        totalSurfaces: null, totalEntities: null, lastFullScan: null,
-        verifiedToday: 0, verified7d: 0, verifiedOlder: 0, verifiedUnknown: 0,
-        headings: [],
-      };
-      if (!text) return out;
-      const fmMatch = text.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n)?/);
-      if (fmMatch) {
-        const fm = fmMatch[1];
-        const ts = fm.match(/^total_surfaces:\s*(\d+)/m); if (ts) out.totalSurfaces = parseInt(ts[1], 10);
-        const te = fm.match(/^total_entities:\s*(\d+)/m); if (te) out.totalEntities = parseInt(te[1], 10);
-        const ls = fm.match(/^last_full_scan:\s*(\S+)/m); if (ls) out.lastFullScan = ls[1];
-      }
-      const now = Date.now();
-      const oneDay = 24 * 60 * 60 * 1000;
-      const verifyRe = /^[ \t-]*Last verified:\s*([^\n]+)$/gim;
-      let vm;
-      while ((vm = verifyRe.exec(text))) {
-        const raw = (vm[1] || '').trim();
-        if (!raw || raw === '?') { out.verifiedUnknown++; continue; }
-        const dateMatch = raw.match(/(\d{4}-\d{2}-\d{2})/);
-        if (!dateMatch) { out.verifiedUnknown++; continue; }
-        const ageMs = now - new Date(dateMatch[1] + 'T00:00:00').getTime();
-        if (ageMs < oneDay * 1.5) out.verifiedToday++;
-        else if (ageMs < 7 * oneDay) out.verified7d++;
-        else out.verifiedOlder++;
-      }
-      // Skip headings inside frontmatter and code fences.
-      const body = fmMatch ? text.slice(fmMatch[0].length) : text;
-      const lines = body.split(/\r?\n/);
-      let inFence = false;
-      const seen = new Map();
-      for (const line of lines) {
-        if (/^```/.test(line)) { inFence = !inFence; continue; }
-        if (inFence) continue;
-        const m = line.match(/^(##|###)\s+(.+?)\s*$/);
-        if (!m) continue;
-        const level = m[1].length;
-        const headingText = m[2].replace(/`/g, '').replace(/^\d+\.\s*/, '');
-        let slug = atlasSlug(headingText);
-        if (!slug) continue;
-        const n = (seen.get(slug) || 0) + 1;
-        seen.set(slug, n);
-        if (n > 1) slug = slug + '-' + n;
-        out.headings.push({ level, text: headingText, slug });
-      }
-      return out;
-    }
-
-    const ATLAS_VIEW_TABS = [
-      ['overview', 'Overview'],
-      ['surfaces', 'Surfaces'],
-      ['entities', 'Entities'],
-      ['flows', 'Flows'],
-      ['findings', 'Findings'],
-      ['gallery', 'Gallery'],
-      ['document', 'Document'],
-      ['ask', 'Ask Atlas'],
-    ];
-
-    const ATLAS_SURFACE_FILTERS = [
-      ['verified', 'Verified'],
-      ['gaps', 'Gaps'],
-      ['changed', 'Changed'],
-      ['destructive', 'Destructive'],
-      ['modal', 'Modal'],
-      ['mobile', 'Mobile'],
-      ['error', 'Error state'],
-    ];
-
-    function atlasFileUrl(workspaceId, relPath) {
-      return '/api/atlas/file?workspaceId=' + encodeURIComponent(workspaceId) + '&relPath=' + encodeURIComponent(relPath);
-    }
-
-    function atlasArray(value) {
-      return Array.isArray(value) ? value : [];
-    }
-
-    function atlasSearchText(item) {
-      if (!item || typeof item !== 'object') return '';
-      return Object.values(item).flatMap(value => Array.isArray(value) ? value : [value])
-        .filter(value => typeof value === 'string')
-        .join(' ')
-        .toLowerCase();
-    }
-
-    function atlasSurfaceTraits(surface, changelogText) {
-      const text = atlasSearchText(surface);
-      const changedHaystack = String(changelogText || '').toLowerCase();
-      return {
-        verified: surface?.status === 'verified',
-        gaps: surface?.status !== 'verified',
-        changed: changedHaystack.includes(String(surface?.id || '').toLowerCase())
-          || (!!surface?.name && changedHaystack.includes(String(surface.name).toLowerCase())),
-        destructive: /\b(delete|remove|erase|destroy|reset|clear all|cleanup|restore|replace workspace|publish|unpublish)\b/.test(text),
-        modal: /\b(modal|dialog|drawer|sheet|popover|picker)\b/.test(text),
-        mobile: /\b(mobile|narrow|phone|responsive|small viewport)\b/.test(text),
-        error: /\b(error|failure|failed|malformed|invalid|empty|offline|missing|unavailable)\b/.test(text),
-      };
-    }
-
-    function atlasMarkdownSection(markdown, labels) {
-      if (!markdown) return '';
-      const wanted = labels.map(label => label.toLowerCase());
-      const lines = markdown.split(/\r?\n/);
-      const out = [];
-      let capturing = false;
-      for (const line of lines) {
-        const heading = line.match(/^##\s+(?:\d+\.\s*)?(.+?)\s*$/);
-        if (heading) {
-          if (capturing) break;
-          const title = heading[1].replace(/`/g, '').toLowerCase();
-          capturing = wanted.some(label => title.includes(label));
-        }
-        if (capturing) out.push(line);
-      }
-      return out.join('\n').trim();
-    }
-
-    function atlasViewForId(id) {
-      if (String(id).startsWith('surface.')) return 'surfaces';
-      if (String(id).startsWith('entity.')) return 'entities';
-      if (String(id).startsWith('flow.')) return 'flows';
-      return 'overview';
-    }
-
-    function AtlasPanel({ activeWorkspace, agents, messages, qaLiveShots, onRescanAtlas, onResumeAtlas, onDiscardAtlasCandidate }) {
-      const [content, setContent] = useState('');
-      const [graph, setGraph] = useState(null);
-      const [changelog, setChangelog] = useState('');
-      const [loading, setLoading] = useState(false);
-      const [error, setError] = useState(null);
-      const [query, setQuery] = useState('');
-      const [tocOpen, setTocOpen] = useState(true);
-      const [activeView, setActiveView] = useState('overview');
-      const [activeFilters, setActiveFilters] = useState([]);
-      const [selectedAtlasId, setSelectedAtlasId] = useState(null);
-      const [copiedAtlasValue, setCopiedAtlasValue] = useState(null);
-      const [lightboxIndex, setLightboxIndex] = useState(null);
-      const [askQuestion, setAskQuestion] = useState('');
-      const [askBusy, setAskBusy] = useState(false);
-      const [askError, setAskError] = useState(null);
-      const [askHistory, setAskHistory] = useState([]);
-      const [askComposerOpen, setAskComposerOpen] = useState(true);
-      const bodyRef = useRef(null);
-
-      const wsId = activeWorkspace?.id;
-      const wsHasAtlas = !!(activeWorkspace?.atlasLastScanAt && activeWorkspace?.atlasProjectCwd);
-      const atlasRun = activeWorkspace?.atlasRun;
-      const atlasAgent = activeWorkspace?.atlasAgentId
-        ? agents.find(a => a.id === activeWorkspace.atlasAgentId)
-        : null;
-      const atlasRunActive = atlasRun && (atlasRun.status === 'running' || atlasRun.status === 'validating');
-
-      useEffect(() => {
-        if (!wsId) return;
-        try {
-          const savedView = localStorage.getItem('atlas-view-' + wsId);
-          if (ATLAS_VIEW_TABS.some(([id]) => id === savedView)) setActiveView(savedView);
-          const savedToc = localStorage.getItem('atlas-toc-open-' + wsId);
-          setTocOpen(savedToc === null ? true : savedToc === 'true');
-          const savedAskHistory = JSON.parse(localStorage.getItem('atlas-ask-history-' + wsId) || '[]');
-          const history = Array.isArray(savedAskHistory) ? savedAskHistory.slice(0, 8) : [];
-          setAskHistory(history);
-          setAskComposerOpen(history.length === 0);
-        } catch {
-          setAskHistory([]);
-          setAskComposerOpen(true);
-        }
-        setAskQuestion('');
-        setQuery('');
-        setActiveFilters([]);
-        setSelectedAtlasId(null);
-        setLightboxIndex(null);
-        setAskError(null);
-      }, [wsId]);
-
-      // Fetch atlas.md whenever the workspace changes or a scan completes.
-      useEffect(() => {
-        if (!wsId || !wsHasAtlas) { setContent(''); setGraph(null); setChangelog(''); setError(null); return; }
-        let cancelled = false;
-        setLoading(true);
-        setError(null);
-        fetch('/api/atlas/file?workspaceId=' + encodeURIComponent(wsId) + '&relPath=atlas.md')
-          .then(r => { if (!r.ok) throw new Error('Failed to load atlas.md (' + r.status + ')'); return r.text(); })
-          .then(text => { if (!cancelled) setContent(text); })
-          .catch(e => { if (!cancelled) setError(e.message || String(e)); })
-          .finally(() => { if (!cancelled) setLoading(false); });
-        fetch('/api/atlas/file?workspaceId=' + encodeURIComponent(wsId) + '&relPath=atlas.json')
-          .then(r => r.ok ? r.json() : null)
-          .then(value => { if (!cancelled) setGraph(value); })
-          .catch(() => { if (!cancelled) setGraph(null); });
-        fetch('/api/atlas/file?workspaceId=' + encodeURIComponent(wsId) + '&relPath=changelog.md')
-          .then(r => r.ok ? r.text() : '')
-          .then(value => { if (!cancelled) setChangelog(value); })
-          .catch(() => { if (!cancelled) setChangelog(''); });
-        return () => { cancelled = true; };
-      }, [wsId, activeWorkspace?.atlasLastScanAt]);
-
-      // Rewrite `shots/foo.png` (in inline-code) to ![shots/foo.png](URL) so markdown
-      // renders them as images via the /api/atlas/file endpoint.
-      const rewritten = useMemo(() => {
-        if (!content || !wsId) return content;
-        return content.replace(/`(shots\/[^`]+\.png)`/g, (_, p) => {
-          const url = atlasFileUrl(wsId, p);
-          return '![' + p + '](' + url + ')';
-        });
-      }, [content, wsId]);
-
-      const overview = useMemo(() => parseAtlasOverview(rewritten), [rewritten]);
-      // Frontmatter drives the coverage strip but is metadata, not reader
-      // content. Keep it out of the rendered document.
-      const displayAtlas = useMemo(() => rewritten.replace(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n)?/, ''), [rewritten]);
-
-      // Inject HTML anchor tags before each ##/### heading so TOC links land
-      // precisely. We do this on the markdown text (not the parsed HTML)
-      // because marked passes inline HTML through unchanged.
-      const anchored = useMemo(() => {
-        if (!displayAtlas) return displayAtlas;
-        const slugCount = new Map();
-        const lines = displayAtlas.split('\n');
-        let inFence = false;
-        const out = [];
-        for (const line of lines) {
-          if (/^```/.test(line)) { inFence = !inFence; out.push(line); continue; }
-          if (!inFence) {
-            const m = line.match(/^(##|###)\s+(.+?)\s*$/);
-            if (m) {
-              const headingText = m[2].replace(/`/g, '').replace(/^\d+\.\s*/, '');
-              let slug = atlasSlug(headingText);
-              if (slug) {
-                const n = (slugCount.get(slug) || 0) + 1;
-                slugCount.set(slug, n);
-                if (n > 1) slug = slug + '-' + n;
-                out.push('<a id="' + slug + '" class="atlas-anchor"></a>');
-              }
-            }
-          }
-          out.push(line);
-        }
-        return out.join('\n');
-      }, [displayAtlas]);
-
-      const filtered = useMemo(() => {
-        if (!query.trim()) return anchored;
-        // Simple filter: keep only sections (h2/h3 + body) that contain the query.
-        const q = query.toLowerCase();
-        const sections = anchored.split(/\n(?=##? )/);
-        return sections.filter(s => s.toLowerCase().includes(q)).join('\n\n');
-      }, [anchored, query]);
-
-      const graphSurfaces = useMemo(() => atlasArray(graph?.surfaces), [graph]);
-      const graphEntities = useMemo(() => atlasArray(graph?.entities), [graph]);
-      const graphFlows = useMemo(() => atlasArray(graph?.flows), [graph]);
-      const atlasIdSet = useMemo(() => new Set([
-        ...graphSurfaces.map(item => item.id),
-        ...graphEntities.map(item => item.id),
-        ...graphFlows.map(item => item.id),
-      ].filter(Boolean)), [graphSurfaces, graphEntities, graphFlows]);
-      const surfaceMap = useMemo(() => new Map(graphSurfaces.map(item => [item.id, item])), [graphSurfaces]);
-      const normalizedQuery = query.trim().toLowerCase();
-      const filteredSurfaces = useMemo(() => graphSurfaces.filter(surface => {
-        if (normalizedQuery && !atlasSearchText(surface).includes(normalizedQuery)) return false;
-        const traits = atlasSurfaceTraits(surface, changelog);
-        return activeFilters.every(filter => traits[filter]);
-      }), [graphSurfaces, normalizedQuery, activeFilters, changelog]);
-      const filteredEntities = useMemo(() => graphEntities.filter(entity =>
-        !normalizedQuery || atlasSearchText(entity).includes(normalizedQuery)
-      ), [graphEntities, normalizedQuery]);
-      const filteredFlows = useMemo(() => graphFlows.filter(flow => {
-        if (!normalizedQuery) return true;
-        return atlasSearchText(flow).includes(normalizedQuery)
-          || atlasSearchText(surfaceMap.get(flow.fromSurfaceId)).includes(normalizedQuery)
-          || atlasSearchText(surfaceMap.get(flow.toSurfaceId)).includes(normalizedQuery);
-      }), [graphFlows, normalizedQuery, surfaceMap]);
-      const screenshotItems = useMemo(() => {
-        const byPath = new Map();
-        for (const surface of graphSurfaces) {
-          for (const relPath of atlasArray(surface.screenshotRefs)) {
-            if (typeof relPath !== 'string' || !relPath) continue;
-            let item = byPath.get(relPath);
-            if (!item) {
-              item = { relPath, src: atlasFileUrl(wsId, relPath), surfaceIds: [], surfaceNames: [] };
-              byPath.set(relPath, item);
-            }
-            item.surfaceIds.push(surface.id);
-            item.surfaceNames.push(surface.name || surface.id);
-          }
-        }
-        return Array.from(byPath.values());
-      }, [graphSurfaces, wsId]);
-      const filteredScreenshotItems = useMemo(() => {
-        if (!normalizedQuery && activeFilters.length === 0) return screenshotItems;
-        const visibleIds = new Set(filteredSurfaces.map(surface => surface.id));
-        return screenshotItems.filter(item => item.surfaceIds.some(id => visibleIds.has(id)));
-      }, [screenshotItems, filteredSurfaces, normalizedQuery, activeFilters]);
-      const observedFindings = useMemo(() => atlasMarkdownSection(displayAtlas, ['observed inconsistencies']), [displayAtlas]);
-      const openQuestions = useMemo(() => atlasMarkdownSection(displayAtlas, ['open questions']), [displayAtlas]);
-      const changeFindings = useMemo(() => atlasMarkdownSection(displayAtlas, ['changes since last scan']), [displayAtlas]);
-      const lightboxItem = lightboxIndex == null ? null : screenshotItems[lightboxIndex] || null;
-
-      const changeView = useCallback((view) => {
-        setActiveView(view);
-        setQuery('');
-        if (wsId) {
-          try { localStorage.setItem('atlas-view-' + wsId, view); } catch {}
-        }
-      }, [wsId]);
-
-      const toggleFilter = useCallback((filter) => {
-        setActiveFilters(previous => {
-          if (previous.includes(filter)) return previous.filter(item => item !== filter);
-          const withoutOpposite = filter === 'verified'
-            ? previous.filter(item => item !== 'gaps')
-            : filter === 'gaps' ? previous.filter(item => item !== 'verified') : previous;
-          return [...withoutOpposite, filter];
-        });
-      }, []);
-
-      const toggleToc = useCallback(() => {
-        setTocOpen(previous => {
-          const next = !previous;
-          if (wsId) {
-            try { localStorage.setItem('atlas-toc-open-' + wsId, String(next)); } catch {}
-          }
-          return next;
-        });
-      }, [wsId]);
-
-      const navigateAtlasId = useCallback((id) => {
-        if (!id) return;
-        changeView(atlasViewForId(id));
-        setSelectedAtlasId(id);
-        window.history.replaceState(null, '', window.location.pathname + window.location.search + '#atlas-item=' + encodeURIComponent(id));
-        requestAnimationFrame(() => requestAnimationFrame(() => {
-          document.getElementById('atlas-item-' + id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }));
-      }, [changeView]);
-
-      const copyAtlasText = useCallback(async (value, stateKey) => {
-        const showCopied = () => {
-          setCopiedAtlasValue(stateKey);
-          setTimeout(() => setCopiedAtlasValue(current => current === stateKey ? null : current), 1400);
-        };
-        try {
-          if (!navigator.clipboard?.writeText) throw new Error('Clipboard API unavailable');
-          await navigator.clipboard.writeText(value);
-          showCopied();
-        } catch {
-          const textarea = document.createElement('textarea');
-          textarea.value = value;
-          textarea.style.position = 'fixed';
-          textarea.style.opacity = '0';
-          document.body.appendChild(textarea);
-          textarea.select();
-          document.execCommand('copy');
-          textarea.remove();
-          showCopied();
-        }
-      }, []);
-
-      const copyAtlasLink = useCallback((id) => {
-        const link = window.location.origin + window.location.pathname + window.location.search + '#atlas-item=' + encodeURIComponent(id);
-        copyAtlasText(link, 'link:' + id);
-      }, [copyAtlasText]);
-
-      const openLightbox = useCallback((relPath) => {
-        const index = screenshotItems.findIndex(item => item.relPath === relPath);
-        if (index >= 0) setLightboxIndex(index);
-      }, [screenshotItems]);
-
-      const moveLightbox = useCallback((delta) => {
-        setLightboxIndex(current => {
-          if (current == null || screenshotItems.length === 0) return current;
-          return (current + delta + screenshotItems.length) % screenshotItems.length;
-        });
-      }, [screenshotItems.length]);
-
-      const askAtlas = useCallback(async (event) => {
-        event.preventDefault();
-        const question = askQuestion.trim();
-        if (!question || !wsId || askBusy) return;
-        setAskBusy(true);
-        setAskError(null);
-        try {
-          const response = await fetch('/api/atlas/ask', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ workspaceId: wsId, question }),
-          });
-          const result = await response.json().catch(() => ({}));
-          if (!response.ok) throw new Error(result.error || 'Ask Atlas failed (' + response.status + ')');
-          const entry = { ...result, question, askedAt: Date.now() };
-          setAskHistory(previous => {
-            const next = [entry, ...previous].slice(0, 8);
-            try { localStorage.setItem('atlas-ask-history-' + wsId, JSON.stringify(next)); } catch {}
-            return next;
-          });
-          setAskQuestion('');
-          setAskComposerOpen(false);
-        } catch (askFailure) {
-          setAskError(askFailure.message || String(askFailure));
-        } finally {
-          setAskBusy(false);
-        }
-      }, [askQuestion, wsId, askBusy]);
-
-      useEffect(() => {
-        if (!atlasIdSet.size) return;
-        const applyHash = () => {
-          const match = window.location.hash.match(/^#atlas-item=(.+)$/);
-          if (!match) return;
-          let id;
-          try { id = decodeURIComponent(match[1]); } catch { return; }
-          if (!atlasIdSet.has(id)) return;
-          setActiveView(atlasViewForId(id));
-          setSelectedAtlasId(id);
-          requestAnimationFrame(() => requestAnimationFrame(() => {
-            document.getElementById('atlas-item-' + id)?.scrollIntoView({ block: 'start' });
-          }));
-        };
-        applyHash();
-        window.addEventListener('hashchange', applyHash);
-        return () => window.removeEventListener('hashchange', applyHash);
-      }, [atlasIdSet]);
-
-      useEffect(() => {
-        if (lightboxIndex == null) return;
-        const handleKey = (event) => {
-          if (event.key === 'Escape') setLightboxIndex(null);
-          if (event.key === 'ArrowLeft') moveLightbox(-1);
-          if (event.key === 'ArrowRight') moveLightbox(1);
-        };
-        window.addEventListener('keydown', handleKey);
-        return () => window.removeEventListener('keydown', handleKey);
-      }, [lightboxIndex, moveLightbox]);
-
-      const scrollToSlug = useCallback((slug) => {
-        const root = bodyRef.current;
-        if (!root) return;
-        const el = root.querySelector('#' + CSS.escape(slug));
-        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }, []);
-
-      const openAtlasImage = useCallback((image) => {
-        const src = image && (image.currentSrc || image.getAttribute('src'));
-        if (src) window.open(src, '_blank', 'noopener,noreferrer');
-      }, []);
-
-      const handleAtlasImageClick = useCallback((ev) => {
-        const image = ev.target && ev.target.closest ? ev.target.closest('img') : null;
-        if (!image || !ev.currentTarget.contains(image)) return;
-        ev.preventDefault();
-        openAtlasImage(image);
-      }, [openAtlasImage]);
-
-      const handleAtlasImageKeyDown = useCallback((ev) => {
-        if (ev.key !== 'Enter' && ev.key !== ' ') return;
-        const image = ev.target && ev.target.closest ? ev.target.closest('img') : null;
-        if (!image || !ev.currentTarget.contains(image)) return;
-        ev.preventDefault();
-        openAtlasImage(image);
-      }, [openAtlasImage]);
-
-      useEffect(() => {
-        if (activeView !== 'document') return;
-        const root = bodyRef.current;
-        if (!root) return;
-        root.querySelectorAll('img').forEach(image => {
-          image.loading = 'lazy';
-          image.decoding = 'async';
-          image.tabIndex = 0;
-          image.setAttribute('role', 'link');
-          image.setAttribute('title', 'Open full-size image in a new tab');
-          if (!image.getAttribute('aria-label')) {
-            image.setAttribute('aria-label', (image.getAttribute('alt') || 'Atlas screenshot') + ' — open full-size image in a new tab');
-          }
-        });
-      }, [filtered, loading, activeView]);
-
-      const fmtAgo = (ms) => {
-        if (ms < 60_000) return 'just now';
-        if (ms < 60 * 60_000) return Math.round(ms / 60_000) + 'm ago';
-        if (ms < 24 * 60 * 60_000) return Math.round(ms / (60 * 60_000)) + 'h ago';
-        return Math.round(ms / (24 * 60 * 60_000)) + 'd ago';
-      };
-
-      if (!activeWorkspace) {
-        return e('div', { className: 'atlas-panel' },
-          e('div', { className: 'atlas-empty' }, 'No active workspace.')
-        );
-      }
-
-      const runShots = atlasRun
-        ? ((qaLiveShots && qaLiveShots[wsId]) || []).filter(shot =>
-            (!shot.browserSessionId || shot.browserSessionId === atlasRun.browserSessionId)
-            && shot.timestamp >= atlasRun.startedAt
-          )
-        : [];
-      const runElapsedMs = atlasRunActive ? Date.now() - atlasRun.startedAt : 0;
-      const atlasMsgs = atlasAgent ? ((messages && messages[atlasAgent.id]) || []) : [];
-      const recentMsgs = atlasMsgs.slice(-4);
-      const showRunBanner = atlasRun && ['running', 'validating', 'paused', 'failed'].includes(atlasRun.status);
-      const runBanner = showRunBanner && e('div', { className: 'atlas-run-banner atlas-run-banner-' + atlasRun.status },
-        e('div', { className: 'atlas-run-banner-head' },
-          e('strong', null,
-            atlasRun.status === 'running' ? 'Candidate scan in progress'
-              : atlasRun.status === 'validating' ? 'Validating candidate'
-                : atlasRun.status === 'paused' ? 'Candidate paused' : 'Candidate needs attention'
-          ),
-          atlasRunActive && e('span', null, runShots.length + ' shots · ' + Math.max(0, Math.floor(runElapsedMs / 60000)) + 'm'),
-          !atlasRunActive && e('div', { className: 'atlas-run-actions' },
-            e('button', { className: 'atlas-rescan-btn', onClick: () => onResumeAtlas(wsId) }, 'Resume'),
-            e('button', {
-              className: 'atlas-rescan-btn atlas-discard-btn',
-              onClick: () => { if (confirm('Discard only this partial candidate? The published Atlas stays unchanged.')) onDiscardAtlasCandidate(wsId); },
-            }, 'Discard candidate')
-          )
-        ),
-        e('div', { className: 'atlas-run-summary' },
-          atlasRunActive
-            ? ((atlasRun.phase || 'Scanning') + '. The last published Atlas remains available below until this candidate passes validation.')
-            : (atlasRun.error || 'The candidate was not published. Resume it or discard it; the last published Atlas is unchanged.')
-        ),
-        atlasRun.validationErrors && atlasRun.validationErrors.length > 0 && e('ul', { className: 'atlas-validation-errors' },
-          atlasRun.validationErrors.slice(0, 6).map((message, index) => e('li', { key: index }, message)),
-          atlasRun.validationErrors.length > 6 && e('li', null, '+' + (atlasRun.validationErrors.length - 6) + ' more validation issues')
-        ),
-        atlasRunActive && recentMsgs.length > 0 && e('div', { className: 'atlas-activity-feed atlas-activity-compact' },
-          recentMsgs.map((m, i) => {
-            const text = (m.content || '').replace(/\n?\[Using tool: [^\]]+\]\n?/g, '').trim();
-            const preview = text.length > 180 ? text.slice(0, 180) + '...' : text;
-            return e('div', { key: m.id || i, className: 'atlas-activity-msg atlas-activity-' + m.role }, preview || '(activity recorded)');
-          })
-        )
-      );
-
-      if (!wsHasAtlas) {
-        return e('div', { className: 'atlas-panel' },
-          e('div', { className: 'atlas-header' },
-            e('div', { className: 'atlas-title' }, '🗺️ UI Atlas'),
-            e('div', { className: 'atlas-status' }, atlasRunActive ? 'Building candidate' : 'Not built yet')
-          ),
-          runBanner,
-          e('div', { className: 'atlas-empty' },
-            e('div', null, 'No UI Atlas exists for this workspace.'),
-            e('div', { style: { marginTop: 8, fontSize: 11, color: 'var(--text-muted)' } },
-              activeWorkspace.testUrl
-                ? 'Use the "Build UI Atlas" button on the workspace tab to start.'
-                : 'Set a Test URL on this workspace first, then build an atlas.'
-            )
-          )
-        );
-      }
-
-      const ageMs = Date.now() - (activeWorkspace.atlasLastScanAt || 0);
-      const ageBucket = ageMs < 24 * 60 * 60_000 ? 'fresh'
-        : ageMs < 7 * 24 * 60 * 60_000 ? 'aging'
-        : 'stale';
-
-      const totalVerified = overview.verifiedToday + overview.verified7d + overview.verifiedOlder;
-      const totalCounted = totalVerified + overview.verifiedUnknown;
-      const qaTouchedCount = activeWorkspace.qaSurfaceVerifications
-        ? Object.keys(activeWorkspace.qaSurfaceVerifications).length
-        : 0;
-      const graphVerified = graphSurfaces.filter(surface => surface.status === 'verified').length;
-      const graphPartial = graphSurfaces.filter(surface => surface.status === 'partial' || surface.status === 'unverified').length;
-      const graphExcluded = graphSurfaces.filter(surface => surface.status === 'excluded').length;
-
-      const coverageBits = [];
-      if (graphSurfaces.length) coverageBits.push(graphSurfaces.length + ' surfaces');
-      else if (overview.totalSurfaces != null) coverageBits.push(overview.totalSurfaces + ' surfaces');
-      if (graphEntities.length) coverageBits.push(graphEntities.length + ' entities');
-      else if (overview.totalEntities != null) coverageBits.push(overview.totalEntities + ' entities');
-      if (graphSurfaces.length) {
-        coverageBits.push(graphVerified + '/' + graphSurfaces.length + ' verified');
-        if (graphPartial > 0) coverageBits.push(graphPartial + ' gaps');
-        if (graphExcluded > 0) coverageBits.push(graphExcluded + ' excluded');
-      } else if (totalCounted > 0) {
-        coverageBits.push(totalVerified + '/' + totalCounted + ' verified');
-      }
-      if (qaTouchedCount > 0) coverageBits.push(qaTouchedCount + ' QA-touched');
-
-      // Limit TOC to top-level sections (h2). h3 entries (per-entity, per-surface)
-      // would balloon the list — search handles that case.
-      const tocItems = overview.headings.filter(h => h.level === 2);
-      const coveragePercent = graphSurfaces.length ? Math.round((graphVerified / graphSurfaces.length) * 100) : 0;
-      const riskySurfaces = graphSurfaces.filter(surface => {
-        const traits = atlasSurfaceTraits(surface, changelog);
-        return traits.destructive || traits.error;
-      });
-
-      const renderIdRow = (id) => e('div', { className: 'atlas-id-row' },
-        e('button', { className: 'atlas-id-link', onClick: () => navigateAtlasId(id), title: 'Open ' + id }, id),
-        e('button', {
-          className: 'atlas-icon-btn',
-          onClick: () => copyAtlasText(id, 'id:' + id),
-          title: 'Copy identifier',
-        }, copiedAtlasValue === 'id:' + id ? 'Copied' : 'Copy'),
-        e('button', {
-          className: 'atlas-icon-btn',
-          onClick: () => copyAtlasLink(id),
-          title: 'Copy deep link',
-        }, copiedAtlasValue === 'link:' + id ? 'Copied' : 'Link')
-      );
-
-      const renderLinkedChips = (ids) => ids.length > 0 && e('div', { className: 'atlas-chip-row' },
-        ids.map(id => e('button', {
-          key: id,
-          className: 'atlas-link-chip',
-          onClick: () => navigateAtlasId(id),
-          title: 'Open ' + id,
-        }, id))
-      );
-
-      const renderScreenshots = (surface) => atlasArray(surface.screenshotRefs).length > 0 && e('div', { className: 'atlas-thumb-strip' },
-        atlasArray(surface.screenshotRefs).map(relPath => e('img', {
-          key: relPath,
-          className: 'atlas-thumb',
-          src: atlasFileUrl(wsId, relPath),
-          alt: (surface.name || surface.id) + ' screenshot',
-          loading: 'lazy',
-          decoding: 'async',
-          onClick: () => openLightbox(relPath),
-          title: 'Open in screenshot viewer',
-        }))
-      );
-
-      const renderSurfaceCard = (surface) => {
-        const traits = atlasSurfaceTraits(surface, changelog);
-        const visibleTraits = Object.entries(traits).filter(([, active]) => active).map(([name]) => name);
-        return e('article', {
-          key: surface.id,
-          id: 'atlas-item-' + surface.id,
-          className: 'atlas-card' + (selectedAtlasId === surface.id ? ' selected' : ''),
-        },
-          e('div', { className: 'atlas-card-head' },
-            e('div', { className: 'atlas-card-title' }, surface.name || surface.id),
-            e('span', { className: 'atlas-card-status ' + (surface.status === 'verified' ? 'verified' : 'gap') }, surface.status || 'unknown')
-          ),
-          renderIdRow(surface.id),
-          visibleTraits.length > 0 && e('div', { className: 'atlas-chip-row' },
-            visibleTraits.map(trait => e('span', { key: trait, className: 'atlas-trait-chip' }, trait))
-          ),
-          atlasArray(surface.actions).length > 0 && e('div', { className: 'atlas-card-block' },
-            e('div', { className: 'atlas-card-label' }, 'Actions'),
-            e('ul', { className: 'atlas-card-list' }, atlasArray(surface.actions).map((action, index) => e('li', { key: index }, action)))
-          ),
-          atlasArray(surface.states).length > 0 && e('div', { className: 'atlas-card-block' },
-            e('div', { className: 'atlas-card-label' }, 'States'),
-            e('ul', { className: 'atlas-card-list' }, atlasArray(surface.states).map((state, index) => e('li', { key: index }, state)))
-          ),
-          atlasArray(surface.entityIds).length > 0 && e('div', { className: 'atlas-card-block' },
-            e('div', { className: 'atlas-card-label' }, 'Entities'),
-            renderLinkedChips(atlasArray(surface.entityIds))
-          ),
-          renderScreenshots(surface),
-          atlasArray(surface.codeRefs).length > 0 && e('div', { className: 'atlas-card-block' },
-            e('div', { className: 'atlas-card-label' }, 'Code references'),
-            atlasArray(surface.codeRefs).map((ref, index) => e('span', { key: index, className: 'atlas-code-ref' }, ref))
-          )
-        );
-      };
-
-      const renderEntityCard = (entity) => {
-        const relatedSurfaces = graphSurfaces.filter(surface => atlasArray(surface.entityIds).includes(entity.id));
-        return e('article', {
-          key: entity.id,
-          id: 'atlas-item-' + entity.id,
-          className: 'atlas-card' + (selectedAtlasId === entity.id ? ' selected' : ''),
-        },
-          e('div', { className: 'atlas-card-head' }, e('div', { className: 'atlas-card-title' }, entity.name || entity.id)),
-          renderIdRow(entity.id),
-          atlasArray(entity.fields).length > 0 && e('div', { className: 'atlas-card-block' },
-            e('div', { className: 'atlas-card-label' }, 'Fields'),
-            e('ul', { className: 'atlas-card-list' }, atlasArray(entity.fields).map((field, index) =>
-              e('li', { key: index }, typeof field === 'string' ? field : JSON.stringify(field))
-            ))
-          ),
-          relatedSurfaces.length > 0 && e('div', { className: 'atlas-card-block' },
-            e('div', { className: 'atlas-card-label' }, 'Appears on ' + relatedSurfaces.length + ' surface' + (relatedSurfaces.length === 1 ? '' : 's')),
-            renderLinkedChips(relatedSurfaces.map(surface => surface.id))
-          ),
-          atlasArray(entity.codeRefs).length > 0 && e('div', { className: 'atlas-card-block' },
-            e('div', { className: 'atlas-card-label' }, 'Code references'),
-            atlasArray(entity.codeRefs).map((ref, index) => e('span', { key: index, className: 'atlas-code-ref' }, ref))
-          )
-        );
-      };
-
-      const renderFlowCard = (flow) => e('article', {
-        key: flow.id,
-        id: 'atlas-item-' + flow.id,
-        className: 'atlas-card' + (selectedAtlasId === flow.id ? ' selected' : ''),
-      },
-        e('div', { className: 'atlas-card-head' }, e('div', { className: 'atlas-card-title' }, flow.name || flow.id)),
-        renderIdRow(flow.id),
-        flow.trigger && e('div', { className: 'atlas-card-block' },
-          e('div', { className: 'atlas-card-label' }, 'Trigger'),
-          e('div', null, flow.trigger)
-        ),
-        e('div', { className: 'atlas-card-block' },
-          e('div', { className: 'atlas-card-label' }, 'Route'),
-          renderLinkedChips([flow.fromSurfaceId, flow.toSurfaceId].filter(Boolean))
-        )
-      );
-
-      const renderGallery = (items, preview) => e('div', { className: 'atlas-gallery-grid' },
-        (preview ? items.slice(0, 4) : items).map(item => e('figure', { key: item.relPath, className: 'atlas-gallery-item' },
-          e('img', {
-            src: item.src,
-            alt: item.surfaceNames.join(', ') + ' screenshot',
-            loading: 'lazy',
-            decoding: 'async',
-            onClick: () => openLightbox(item.relPath),
-            title: 'Open in screenshot viewer',
-          }),
-          e('figcaption', { className: 'atlas-gallery-caption' },
-            e('span', { className: 'atlas-gallery-name' }, item.surfaceNames.join(', ')),
-            renderLinkedChips(item.surfaceIds)
-          )
-        ))
-      );
-
-      let viewBody;
-      if (loading) {
-        viewBody = e('div', { className: 'atlas-empty' }, 'Loading UI Atlas...');
-      } else if (error) {
-        viewBody = e('div', { className: 'atlas-empty atlas-error' }, 'Error: ' + error);
-      } else if (activeView === 'overview') {
-        viewBody = e('div', { className: 'atlas-view-body atlas-dashboard' },
-          e('div', { className: 'atlas-metric-grid' },
-            [
-              ['Surfaces', graphSurfaces.length, 'surfaces'],
-              ['Entities', graphEntities.length, 'entities'],
-              ['Flows', graphFlows.length, 'flows'],
-              ['Screenshots', screenshotItems.length, 'gallery'],
-            ].map(([label, value, view]) => e('button', { key: label, className: 'atlas-metric', onClick: () => changeView(view) },
-                e('div', { className: 'atlas-metric-value' }, value),
-                e('div', { className: 'atlas-metric-label' }, label + ' — open')
-              ))
-          ),
-          e('section', { className: 'atlas-section' },
-            e('div', { className: 'atlas-section-head' },
-              e('div', { className: 'atlas-section-title' }, 'Evidence coverage'),
-              e('div', { className: 'atlas-section-meta' }, graphVerified + '/' + graphSurfaces.length + ' verified')
-            ),
-            e('div', { className: 'atlas-section-content' },
-              coveragePercent + '% of catalogued surfaces have verified evidence.',
-              e('div', { className: 'atlas-progress', role: 'progressbar', 'aria-valuenow': coveragePercent, 'aria-valuemin': 0, 'aria-valuemax': 100 },
-                e('div', { className: 'atlas-progress-fill', style: { width: coveragePercent + '%' } })
-              ),
-              qaTouchedCount > 0 && e('div', { style: { marginTop: 6 } }, qaTouchedCount + ' surfaces have recent evidence-backed QA coverage.')
-            )
-          ),
-          e('section', { className: 'atlas-section' },
-            e('div', { className: 'atlas-section-head' },
-              e('div', { className: 'atlas-section-title' }, 'Priority surfaces'),
-              e('div', { className: 'atlas-section-meta' }, riskySurfaces.length + ' destructive or error-related')
-            ),
-            e('div', { className: 'atlas-section-content' },
-              riskySurfaces.length
-                ? e(React.Fragment, null,
-                    renderLinkedChips(riskySurfaces.slice(0, 8).map(surface => surface.id)),
-                    e('button', { className: 'atlas-icon-btn', style: { marginTop: 7 }, onClick: () => changeView('surfaces') }, 'Review all surfaces')
-                  )
-                : 'No high-risk traits were detected in the current graph.'
-            )
-          ),
-          e('section', { className: 'atlas-section' },
-            e('div', { className: 'atlas-section-head' },
-              e('div', { className: 'atlas-section-title' }, 'Screenshot evidence'),
-              e('button', { className: 'atlas-icon-btn', onClick: () => changeView('gallery') }, 'View all ' + screenshotItems.length)
-            ),
-            e('div', { className: 'atlas-section-content' }, screenshotItems.length ? renderGallery(screenshotItems, true) : 'No graph-connected screenshots were found.')
-          ),
-          e('section', { className: 'atlas-section' },
-            e('div', { className: 'atlas-section-head' }, e('div', { className: 'atlas-section-title' }, 'Ask this Atlas')),
-            e('div', { className: 'atlas-section-content' },
-              'Ask impact, coverage, and relationship questions. Answers are checked against exact published surface, entity, and flow IDs.',
-              e('div', { style: { marginTop: 7 } }, e('button', { className: 'atlas-ask-submit', onClick: () => changeView('ask') }, 'Open Ask Atlas'))
-            )
-          )
-        );
-      } else if (activeView === 'surfaces') {
-        viewBody = e('div', { className: 'atlas-view-body' },
-          filteredSurfaces.length
-            ? e('div', { className: 'atlas-card-grid' }, filteredSurfaces.map(renderSurfaceCard))
-            : e('div', { className: 'atlas-empty-view' }, 'No surfaces match the active search and filters.')
-        );
-      } else if (activeView === 'entities') {
-        viewBody = e('div', { className: 'atlas-view-body' },
-          filteredEntities.length
-            ? e('div', { className: 'atlas-card-grid' }, filteredEntities.map(renderEntityCard))
-            : e('div', { className: 'atlas-empty-view' }, 'No entities match this search.')
-        );
-      } else if (activeView === 'flows') {
-        viewBody = e('div', { className: 'atlas-view-body' },
-          filteredFlows.length
-            ? e('div', { className: 'atlas-card-grid' }, filteredFlows.map(renderFlowCard))
-            : e('div', { className: 'atlas-empty-view' }, 'No flows match this search.')
-        );
-      } else if (activeView === 'findings') {
-        const findings = [
-          ['Observed inconsistencies', observedFindings],
-          ['Open questions', openQuestions],
-          ['Changes since last scan', changeFindings || changelog],
-        ];
-        viewBody = e('div', { className: 'atlas-view-body atlas-findings-stack' },
-          findings.map(([title, markdown]) => e('section', { key: title, className: 'atlas-section' },
-            e('div', { className: 'atlas-section-head' }, e('div', { className: 'atlas-section-title' }, title)),
-            e('div', { className: 'atlas-section-content' },
-              markdown ? e(MarkdownContent, { content: markdown }) : 'No findings recorded in this section.'
-            )
-          ))
-        );
-      } else if (activeView === 'gallery') {
-        viewBody = e('div', { className: 'atlas-view-body' },
-          filteredScreenshotItems.length
-            ? renderGallery(filteredScreenshotItems, false)
-            : e('div', { className: 'atlas-empty-view' }, 'No screenshot evidence matches the active search and filters.')
-        );
-      } else if (activeView === 'ask') {
-        const askSuggestions = [
-          'Which destructive surfaces should QA prioritize?',
-          'What changed in the latest Atlas scan?',
-          'Which entities appear across the most surfaces?',
-        ];
-        viewBody = e('div', { className: 'atlas-view-body atlas-ask' },
-          e('div', { className: 'atlas-ask-toolbar' },
-            e('div', { className: 'atlas-ask-heading' },
-              e('div', { className: 'atlas-ask-title' }, 'Ask Atlas'),
-              e('div', { className: 'atlas-ask-subtitle' }, 'Question the current published UI map. Every answer must resolve to IDs that actually exist in atlas.json.')
-            ),
-            !askComposerOpen && e('button', { className: 'atlas-ask-submit', onClick: () => setAskComposerOpen(true) }, 'Ask another question')
-          ),
-          e('div', { className: 'atlas-ask-trust-row', 'aria-label': 'Ask Atlas safeguards' },
-            e('span', { className: 'atlas-ask-trust' }, 'Read-only'),
-            e('span', { className: 'atlas-ask-trust' }, 'Published snapshot'),
-            e('span', { className: 'atlas-ask-trust' }, 'Exact-ID validation')
-          ),
-          askComposerOpen && e('div', { className: 'atlas-ask-composer' },
-            e('div', { className: 'atlas-ask-intro' },
-              'A temporary GPT-5.6 Sol xhigh analyst reads only this workspace\'s Atlas. It cannot edit the application or invent citations.'
-            ),
-            e('form', { className: 'atlas-ask-form', onSubmit: askAtlas, 'aria-busy': askBusy },
-              e('textarea', {
-                className: 'atlas-ask-input',
-                value: askQuestion,
-                onChange: event => setAskQuestion(event.target.value),
-                maxLength: 2000,
-                disabled: askBusy,
-                autoFocus: true,
-                placeholder: 'Ask about surfaces, entities, flows, risk, or QA coverage...',
-              }),
-              e('div', { className: 'atlas-ask-actions' },
-                e('button', { className: 'atlas-ask-submit', type: 'submit', disabled: askBusy || !askQuestion.trim() }, askBusy ? 'Analyzing...' : 'Ask Atlas'),
-                e('span', { className: 'atlas-ask-meta' }, askQuestion.length + '/2000')
-              )
-            ),
-            !askBusy && !askQuestion && e('div', { className: 'atlas-ask-suggestions', 'aria-label': 'Suggested questions' },
-              askSuggestions.map(question => e('button', {
-                key: question,
-                className: 'atlas-ask-suggestion',
-                onClick: () => setAskQuestion(question),
-              }, question))
-            )
-          ),
-          askBusy && e('div', { className: 'atlas-ask-progress', role: 'status', 'aria-live': 'polite' },
-            e('span', { className: 'atlas-ask-spinner', 'aria-hidden': true }),
-            e('div', null,
-              e('div', { className: 'atlas-ask-progress-title' }, 'Analyzing the published Atlas'),
-              e('div', { className: 'atlas-ask-progress-detail' }, 'Reading the graph, grounding claims in exact IDs, and validating the answer. This can take a few minutes; keep this tab open.')
-            )
-          ),
-          askError && e('div', { className: 'atlas-ask-error' }, askError),
-          askHistory.length > 0 && e('div', { className: 'atlas-ask-results-head' },
-            e('span', { className: 'atlas-ask-results-title' }, 'Grounded answers'),
-            e('span', { className: 'atlas-ask-results-count' }, askHistory.length + ' saved in this browser')
-          ),
-          askHistory.map((answer, index) => e('article', { key: answer.askedAt || index, className: 'atlas-answer' },
-            e('div', { className: 'atlas-answer-head' },
-              e('span', { className: 'atlas-answer-status' }, 'Grounded answer'),
-              answer.askedAt && e('span', null, new Date(answer.askedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })),
-              e('span', { className: 'atlas-answer-model' }, answer.model === 'gpt-5.6-sol' ? 'GPT-5.6 Sol · ' + (answer.reasoningLevel || 'xhigh') : (answer.model || 'Atlas Analyst')),
-              e('button', {
-                className: 'atlas-icon-btn',
-                onClick: () => copyAtlasText(answer.answer || '', 'answer:' + (answer.askedAt || index)),
-              }, copiedAtlasValue === 'answer:' + (answer.askedAt || index) ? 'Copied' : 'Copy')
-            ),
-            e('div', { className: 'atlas-answer-question' },
-              e('span', { className: 'atlas-answer-label' }, 'Question'),
-              answer.question
-            ),
-            e('div', { className: 'atlas-answer-citations' },
-              e('span', { className: 'atlas-answer-label' }, 'Atlas citations (' + atlasArray(answer.citations).length + ')'),
-              renderLinkedChips(atlasArray(answer.citations))
-            ),
-            e('div', { className: 'atlas-answer-body' },
-              e('span', { className: 'atlas-answer-label' }, 'Answer'),
-              e(MarkdownContent, { content: answer.answer || '' })
-            )
-          )),
-          !askBusy && !askHistory.length && e('div', { className: 'atlas-empty-view' },
-            e('div', { style: { color: 'var(--text-secondary)', marginBottom: 4 } }, 'No grounded answers yet.'),
-            e('div', null, 'Ask a question above or choose a suggested starting point.')
-          )
-        );
-      } else {
-        viewBody = e(React.Fragment, null,
-          tocItems.length > 0 && !query && e('div', { className: 'atlas-toc' + (tocOpen ? '' : ' collapsed') },
-            e('button', { className: 'atlas-toc-header', type: 'button', onClick: toggleToc, 'aria-expanded': tocOpen },
-              e('span', { className: 'atlas-toc-chevron' }, tocOpen ? 'v' : '>'),
-              e('span', null, 'Contents (' + tocItems.length + ')')
-            ),
-            tocOpen && e('div', { className: 'atlas-toc-list' },
-              tocItems.map(heading => e('button', {
-                key: heading.slug,
-                className: 'atlas-toc-link',
-                onClick: () => scrollToSlug(heading.slug),
-                title: heading.text,
-              }, heading.text))
-            )
-          ),
-          rewritten && e('div', {
-            className: 'atlas-body',
-            ref: bodyRef,
-            onClick: handleAtlasImageClick,
-            onKeyDown: handleAtlasImageKeyDown,
-          }, e(MarkdownContent, { content: filtered || anchored }))
-        );
-      }
-
-      const searchViews = ['surfaces', 'entities', 'flows', 'gallery', 'document'];
-      const showFilters = activeView === 'surfaces' || activeView === 'gallery';
-
-      return e('div', { className: 'atlas-panel' },
-        e('div', { className: 'atlas-header' },
-          e('div', { className: 'atlas-header-top' },
-            e('div', { className: 'atlas-header-main' },
-              e('div', { className: 'atlas-title' }, '🗺️ UI Atlas — ' + activeWorkspace.name),
-              e('div', { className: 'atlas-status atlas-status-' + ageBucket },
-                'Last scan ' + fmtAgo(ageMs) + (ageBucket === 'stale' ? ' · stale' : '')
-              )
-            ),
-            e('div', { className: 'atlas-header-actions' },
-              !showRunBanner && e('button', {
-                className: 'atlas-rescan-btn',
-                onClick: () => { if (window.confirm(ATLAS_RESCAN_CONFIRMATION)) onRescanAtlas(wsId); },
-                title: 'Build a validated replacement while keeping the current Atlas available',
-              }, 'Update Atlas')
-            )
-          )
-        ),
-        runBanner,
-        activeView !== 'overview' && activeView !== 'ask' && e('div', { className: 'atlas-coverage-strip' },
-          coverageBits.map((bit, index) => e('span', { key: index, className: 'atlas-coverage-pill' }, bit))
-        ),
-        e('nav', { className: 'atlas-view-tabs', 'aria-label': 'UI Atlas views' },
-          ATLAS_VIEW_TABS.map(([id, label]) => e('button', {
-            key: id,
-            className: 'atlas-view-tab' + (activeView === id ? ' active' : ''),
-            onClick: () => changeView(id),
-            'aria-current': activeView === id ? 'page' : undefined,
-          }, label))
-        ),
-        searchViews.includes(activeView) && e('div', { className: 'atlas-search-row' },
-          e('input', {
-            type: 'search',
-            className: 'atlas-search',
-            placeholder: activeView === 'document' ? 'Search the full Atlas document...' : 'Search ' + activeView + '...',
-            value: query,
-            onChange: event => setQuery(event.target.value),
-          }),
-          query && e('button', { className: 'atlas-search-clear', onClick: () => setQuery(''), 'aria-label': 'Clear search' }, '×')
-        ),
-        showFilters && e('div', { className: 'atlas-filter-strip' },
-          e('span', { className: 'atlas-filter-label' }, 'Filters'),
-          ATLAS_SURFACE_FILTERS.map(([id, label]) => e('button', {
-            key: id,
-            className: 'atlas-filter-chip' + (activeFilters.includes(id) ? ' active' : ''),
-            onClick: () => toggleFilter(id),
-            'aria-pressed': activeFilters.includes(id),
-          }, label)),
-          activeFilters.length > 0 && e('button', { className: 'atlas-filter-chip', onClick: () => setActiveFilters([]) }, 'Clear')
-        ),
-        viewBody,
-        lightboxItem && e('div', {
-          className: 'atlas-lightbox',
-          role: 'presentation',
-          onClick: event => { if (event.target === event.currentTarget) setLightboxIndex(null); },
-        }, e('div', { className: 'atlas-lightbox-dialog', role: 'dialog', 'aria-modal': true, 'aria-label': lightboxItem.surfaceNames.join(', ') + ' screenshot' },
-          e('div', { className: 'atlas-lightbox-head' },
-            e('div', { className: 'atlas-lightbox-title' }, lightboxItem.surfaceNames.join(', ')),
-            e('button', { className: 'atlas-lightbox-button', onClick: () => window.open(lightboxItem.src, '_blank', 'noopener,noreferrer') }, 'Open in new tab'),
-            e('button', { className: 'atlas-lightbox-button', onClick: () => setLightboxIndex(null), 'aria-label': 'Close screenshot viewer' }, 'Close')
-          ),
-          e('div', { className: 'atlas-lightbox-stage' },
-            screenshotItems.length > 1 && e('button', { className: 'atlas-lightbox-nav prev', onClick: () => moveLightbox(-1), 'aria-label': 'Previous screenshot' }, '‹'),
-            e('img', { src: lightboxItem.src, alt: lightboxItem.surfaceNames.join(', ') + ' full-size screenshot' }),
-            screenshotItems.length > 1 && e('button', { className: 'atlas-lightbox-nav next', onClick: () => moveLightbox(1), 'aria-label': 'Next screenshot' }, '›')
-          ),
-          e('div', { className: 'atlas-lightbox-foot' },
-            renderLinkedChips(lightboxItem.surfaceIds),
-            e('span', { className: 'atlas-lightbox-count' }, (lightboxIndex + 1) + ' / ' + screenshotItems.length)
-          )
-        ))
       );
     }
 
@@ -5953,7 +3833,7 @@
       const totalPanels = columns * rows;
 
       // Agents for the active workspace
-      const workspaceAgents = activeWorkspace ? agents.filter(a => a.workspaceId === activeWorkspace.id && !a.hideFromGrid) : [];
+      const workspaceAgents = activeWorkspace ? agents.filter(a => a.workspaceId === activeWorkspace.id) : [];
       const workspaceAgentIds = workspaceAgents.map(a => a.id);
       const workspaceAgentIdSet = new Set(workspaceAgentIds);
       const workspaceAgentIdsKey = workspaceAgentIds.join('|');
@@ -6217,7 +4097,6 @@
       // again collapses the wide panel so agent grids can use the extra width.
       const tabs = [
         { id: 'agents', icon: ICONS.agents, label: 'Workspaces' },
-        { id: 'atlas', icon: null, emoji: '🗺️', label: 'UI Atlas' },
         { id: 'commands', icon: ICONS.commands, label: 'Slash Commands' },
         { id: 'emulators', icon: ICONS.emulators, label: 'Emulators' },
         { id: 'tokens', icon: null, emoji: '🪙', label: 'Token Usage' },
@@ -6276,27 +4155,11 @@
             onRenameWorkspace: (id, name) => ws.updateWorkspace(id, { name }),
             onReorderWorkspaces: ws.reorderWorkspaces,
             onUpdateWorkspaceTesting: (id, updates) => ws.updateWorkspace(id, updates),
-            onProvisionAtlas: (workspaceId, projectCwd) => ws.provisionAtlasAgent(workspaceId, projectCwd),
-            onStopAtlas: (agentId) => ws.stopAgent(agentId),
-            onRescanAtlas: (workspaceId) => ws.rescanAtlas(workspaceId),
-            onResumeAtlas: (workspaceId) => ws.resumeAtlas(workspaceId),
-            onDiscardAtlasCandidate: (workspaceId) => ws.discardAtlasCandidate(workspaceId),
-            onOpenAtlasViewer: (workspaceId) => openSidebarTab('atlas'),
-            qaLiveShots: ws.qaLiveShots,
             onNewAgent: () => { setEditingAgent(null); setShowModal(true); },
             onEditAgent: (agent) => { setEditingAgent(agent); setShowModal(true); },
             onRemoveAgent: ws.removeAgent,
             statusStartTimes,
             liveTurnState,
-          }),
-          sidebarTab === 'atlas' && e(AtlasPanel, {
-            activeWorkspace,
-            agents,
-            messages,
-            qaLiveShots: ws.qaLiveShots,
-            onRescanAtlas: ws.rescanAtlas,
-            onResumeAtlas: ws.resumeAtlas,
-            onDiscardAtlasCandidate: ws.discardAtlasCandidate,
           }),
           sidebarTab === 'commands' && e(CommandsPanel, { commands: SLASH_COMMANDS }),
           sidebarTab === 'emulators' && e(EmulatorsPanel, { settings, onUpdateSettings: ws.updateSettings }),
@@ -6353,13 +4216,6 @@
                   terminals,
                   terminalOutput,
                   workspace: activeWorkspace,
-                  qaRuns: activeWorkspace ? (activeWorkspace.qaRuns || []).filter(run => run.sourceAgentId === agent.id) : [],
-                  qaLiveShots: activeWorkspace ? (ws.qaLiveShots[activeWorkspace.id] || []) : [],
-                  qaHasUnread: !!ws.qaUnread[agent.id],
-                  onQaSend: ws.sendQaMessage,
-                  onQaAbort: ws.abortQaTest,
-                  onQaHandoff: ws.handoffQaRun,
-                  onClearQaUnread: ws.clearQaUnread,
                   onSendMessage: (content) => ws.sendMessage(agent.id, content),
                   onSendImages: ws.sendImages,
                   authRecoveries: (ws.authRecoveries || []).filter(item => item.agentId === agent.id),
@@ -6409,13 +4265,6 @@
                   terminals,
                   terminalOutput,
                   workspace: activeWorkspace,
-                  qaRuns: activeWorkspace ? (activeWorkspace.qaRuns || []).filter(run => run.sourceAgentId === agent.id) : [],
-                  qaLiveShots: activeWorkspace ? (ws.qaLiveShots[activeWorkspace.id] || []) : [],
-                  qaHasUnread: !!ws.qaUnread[agent.id],
-                  onQaSend: ws.sendQaMessage,
-                  onQaAbort: ws.abortQaTest,
-                  onQaHandoff: ws.handoffQaRun,
-                  onClearQaUnread: ws.clearQaUnread,
                   onSendMessage: (content) => ws.sendMessage(agent.id, content),
                   onSendImages: ws.sendImages,
                   authRecoveries: (ws.authRecoveries || []).filter(item => item.agentId === agent.id),
