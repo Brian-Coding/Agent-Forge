@@ -5,12 +5,11 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { FSWatcher } from 'fs';
 import { agentService } from './agent.service';
-import { browserService } from './browser.service';
+import { clients } from '../broadcast';
 import {
   classifyWatchedPath,
   createProjectWatcherHub,
   isPathInsideRoot,
-  isRebuildTriggerPath,
   projectWatcherHub,
   shouldIgnoreWatchedPath,
 } from './project-watcher.service';
@@ -62,9 +61,7 @@ test('ignore policy keeps generated, lock, and artifact paths out of source batc
   expect(shouldIgnoreWatchedPath('dist/bundle.js')).toBe(true);
   expect(shouldIgnoreWatchedPath('owned-processes.json')).toBe(true);
   expect(classifyWatchedPath('screenshots/qa.png')).toBe('artifact');
-  expect(isRebuildTriggerPath('src/app.ts')).toBe(true);
-  expect(isRebuildTriggerPath('.plans/active.md')).toBe(false);
-  expect(isRebuildTriggerPath('screenshots/qa.png')).toBe(false);
+  expect(classifyWatchedPath('src/app.ts')).toBe('source');
 });
 
 test('three agents sharing one project create one source watcher and one plan watcher', () => {
@@ -299,14 +296,17 @@ test('five agents across two real roots share two source watchers and two plan w
   }
 });
 
-test('a real source change notifies the browser worker readiness path', async () => {
+test('a real source change broadcasts file_changed for the subscribed agent', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'af-watch-ready-'));
   const id = 'watch-ready-agent';
   const notified: string[] = [];
-  const originalNotify = browserService.notifyFileChanged;
+  const fakeClient = { send: (data: string) => {
+    const message = JSON.parse(data);
+    if (message.type === 'file_changed') notified.push(message.agentId);
+  }, close() {} } as any;
+  clients.add(fakeClient);
   const originalSave = persistenceService.save;
   const originalSaveNow = persistenceService.saveNow;
-  browserService.notifyFileChanged = async workspaceId => { notified.push(workspaceId); };
   persistenceService.save = () => {};
   persistenceService.saveNow = async () => {};
   try {
@@ -326,10 +326,10 @@ test('a real source change notifies the browser worker readiness path', async ()
       sharedContext: '',
     });
     await writeFile(join(directory, 'ready-signal.ts'), 'export {}\n');
-    const seen = await waitFor(() => notified, value => value.includes('workspace-ready'), 3_000);
-    expect(seen).toContain('workspace-ready');
+    const seen = await waitFor(() => notified, value => value.includes(id), 3_000);
+    expect(seen).toContain(id);
   } finally {
-    browserService.notifyFileChanged = originalNotify;
+    clients.delete(fakeClient);
     persistenceService.save = originalSave;
     persistenceService.saveNow = originalSaveNow;
     if (agentService.getAgent(id)) await agentService.removeAgent(id).catch(() => false);

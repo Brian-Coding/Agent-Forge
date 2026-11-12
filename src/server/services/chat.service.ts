@@ -202,7 +202,6 @@ function persistAssistantResult(
     content,
     undefined,
     undefined,
-    undefined,
     turn.provider,
     turn.modelRan || turn.resolvedModel,
   );
@@ -477,7 +476,7 @@ function sniffPlanWrite(agentId: string, toolName: string, input: unknown): void
 
 // --- Run one turn -----------------------------------------------------------
 
-async function runChatTurn(agentId: string, content: string, source?: 'qa', options: ChatTurnOptions = {}): Promise<void> {
+async function runChatTurn(agentId: string, content: string, options: ChatTurnOptions = {}): Promise<void> {
   const info = agentService.getAgent(agentId);
   if (!info) {
     console.warn(`[chat] sendMessage: agent not found ${agentId}`);
@@ -508,7 +507,6 @@ async function runChatTurn(agentId: string, content: string, source?: 'qa', opti
     options.displayContent ?? content,
     undefined,
     undefined,
-    source,
     undefined,
     undefined,
     options.imageAttachments,
@@ -887,7 +885,7 @@ export const chatService = {
    * Serializes per-agent via the sendLocks chain so concurrent calls don't
    * interleave.
    */
-  async sendMessage(agentId: string, content: string, source?: 'qa', options: ChatTurnOptions = {}): Promise<void> {
+  async sendMessage(agentId: string, content: string, options: ChatTurnOptions = {}): Promise<void> {
     // Capture the epoch at enqueue time. If resetLock() bumps it while this
     // send waits in the queue (user hit Stop), the send no-ops on dequeue.
     const epochAtEnqueue = turnEpochs.get(agentId) ?? 0;
@@ -896,7 +894,7 @@ export const chatService = {
         console.warn(`[chat] dropping queued message for ${agentId} — agent was stopped while it waited`);
         return Promise.resolve();
       }
-      return runChatTurn(agentId, content, source, options);
+      return runChatTurn(agentId, content, options);
     };
     const prev = sendLocks.get(agentId) ?? Promise.resolve();
     const execution = prev.then(runIfCurrent, runIfCurrent);

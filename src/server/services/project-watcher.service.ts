@@ -96,10 +96,6 @@ export function shouldIgnoreWatchedPath(relativePath: string): boolean {
   return classifyWatchedPath(relativePath) !== 'source';
 }
 
-export function isRebuildTriggerPath(relativePath: string): boolean {
-  return classifyWatchedPath(relativePath) === 'source';
-}
-
 export function canonicalizeProjectRoot(
   cwd: string,
   options: { realpath?: (path: string) => string; platform?: NodeJS.Platform } = {},

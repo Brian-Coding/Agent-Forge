@@ -25,82 +25,6 @@ export interface AgentTurnOutcome {
  */
 export type AgentProvider = 'claude' | 'codex';
 
-export type AtlasRunStatus = 'running' | 'validating' | 'paused' | 'failed' | 'completed' | 'cancelled';
-
-export interface AtlasRunInfo {
-  id: string;
-  mode: 'build' | 'rescan';
-  status: AtlasRunStatus;
-  candidateRelPath: string;
-  browserSessionId: string;
-  createdAt: number;
-  startedAt: number;
-  finishedAt?: number;
-  lastActivityAt: number;
-  phase?: string;
-  validationErrors?: string[];
-  error?: string;
-  surfaceCount?: number;
-  entityCount?: number;
-  verifiedSurfaceCount?: number;
-  resumeCount?: number;
-}
-
-export type QaVerdict = 'pass' | 'warnings' | 'fail' | 'inconclusive';
-export type QaRunStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
-export type QaAssertionStatus = 'passed' | 'failed' | 'warning' | 'not_run';
-
-export interface QaAssertionInfo {
-  id: string;
-  name: string;
-  status: QaAssertionStatus;
-  expected?: string;
-  observed?: string;
-  evidenceIds: string[];
-  atlasSurfaceIds?: string[];
-}
-
-export interface QaEvidenceInfo {
-  id: string;
-  kind: 'screenshot' | 'console' | 'network' | 'observation';
-  label: string;
-  ref?: string;
-  detail?: string;
-}
-
-export interface QaFindingInfo {
-  id: string;
-  severity: 'critical' | 'major' | 'minor' | 'note';
-  title: string;
-  details: string;
-  evidenceIds: string[];
-  atlasSurfaceIds?: string[];
-}
-
-export interface QaRunInfo {
-  id: string;
-  sourceAgentId: string;
-  prompt: string;
-  status: QaRunStatus;
-  browserSessionId: string;
-  createdAt: number;
-  startedAt?: number;
-  finishedAt?: number;
-  rerunOf?: string;
-  verdict?: QaVerdict;
-  summary?: string;
-  report?: string;
-  assertions?: QaAssertionInfo[];
-  evidence?: QaEvidenceInfo[];
-  findings?: QaFindingInfo[];
-  validationErrors?: string[];
-  error?: string;
-  handoffStartedAt?: number;
-  handedOffAt?: number;
-  handoffError?: string;
-  usage?: { inputTokens: number; outputTokens: number; costUsd: number };
-}
-
 export interface WorkspaceInfo {
   id: string;
   name: string;
@@ -111,15 +35,7 @@ export interface WorkspaceInfo {
   selectedAgentIds: string[];
   lockedAgentIds: string[];    // Agents locked to their current grid slot
   createdAt: number;
-  testUrl?: string;            // URL the QA agent navigates to (e.g. http://localhost:5173)
-  googleDocsTrackerEnabled?: boolean; // Opt-in: expose the configured Google Docs tracker to agents in this workspace.
-  qaAgentId?: string;          // ID of the QA testing agent provisioned for this workspace (set lazily on first QA chat send)
-  qaRuns?: QaRunInfo[];        // Persisted structured QA history, capped per workspace.
-  atlasAgentId?: string;       // ID of the UI Atlas agent provisioned for this workspace (explicit user action via the "Create UI Atlas Agent" button)
-  atlasProjectCwd?: string;    // Project directory the Atlas agent reads from (and writes docs/ui-atlas/ into). Persisted so re-scans don't re-prompt.
-  atlasLastScanAt?: number;    // Timestamp of the last validated + published Atlas (never inferred from agent idle).
-  atlasRun?: AtlasRunInfo;     // Current/recent transactional candidate run. Partial runs remain resumable.
-  qaSurfaceVerifications?: Record<string, number>; // surface slug -> last QA-verification timestamp. Stamped when a QA report references surface.<slug>.
+  testUrl?: string;            // The workspace's app URL (e.g. http://localhost:5173); linked in the sidebar and used to label its port
 }
 
 export interface AgentInfo {
@@ -135,7 +51,6 @@ export interface AgentInfo {
   lastTurnOutcome?: AgentTurnOutcome | null;
   createdAt: number;
   workspaceId: string;        // Workspace this agent belongs to
-  hideFromGrid?: boolean;     // True for special-purpose agents (UI Atlas, QA Tester) that shouldn't take grid slots or appear in chip lists
   // Provider / model selection (hot-swappable per agent, per the inline dropdowns under each chat input)
   provider?: AgentProvider;   // Defaults to 'claude' when absent (backward compat with pre-rebuild data.json)
   model?: string;             // Provider-scoped model id; null → adapter default
@@ -294,7 +209,6 @@ export interface ChatMessage {
   imageData?: string;         // Base64 encoded image data
   imageMimeType?: string;     // e.g. 'image/png', 'image/jpeg'
   imageAttachments?: ChatImageAttachment[]; // Stable local files; avoids base64 payload/history bloat for multi-image turns
-  source?: 'qa';              // QA-originated message (for visual styling)
   provider?: AgentProvider;   // Which provider produced this turn (assistant messages only). Stamped at turn-finalize. Legacy messages without this field display as 'Claude' for backward compat.
   model?: string;             // Which model actually produced this turn when the provider reports it.
 }
@@ -608,19 +522,10 @@ export type ClientMessage =
   // Workspaces
   | { type: 'get_workspaces' }
   | { type: 'create_workspace'; name: string; cwd: string }
-  | { type: 'update_workspace'; id: string; name?: string; gridColumns?: number; gridRows?: number; selectedAgentIds?: string[]; lockedAgentIds?: string[]; testUrl?: string; googleDocsTrackerEnabled?: boolean }
+  | { type: 'update_workspace'; id: string; name?: string; gridColumns?: number; gridRows?: number; selectedAgentIds?: string[]; lockedAgentIds?: string[]; testUrl?: string }
   | { type: 'reorder_workspaces'; orderedIds: string[] }
   | { type: 'delete_workspace'; id: string }
   | { type: 'set_active_workspace'; id: string }
-  // QA testing
-  | { type: 'send_qa_message'; workspaceId: string; sourceAgentId: string; content: string; rerunOf?: string }
-  | { type: 'abort_qa_test'; workspaceId: string }
-  | { type: 'handoff_qa_run'; workspaceId: string; runId: string }
-  // UI Atlas
-  | { type: 'provision_atlas_agent'; workspaceId: string; projectCwd: string }
-  | { type: 'rescan_atlas'; workspaceId: string }
-  | { type: 'resume_atlas'; workspaceId: string }
-  | { type: 'discard_atlas_candidate'; workspaceId: string }
   // Terminals
   | { type: 'create_terminal'; agentId: string; command: string }
   | { type: 'kill_terminal'; id: string }
@@ -673,10 +578,6 @@ export type ServerMessage =
   | { type: 'workspace_created'; workspace: WorkspaceInfo }
   | { type: 'workspace_updated'; workspace: WorkspaceInfo }
   | { type: 'workspace_deleted'; id: string }
-  // QA testing
-  | { type: 'qa_results_ready'; workspaceId: string; sourceAgentId: string; runId: string }
-  | { type: 'qa_screenshot_taken'; workspaceId: string; path: string; timestamp: number; browserSessionId?: string }
-  | { type: 'qa_stuck_warning'; workspaceId: string; endpoint: string; repeatCount: number; argsPreview: string }
   // Terminals
   | { type: 'terminals_list'; terminals: TerminalSession[] }
   | { type: 'terminal_created'; terminal: TerminalSession }

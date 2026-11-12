@@ -5,11 +5,6 @@ import { agentService } from './services/agent.service';
 import { settingsService } from './services/settings.service';
 import { workspaceService } from './services/workspace.service';
 import { terminalService } from './services/terminal.service';
-// Side-effect imports — qa.service and atlas.service register their agent
-// lifecycle listeners at module load. Importing them here guarantees the
-// listeners are wired before the first WS message arrives.
-import { qaService } from './services/qa.service';
-import { atlasService } from './services/atlas.service';
 import { chatService } from './services/chat.service';
 import { usageService } from './services/usage.service';
 import { limitsService } from './services/limits.service';
@@ -149,7 +144,7 @@ async function handleMessage(ws: ServerWebSocket<unknown>, message: ClientMessag
         break;
       }
       try {
-        await chatService.sendMessage(message.agentId, original.content, undefined, {
+        await chatService.sendMessage(message.agentId, original.content, {
           imageAttachments: original.imageAttachments,
         });
       } catch (e: any) {
@@ -158,92 +153,6 @@ async function handleMessage(ws: ServerWebSocket<unknown>, message: ClientMessag
           message: e?.message || 'Preserved prompt could not be retried',
           agentId: message.agentId,
         });
-      }
-      break;
-    }
-
-    case 'send_qa_message': {
-      try {
-        console.log(`[qa] send_qa_message ws=${message.workspaceId} src=${message.sourceAgentId} content="${message.content.slice(0, 80)}..."`);
-        await qaService.sendQaMessage(message.workspaceId, message.sourceAgentId, message.content, message.rerunOf);
-        console.log(`[qa] send_qa_message dispatched ok`);
-      } catch (e: any) {
-        console.error(`[qa] send_qa_message failed:`, e);
-        sendTo(ws, { type: 'error', message: e?.message || 'QA send failed' });
-      }
-      break;
-    }
-
-    case 'abort_qa_test': {
-      try {
-        console.log(`[qa] abort_qa_test ws=${message.workspaceId}`);
-        await qaService.abortQaTest(message.workspaceId);
-      } catch (e: any) {
-        console.error(`[qa] abort_qa_test failed:`, e);
-        sendTo(ws, { type: 'error', message: e?.message || 'QA abort failed' });
-      }
-      break;
-    }
-
-    case 'handoff_qa_run': {
-      try {
-        await qaService.handoffRun(message.workspaceId, message.runId);
-      } catch (e: any) {
-        console.error('[qa] handoff failed:', e);
-        sendTo(ws, { type: 'error', message: e?.message || 'QA handoff failed' });
-      }
-      break;
-    }
-
-    case 'provision_atlas_agent': {
-      try {
-        console.log(`[atlas] provision ws=${message.workspaceId} cwd=${message.projectCwd}`);
-        const created = await atlasService.provisionAtlasAgent(message.workspaceId, message.projectCwd);
-        broadcast({ type: 'agent_created', agent: created });
-        broadcast({ type: 'agents_list', agents: agentService.getAgents() });
-        console.log(`[atlas] agent created id=${created.id}`);
-      } catch (e: any) {
-        console.error(`[atlas] provision failed:`, e);
-        sendTo(ws, { type: 'error', message: e?.message || 'Atlas provisioning failed' });
-      }
-      break;
-    }
-
-    case 'rescan_atlas': {
-      try {
-        console.log(`[atlas] rescan ws=${message.workspaceId}`);
-        const created = await atlasService.rescanAtlas(message.workspaceId);
-        broadcast({ type: 'agent_created', agent: created });
-        broadcast({ type: 'agents_list', agents: agentService.getAgents() });
-        console.log(`[atlas] rescan agent created id=${created.id}`);
-      } catch (e: any) {
-        console.error(`[atlas] rescan failed:`, e);
-        sendTo(ws, { type: 'error', message: e?.message || 'Atlas rescan failed' });
-      }
-      break;
-    }
-
-    case 'resume_atlas': {
-      try {
-        console.log(`[atlas] resume ws=${message.workspaceId}`);
-        const result = await atlasService.resumeAtlas(message.workspaceId);
-        if (result.created) broadcast({ type: 'agent_created', agent: result.agent });
-        broadcast({ type: 'agents_list', agents: agentService.getAgents() });
-      } catch (e: any) {
-        console.error('[atlas] resume failed:', e);
-        sendTo(ws, { type: 'error', message: e?.message || 'Atlas resume failed' });
-      }
-      break;
-    }
-
-    case 'discard_atlas_candidate': {
-      try {
-        console.log(`[atlas] discard candidate ws=${message.workspaceId}`);
-        await atlasService.discardCandidate(message.workspaceId);
-        broadcast({ type: 'agents_list', agents: agentService.getAgents() });
-      } catch (e: any) {
-        console.error('[atlas] discard failed:', e);
-        sendTo(ws, { type: 'error', message: e?.message || 'Atlas candidate discard failed' });
       }
       break;
     }

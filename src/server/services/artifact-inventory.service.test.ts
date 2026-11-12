@@ -12,10 +12,6 @@ import {
 
 test('taxonomy classifies known artifact locations', () => {
   expect(classifyArtifactRelativePath('chat-images/agent/1.png')).toBe('chat-upload-original');
-  expect(classifyArtifactRelativePath('qa/workspace/run/shot.png')).toBe('qa-screenshot');
-  expect(classifyArtifactRelativePath('qa/workspace/run/report.md')).toBe('qa-run-report');
-  expect(classifyArtifactRelativePath('ui-atlas/history/pub.json')).toBe('ui-atlas-history');
-  expect(classifyArtifactRelativePath('docs/.agent-forge-atlas-candidates/run-1/atlas.json')).toBe('ui-atlas-candidate');
   expect(classifyArtifactRelativePath('mystery.bin')).toBe('unknown');
 });
 
@@ -81,47 +77,14 @@ test('created artifacts are appended to a manifest and skipped as inventory nois
   await rm(root, { recursive: true, force: true });
 });
 
-test('reference collection reads messages, QA evidence, and atlas candidates', () => {
+test('reference collection reads message image attachments', () => {
   const refs = collectArtifactReferences({
     messages: [{
       id: 'm1', agentId: 'a', role: 'user', content: '', timestamp: 1,
       imageAttachments: [{ path: 'C:\\img\\one.png', name: 'one.png', mimeType: 'image/png', size: 1 }],
     }],
-    workspaces: [{
-      id: 'w',
-      name: 'W',
-      sortOrder: 0,
-      gridColumns: 2,
-      gridRows: 2,
-      selectedAgentIds: [],
-      lockedAgentIds: [],
-      createdAt: 1,
-      qaRuns: [{
-        id: 'q1',
-        sourceAgentId: 'a',
-        prompt: 'test',
-        status: 'completed',
-        browserSessionId: 'qa-q1',
-        createdAt: 1,
-        evidence: [{ id: 'e1', kind: 'screenshot', label: 'shot', ref: 'C:\\qa\\shot.png' }],
-      }],
-      atlasRun: {
-        id: 'atlas-1',
-        mode: 'build',
-        status: 'completed',
-        candidateRelPath: 'docs/.agent-forge-atlas-candidates/atlas-1',
-        browserSessionId: 'atlas-1',
-        createdAt: 1,
-        startedAt: 1,
-        lastActivityAt: 1,
-      },
-    }],
-  } as any);
-  expect(refs).toEqual([
-    'C:\\img\\one.png',
-    'C:\\qa\\shot.png',
-    'docs/.agent-forge-atlas-candidates/atlas-1',
-  ]);
+  } as any, ['extra/ref.png']);
+  expect(refs).toEqual(['extra/ref.png', 'C:\\img\\one.png']);
 });
 
 test('leases keep files out of the quarantine proposal', async () => {

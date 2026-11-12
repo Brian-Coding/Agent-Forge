@@ -13,7 +13,7 @@ import { broadcast } from '../broadcast';
 import { normalizeSharedProjectContext } from './prompt-builder.service';
 import { observeProviderModel } from './model-catalog.service';
 import { runDurableMutation } from './durable-mutation';
-import { isRebuildTriggerPath, projectWatcherHub } from './project-watcher.service';
+import { projectWatcherHub } from './project-watcher.service';
 import {
   buildExhaustiveImagePrompt,
   storeChatImageBytes,
@@ -85,7 +85,6 @@ export async function terminateTrackedPids(
 }
 
 export interface CreateAgentOptions {
-  hideFromGrid?: boolean;
   provider?: AgentProvider;
   model?: string;
   reasoningLevel?: string;
@@ -103,8 +102,8 @@ function restoreAgentInfo(target: AgentInfo, snapshot: AgentInfo): void {
 }
 
 // --- Lifecycle bus ---
-// Other services (qa.service, atlas.service) subscribe to agent transitions
-// without agent.service needing to import them. Registrations happen at
+// Other services can subscribe to agent transitions without agent.service
+// needing to import them. Registrations happen at
 // each subscriber's module-load time. HMR-safe via globalThis so reloads
 // don't double-register or lose listeners. Listeners run sequentially and
 // their throws are caught + logged so one bad listener can't block others.
@@ -121,13 +120,8 @@ async function notifyLifecycle(kind: 'onIdle' | 'onStop' | 'onRemoved', agentId:
   }
 }
 
-// QA + Atlas state and system-prompt templates moved to:
-//   src/server/services/qa.service.ts
-//   src/server/services/atlas.service.ts
-//   src/server/services/prompts/{qa,atlas}-system-prompt.ts
-// They subscribe to agent lifecycle via agentService.onAgentIdle / onAgentRemoved.
 
-function addMessage(agentId: string, role: ChatMessage['role'], content: string, imageData?: string, imageMimeType?: string, source?: 'qa', provider?: AgentProvider, model?: string, imageAttachments?: readonly ChatImageAttachment[]): ChatMessage {
+function addMessage(agentId: string, role: ChatMessage['role'], content: string, imageData?: string, imageMimeType?: string, provider?: AgentProvider, model?: string, imageAttachments?: readonly ChatImageAttachment[]): ChatMessage {
   const msg: ChatMessage = {
     id: generateId(),
     agentId,
@@ -137,7 +131,6 @@ function addMessage(agentId: string, role: ChatMessage['role'], content: string,
   };
   if (imageData) msg.imageData = imageData;
   if (imageMimeType) msg.imageMimeType = imageMimeType;
-  if (source) msg.source = source;
   if (provider) msg.provider = provider;
   if (model) msg.model = model;
   if (imageAttachments?.length) msg.imageAttachments = [...imageAttachments];
@@ -179,11 +172,6 @@ function startFileWatcher(agentId: string) {
     if (!live) return;
     live.lastFileChange = event.changedRelativePaths;
     broadcast({ type: 'file_changed', agentId, files: event.changedRelativePaths });
-    if (event.changedRelativePaths.some(isRebuildTriggerPath) && live.info.workspaceId) {
-      void import('./browser.service').then(({ browserService }) => {
-        void browserService.notifyFileChanged(live.info.workspaceId);
-      });
-    }
   });
 }
 
@@ -271,13 +259,13 @@ export const agentService = {
   },
 
   /** Internal: append a system message to an agent's chat. Used by qa.service relay path (e.g. screenshot attachments). */
-  addSystemMessage(agentId: string, content: string, imageData?: string, imageMimeType?: string, source?: 'qa'): ChatMessage {
-    return addMessage(agentId, 'system', content, imageData, imageMimeType, source);
+  addSystemMessage(agentId: string, content: string, imageData?: string, imageMimeType?: string): ChatMessage {
+    return addMessage(agentId, 'system', content, imageData, imageMimeType);
   },
 
   /** Internal: append any-role message. Used by chat.service when broadcasting user turns. */
-  appendMessage(agentId: string, role: ChatMessage['role'], content: string, imageData?: string, imageMimeType?: string, source?: 'qa', provider?: AgentProvider, model?: string, imageAttachments?: readonly ChatImageAttachment[]): ChatMessage {
-    return addMessage(agentId, role, content, imageData, imageMimeType, source, provider, model, imageAttachments);
+  appendMessage(agentId: string, role: ChatMessage['role'], content: string, imageData?: string, imageMimeType?: string, provider?: AgentProvider, model?: string, imageAttachments?: readonly ChatImageAttachment[]): ChatMessage {
+    return addMessage(agentId, role, content, imageData, imageMimeType, provider, model, imageAttachments);
   },
 
   /** Internal: set agent status + broadcast agent_updated. No-op if status unchanged. */
@@ -414,20 +402,9 @@ export const agentService = {
       wsId = ws.id;
     }
 
-    // Auto-include the workspace's UI Atlas as a referencePath when one
-    // exists, so every agent in this workspace is atlas-aware. Skip for the
-    // Atlas agent itself (it owns the atlas, doesn't reference it). Skip if
-    // the path already appears in the user-supplied referencePaths.
     const ws = workspaceService.get(wsId);
     const fallbackWorkspaceCwd = ws?.cwd ? undefined : await canonicalWorkspaceDirectory(cwd);
-    const isAtlasAgent = name === 'UI Atlas Agent';
     const finalRefPaths = [...referencePaths];
-    if (!isAtlasAgent && ws?.atlasProjectCwd) {
-      const atlasPath = join(ws.atlasProjectCwd, 'docs', 'ui-atlas');
-      if (existsSync(atlasPath) && !finalRefPaths.includes(atlasPath)) {
-        finalRefPaths.unshift(atlasPath);
-      }
-    }
 
     const provider = opts.provider ?? 'codex';
     const model = resolveAgentModel(provider, opts.model);
@@ -459,7 +436,6 @@ export const agentService = {
         model,
         reasoningLevel,
       };
-      if (opts.hideFromGrid) info.hideFromGrid = true;
 
       const previousSelectedAgentIds = [...targetWorkspace.selectedAgentIds];
       const previousWorkspaceCwd = targetWorkspace.cwd;
@@ -483,7 +459,7 @@ export const agentService = {
       });
 
       try {
-        workspaceService.addAgentToWorkspace(targetWorkspaceId, id, opts.hideFromGrid);
+        workspaceService.addAgentToWorkspace(targetWorkspaceId, id);
         startFileWatcher(id);
         documentService.startPlansWatcher(id, cwd);
         await persistenceService.saveNow();
@@ -831,12 +807,12 @@ export const agentService = {
    * funnel through the same bridge. chat.service owns the per-agent
    * sendLock chain.
    */
-  async sendMessage(agentId: string, content: string, source?: 'qa', options?: ChatTurnOptions): Promise<void> {
+  async sendMessage(agentId: string, content: string, options?: ChatTurnOptions): Promise<void> {
     // Dynamic import to avoid module-load-time circular reference. chat.service
     // imports agent.service, so the top-level import would deadlock; deferring
     // until the first call lets both modules finish loading first.
     const { chatService } = await import('./chat.service');
-    return chatService.sendMessage(agentId, content, source, options);
+    return chatService.sendMessage(agentId, content, options);
   },
 
   async stopAgent(agentId: string, reason: 'user' | 'timeout' | 'system' = 'user'): Promise<boolean> {
@@ -916,7 +892,7 @@ export const agentService = {
       const content = buildExhaustiveImagePrompt(attachments, prompt);
       const displayContent = `[${attachments.length} image${attachments.length === 1 ? '' : 's'} attached at original resolution]`
         + (prompt?.trim() ? `\n${prompt.trim()}` : '');
-      await agentService.sendMessage(agentId, content, undefined, {
+      await agentService.sendMessage(agentId, content, {
         imagePaths: attachments.map(image => image.path),
         imageAttachments: attachments,
         displayContent,

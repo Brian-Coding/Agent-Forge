@@ -123,7 +123,6 @@ export function normalizePersistedData(raw: unknown): PersistedDataNormalization
       totalCostUsd: finiteNonNegative(migrated.totalCostUsd),
       numTurns: finiteNonNegative(migrated.numTurns),
     };
-    if (typeof migrated.hideFromGrid === 'boolean') normalized.hideFromGrid = migrated.hideFromGrid;
     if (migrated.provider === 'claude' || migrated.provider === 'codex') normalized.provider = migrated.provider;
     const model = boundedString(migrated.model, 256, false);
     if (model) normalized.model = model;
@@ -172,7 +171,6 @@ export function normalizePersistedData(raw: unknown): PersistedDataNormalization
       if (attachments.length !== candidate.imageAttachments.length) issue(`messages[${index}].imageAttachments was repaired`);
       if (attachments.length > 0) message.imageAttachments = attachments;
     }
-    if (candidate.source === 'qa') message.source = 'qa';
     if (candidate.provider === 'claude' || candidate.provider === 'codex') message.provider = candidate.provider;
     const messageModel = boundedString(candidate.model, 256, false);
     if (messageModel) message.model = messageModel;

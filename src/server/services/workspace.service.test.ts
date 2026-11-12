@@ -79,7 +79,7 @@ test('workspace mutations restore maps, ordering, settings, and reassignments wh
     await expect(workspaceService.update(first.id, {
       name: 'uncommitted',
       selectedAgentIds: selected,
-      qaSurfaceVerifications: { surface: 123 },
+      testUrl: 'http://localhost:5173',
     })).rejects.toThrow('disk full');
     selected.push('external-mutation');
     expect(first).toEqual(firstBeforeUpdate);
@@ -110,50 +110,37 @@ test('workspace mutations restore maps, ordering, settings, and reassignments wh
   }
 });
 
-test('restart recovery durably finalizes interrupted QA and pauses Atlas exactly once', async () => {
+test('restart migration drops legacy Atlas, QA, and tracker workspace state exactly once', async () => {
   const map: Map<string, WorkspaceInfo> = (globalThis as any).__workspacesMap;
   const originalEntries = [...map.entries()];
   const originalSettings = structuredClone(settingsService.getRef());
   const originalSaveNow = persistenceService.saveNow;
   let saveCalls = 0;
   const now = Date.now();
-  const recovered: any = {
-    ...workspace(`recovery-${randomUUID()}`, 0, now),
-    qaRuns: [{
-      id: 'qa-interrupted',
-      sourceAgentId: 'agent-1',
-      prompt: 'verify',
-      status: 'running',
-      queuedAt: now - 100,
-      startedAt: now - 50,
-      handoffStartedAt: now - 25,
-    }],
-    atlasRun: {
-      id: 'atlas-interrupted',
-      status: 'validating',
-      candidateRelPath: 'docs/.agent-forge-atlas-candidates/atlas-interrupted',
-      startedAt: now - 100,
-    },
+  const legacy: any = {
+    ...workspace(`legacy-features-${randomUUID()}`, 0, now),
+    testUrl: 'http://localhost:5173',
+    googleDocsTrackerEnabled: true,
+    qaAgentId: 'qa-agent',
+    qaRuns: [{ id: 'qa-1', status: 'running' }],
+    qaSurfaceVerifications: { 'surface.home': now },
+    atlasAgentId: 'atlas-agent',
+    atlasProjectCwd: '/tmp/example-project',
+    atlasLastScanAt: now,
+    atlasRun: { id: 'atlas-1', status: 'running' },
   };
   map.clear();
   persistenceService.saveNow = async () => { saveCalls++; };
 
   try {
-    await workspaceService.loadAndMigrate([recovered], {}, [], () => {});
-    expect(recovered.qaRuns[0]).toMatchObject({
-      status: 'failed',
-      verdict: 'inconclusive',
-      error: 'Interrupted by server restart; run it again to obtain a trustworthy result.',
-      handoffError: 'Agent Forge restarted before the QA handoff completed. Try sending it again.',
-    });
-    expect(recovered.qaRuns[0].handoffStartedAt).toBeUndefined();
-    expect(recovered.atlasRun).toMatchObject({
-      status: 'paused',
-      error: 'Agent Forge restarted before this Atlas run completed. Resume to continue from its candidate checkpoint.',
-    });
+    await workspaceService.loadAndMigrate([legacy], {}, [], () => {});
+    for (const key of ['googleDocsTrackerEnabled', 'qaAgentId', 'qaRuns', 'qaSurfaceVerifications', 'atlasAgentId', 'atlasProjectCwd', 'atlasLastScanAt', 'atlasRun']) {
+      expect(key in legacy).toBe(false);
+    }
+    expect(legacy.testUrl).toBe('http://localhost:5173');
     expect(saveCalls).toBe(1);
 
-    await workspaceService.loadAndMigrate([recovered], {}, [], () => {});
+    await workspaceService.loadAndMigrate([legacy], {}, [], () => {});
     expect(saveCalls).toBe(1);
   } finally {
     persistenceService.saveNow = originalSaveNow;
@@ -224,59 +211,5 @@ test('legacy workspaces inherit their primary directory from an assigned agent',
     map.clear();
     for (const [id, value] of originalEntries) map.set(id, value);
     settingsService.load(originalSettings);
-  }
-});
-
-test('restart recovery recognizes a canonical Atlas published before state persistence', async () => {
-  const map: Map<string, WorkspaceInfo> = (globalThis as any).__workspacesMap;
-  const originalEntries = [...map.entries()];
-  const originalSettings = structuredClone(settingsService.getRef());
-  const originalSaveNow = persistenceService.saveNow;
-  const projectRoot = await mkdtemp(join(tmpdir(), 'agent-forge-published-recovery-'));
-  const atlasRoot = join(projectRoot, 'docs', 'ui-atlas');
-  const runId = `published-${randomUUID()}`;
-  const publishedAt = Date.now() - 1_000;
-  let saveCalls = 0;
-  const recovered: any = {
-    ...workspace(`published-workspace-${randomUUID()}`, 0, Date.now()),
-    atlasProjectCwd: projectRoot,
-    atlasRun: {
-      id: runId,
-      mode: 'build',
-      status: 'validating',
-      candidateRelPath: `docs/.agent-forge-atlas-candidates/${runId}`,
-      browserSessionId: `atlas-${runId}`,
-      createdAt: publishedAt - 100,
-      startedAt: publishedAt - 50,
-      lastActivityAt: publishedAt - 25,
-    },
-  };
-  await mkdir(atlasRoot, { recursive: true });
-  await writeFile(join(atlasRoot, 'manifest.json'), JSON.stringify({
-    schemaVersion: 1,
-    atlasSchemaVersion: 1,
-    runId,
-    status: 'complete',
-    generatedAt: new Date(publishedAt).toISOString(),
-  }));
-  map.clear();
-  persistenceService.saveNow = async () => { saveCalls++; };
-
-  try {
-    await workspaceService.loadAndMigrate([recovered], {}, [], () => {});
-    expect(recovered.atlasRun).toMatchObject({
-      id: runId,
-      status: 'completed',
-      phase: 'published',
-      error: undefined,
-    });
-    expect(recovered.atlasLastScanAt).toBe(publishedAt);
-    expect(saveCalls).toBe(1);
-  } finally {
-    persistenceService.saveNow = originalSaveNow;
-    map.clear();
-    for (const [id, value] of originalEntries) map.set(id, value);
-    settingsService.load(originalSettings);
-    await rm(projectRoot, { recursive: true, force: true });
   }
 });

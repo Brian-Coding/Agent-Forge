@@ -128,7 +128,6 @@ test('full server boot recovers state, enforces transport guards, persists a mut
       ...process.env,
       PORT: String(port),
       HOST: '127.0.0.1',
-      BROWSER_HEADLESS: '1',
       AI_HARNESS_CLAUDE_CREDENTIALS_JSON: join(directory, 'missing-claude-credentials.json'),
       AI_HARNESS_CLAUDE_LIMITS_JSON: join(directory, 'missing-claude-limits.json'),
       AI_HARNESS_CODEX_SESSIONS_DIR: join(directory, 'missing-codex-sessions'),
@@ -208,8 +207,10 @@ test('full server boot recovers state, enforces transport guards, persists a mut
 
     const persisted = JSON.parse(await readFile(join(directory, 'data.json'), 'utf8'));
     const recovered = persisted.workspaces.find((workspace: any) => workspace.id === workspaceId);
-    expect(recovered.qaRuns[0]).toMatchObject({ status: 'failed', verdict: 'inconclusive' });
-    expect(recovered.atlasRun).toMatchObject({ status: 'paused' });
+    // Legacy state from features that moved to separate projects is dropped on boot.
+    expect(recovered.qaRuns).toBeUndefined();
+    expect(recovered.atlasRun).toBeUndefined();
+    expect(recovered.googleDocsTrackerEnabled).toBeUndefined();
     expect(persisted.workspaces.some((workspace: any) => workspace.name === 'E2E durable workspace')).toBe(true);
     expect(JSON.parse(await readFile(join(directory, 'pids.json'), 'utf8'))).toEqual([]);
     expect(existsSync(join(directory, 'agent-forge.lock'))).toBe(false);

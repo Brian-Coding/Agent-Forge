@@ -7,9 +7,6 @@ import { workspaceService } from './services/workspace.service';
 import { documentService } from './services/document.service';
 import { agentService, initAgentService } from './services/agent.service';
 import { terminalService } from './services/terminal.service';
-import { browserService } from './services/browser.service';
-import { qaService } from './services/qa.service';
-import { atlasService } from './services/atlas.service';
 import { usageService } from './services/usage.service';
 import { limitsService } from './services/limits.service';
 import { MAX_CHAT_IMAGE_TOTAL_BYTES } from './services/chat-image.service';
@@ -35,22 +32,12 @@ import { handleGetPorts, handleKillPort } from './routes/ports.routes';
 import { handleGitBranch, handleGitDiff } from './routes/git.routes';
 import { handleGetModels } from './routes/models.routes';
 import { handleUsageExport } from './routes/usage.routes';
-import { handleVercelIntegration } from './routes/integrations.routes';
-import {
-  handleGoogleDocsAppend,
-  handleGoogleDocsDocument,
-  handleGoogleDocsIntegration,
-  handleGoogleDocsReplace,
-} from './routes/google-docs.routes';
-import { googleDocsService } from './services/google-docs.service';
 import { handleHarnessInstructions } from './routes/harness.routes';
 import { handleRuntimeHealth } from './routes/health.routes';
 import { captureRuntimeStartup } from './services/runtime-truth';
-import { handleAskAtlas } from './routes/atlas.routes';
 import { handleProjectFile } from './routes/project-file.routes';
 import { handleChatImage, handleChatImageUpload } from './routes/chat-image.routes';
 import { handleListSimulators, handleBootSimulator, handleShutdownSimulator, handleEraseSimulator, handleCleanDerivedData } from './routes/simulator.routes';
-import { handleBrowserNavigate, handleBrowserScreenshot, handleBrowserClick, handleBrowserType, handleBrowserWaitForReady, handleBrowserConsoleGet, handleBrowserConsoleClear, handleBrowserStatus, handleBrowserEvaluate, handleBrowserNetworkGet, handleBrowserNetworkClear, handleBrowserViewport, handleBrowserContextClose, handleQaScreenshot, handleAtlasFile } from './routes/browser.routes';
 
 // --- Process lock --------------------------------------------------------
 // Prevents two agent-forge bun.exe instances from clobbering the same
@@ -139,7 +126,7 @@ async function init() {
 
   // Register the collector before any migration/recovery calls saveNow(). A
   // save made without a collector is intentionally a no-op, which previously
-  // left recovered QA/Atlas states and the default workspace undurable.
+  // left recovered state and the default workspace undurable.
   persistenceService.setBuildPersistedData((): PersistedData => ({
     schemaVersion: PERSISTED_SCHEMA_VERSION,
     agents: agentService.buildPersistedAgents() as any,
@@ -212,9 +199,7 @@ function isRequestAllowed(req: Request): boolean {
 // --- Server bind with port fallback -------------------------------------
 // Try preferredPort first; if Windows has the socket locked (typically an
 // orphan our scan missed, or a non-bun process), walk forward through
-// preferredPort+1..+7 instead of failing startup. agentService.setGuiPort
-// below uses whichever port we actually bound so the QA system prompt
-// references the right URL even on the fallback.
+// preferredPort+1..+7 instead of failing startup.
 function startServer(preferredPort: number) {
   const maxAttempts = 8;
   let lastErr: unknown = null;
@@ -249,12 +234,6 @@ function startServer(preferredPort: number) {
           if (url.pathname === '/api/git-diff' && req.method === 'GET') return handleGitDiff(req);
           if (url.pathname === '/api/models' && req.method === 'GET') return handleGetModels(req);
           if (url.pathname === '/api/usage/export' && req.method === 'GET') return handleUsageExport(req);
-          if (url.pathname === '/api/integrations/vercel' && (req.method === 'GET' || req.method === 'POST')) return handleVercelIntegration(req);
-          if (url.pathname === '/api/integrations/google-docs' && (req.method === 'GET' || req.method === 'POST')) return handleGoogleDocsIntegration(req);
-          if (url.pathname === '/api/google-docs/document' && req.method === 'GET') return handleGoogleDocsDocument();
-          if (url.pathname === '/api/google-docs/append' && req.method === 'POST') return handleGoogleDocsAppend(req, false);
-          if (url.pathname === '/api/google-docs/append-if-absent' && req.method === 'POST') return handleGoogleDocsAppend(req, true);
-          if (url.pathname === '/api/google-docs/replace' && req.method === 'POST') return handleGoogleDocsReplace(req);
           if (url.pathname === '/api/harness/instructions' && req.method === 'GET') return handleHarnessInstructions();
           if (url.pathname === '/api/health' && req.method === 'GET') return handleRuntimeHealth();
           if (url.pathname === '/api/project-file' && req.method === 'GET') return handleProjectFile(req);
@@ -265,22 +244,6 @@ function startServer(preferredPort: number) {
           if (url.pathname === '/api/simulators/shutdown' && req.method === 'POST') return handleShutdownSimulator(req);
           if (url.pathname === '/api/simulators/erase' && req.method === 'POST') return handleEraseSimulator(req);
           if (url.pathname === '/api/simulators/clean-derived-data' && req.method === 'POST') return handleCleanDerivedData(req);
-          if (url.pathname === '/api/browser/navigate' && req.method === 'POST') return handleBrowserNavigate(req);
-          if (url.pathname === '/api/browser/screenshot' && req.method === 'POST') return handleBrowserScreenshot(req);
-          if (url.pathname === '/api/browser/click' && req.method === 'POST') return handleBrowserClick(req);
-          if (url.pathname === '/api/browser/type' && req.method === 'POST') return handleBrowserType(req);
-          if (url.pathname === '/api/browser/wait-for-ready' && req.method === 'POST') return handleBrowserWaitForReady(req);
-          if (url.pathname === '/api/browser/console' && req.method === 'GET') return handleBrowserConsoleGet(req);
-          if (url.pathname === '/api/browser/console/clear' && req.method === 'POST') return handleBrowserConsoleClear(req);
-          if (url.pathname === '/api/browser/status' && req.method === 'GET') return handleBrowserStatus(req);
-          if (url.pathname === '/api/browser/evaluate' && req.method === 'POST') return handleBrowserEvaluate(req);
-          if (url.pathname === '/api/browser/network' && req.method === 'GET') return handleBrowserNetworkGet(req);
-          if (url.pathname === '/api/browser/network/clear' && req.method === 'POST') return handleBrowserNetworkClear(req);
-          if (url.pathname === '/api/browser/viewport' && req.method === 'POST') return handleBrowserViewport(req);
-          if (url.pathname === '/api/browser/context/close' && req.method === 'POST') return handleBrowserContextClose(req);
-          if (url.pathname === '/api/qa/screenshot' && req.method === 'GET') return handleQaScreenshot(req);
-          if (url.pathname === '/api/atlas/file' && req.method === 'GET') return handleAtlasFile(req);
-          if (url.pathname === '/api/atlas/ask' && req.method === 'POST') return handleAskAtlas(req);
 
           return new Response('Not Found', { status: 404 });
         },
@@ -316,11 +279,6 @@ if (server.port !== preferredPort) {
   console.warn(`NOTE: Preferred port ${preferredPort} was busy; bound to ${server.port} instead.`);
 }
 
-// Tell QA + Atlas services the bound port — they substitute {GUI_PORT} into their system prompts
-// at provision time so the spawned agents call back to the same Bun.serve we just bound.
-qaService.setGuiPort(server.port ?? 0);
-atlasService.setGuiPort(server.port ?? 0);
-googleDocsService.setGuiPort(server.port ?? 0);
 // Provider limits: initial read now, then every minute.
 limitsService.start();
 console.log(`Server running at http://localhost:${server.port}`);
@@ -339,7 +297,6 @@ export const shutdown = createShutdownCoordinator({
     const results = await Promise.allSettled([
       agentService.shutdownAll(),
       terminalService.killAll(),
-      browserService.close(),
     ]);
     const failures = results.filter(result => result.status === 'rejected');
     if (failures.length > 0) throw new AggregateError(failures.map(result => (result as PromiseRejectedResult).reason), 'One or more cleanup operations failed');
@@ -348,7 +305,6 @@ export const shutdown = createShutdownCoordinator({
     await Promise.allSettled([
       agentService.killAllProcesses(),
       terminalService.killAll(),
-      browserService.close(),
     ]);
   },
   persistData: () => persistenceService.saveNow(),

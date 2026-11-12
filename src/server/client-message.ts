@@ -276,7 +276,6 @@ export function validateClientMessage(value: unknown): ClientMessage {
         'selectedAgentIds',
         'lockedAgentIds',
         'testUrl',
-        'googleDocsTrackerEnabled',
       ], ['type', 'id']);
       id(message.id, 'id');
       optionalString(message.name, 'name', MAX_NAME_CHARS);
@@ -285,7 +284,6 @@ export function validateClientMessage(value: unknown): ClientMessage {
       optionalSlotIdArray(message.selectedAgentIds, 'selectedAgentIds', MAX_ID_LIST);
       optionalStringArray(message.lockedAgentIds, 'lockedAgentIds', MAX_ID_LIST);
       optionalString(message.testUrl, 'testUrl', 8_192);
-      if (message.googleDocsTrackerEnabled !== undefined) boolean(message.googleDocsTrackerEnabled, 'googleDocsTrackerEnabled');
       break;
 
     case 'reorder_workspaces':
@@ -297,34 +295,6 @@ export function validateClientMessage(value: unknown): ClientMessage {
     case 'set_active_workspace':
       exactKeys(message, ['type', 'id'], ['type', 'id']);
       id(message.id, 'id');
-      break;
-
-    case 'send_qa_message':
-      exactKeys(message, ['type', 'workspaceId', 'sourceAgentId', 'content', 'rerunOf'], ['type', 'workspaceId', 'sourceAgentId', 'content']);
-      id(message.workspaceId, 'workspaceId');
-      id(message.sourceAgentId, 'sourceAgentId');
-      string(message.content, 'content', MAX_TEXT_CHARS);
-      optionalId(message.rerunOf, 'rerunOf');
-      break;
-
-    case 'abort_qa_test':
-    case 'rescan_atlas':
-    case 'resume_atlas':
-    case 'discard_atlas_candidate':
-      exactKeys(message, ['type', 'workspaceId'], ['type', 'workspaceId']);
-      id(message.workspaceId, 'workspaceId');
-      break;
-
-    case 'handoff_qa_run':
-      exactKeys(message, ['type', 'workspaceId', 'runId'], ['type', 'workspaceId', 'runId']);
-      id(message.workspaceId, 'workspaceId');
-      id(message.runId, 'runId');
-      break;
-
-    case 'provision_atlas_agent':
-      exactKeys(message, ['type', 'workspaceId', 'projectCwd'], ['type', 'workspaceId', 'projectCwd']);
-      id(message.workspaceId, 'workspaceId');
-      string(message.projectCwd, 'projectCwd', MAX_PATH_CHARS, true);
       break;
 
     case 'create_terminal':

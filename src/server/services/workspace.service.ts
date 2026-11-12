@@ -1,11 +1,21 @@
-import type { WorkspaceInfo, AppSettings, AtlasRunInfo, QaRunInfo } from '../../shared/protocol';
+import type { WorkspaceInfo, AppSettings } from '../../shared/protocol';
 import { realpath, stat } from 'node:fs/promises';
 import { isAbsolute, resolve } from 'node:path';
 import { generateId } from '../utils';
 import { persistenceService } from './persistence.service';
 import { settingsService } from './settings.service';
-import { compactQaRunHistory } from './qa-run-history';
 import { runDurableMutation } from './durable-mutation';
+
+const LEGACY_WORKSPACE_KEYS = [
+  'googleDocsTrackerEnabled',
+  'qaAgentId',
+  'qaRuns',
+  'qaSurfaceVerifications',
+  'atlasAgentId',
+  'atlasProjectCwd',
+  'atlasLastScanAt',
+  'atlasRun',
+] as const;
 
 // HMR-safe state
 const workspaces: Map<string, WorkspaceInfo> = (globalThis as any).__workspacesMap ??= new Map<string, WorkspaceInfo>();
@@ -73,7 +83,6 @@ export const workspaceService = {
         gridRows: 2,
         selectedAgentIds: [],
         lockedAgentIds: [],
-        googleDocsTrackerEnabled: false,
         createdAt: Date.now(),
       };
       const settings = settingsService.getRef();
@@ -91,7 +100,7 @@ export const workspaceService = {
     });
   },
 
-  async update(id: string, updates: { name?: string; gridColumns?: number; gridRows?: number; selectedAgentIds?: string[]; lockedAgentIds?: string[]; testUrl?: string; googleDocsTrackerEnabled?: boolean; qaAgentId?: string | null; qaRuns?: QaRunInfo[]; atlasAgentId?: string | null; atlasProjectCwd?: string; atlasLastScanAt?: number; atlasRun?: AtlasRunInfo | null; qaSurfaceVerifications?: Record<string, number> }): Promise<WorkspaceInfo | null> {
+  async update(id: string, updates: { name?: string; gridColumns?: number; gridRows?: number; selectedAgentIds?: string[]; lockedAgentIds?: string[]; testUrl?: string }): Promise<WorkspaceInfo | null> {
     return runDurableMutation(async () => {
       const ws = workspaces.get(id);
       if (!ws) return null;
@@ -102,23 +111,6 @@ export const workspaceService = {
       if (updates.selectedAgentIds !== undefined) ws.selectedAgentIds = [...updates.selectedAgentIds];
       if (updates.lockedAgentIds !== undefined) ws.lockedAgentIds = [...updates.lockedAgentIds];
       if (updates.testUrl !== undefined) ws.testUrl = updates.testUrl;
-      if (updates.googleDocsTrackerEnabled !== undefined) ws.googleDocsTrackerEnabled = updates.googleDocsTrackerEnabled;
-      if (updates.qaAgentId !== undefined) {
-        if (updates.qaAgentId === null) delete ws.qaAgentId;
-        else ws.qaAgentId = updates.qaAgentId;
-      }
-      if (updates.qaRuns !== undefined) ws.qaRuns = structuredClone(updates.qaRuns);
-      if (updates.atlasAgentId !== undefined) {
-        if (updates.atlasAgentId === null) delete ws.atlasAgentId;
-        else ws.atlasAgentId = updates.atlasAgentId;
-      }
-      if (updates.atlasProjectCwd !== undefined) ws.atlasProjectCwd = updates.atlasProjectCwd;
-      if (updates.atlasLastScanAt !== undefined) ws.atlasLastScanAt = updates.atlasLastScanAt;
-      if (updates.atlasRun !== undefined) {
-        if (updates.atlasRun === null) delete ws.atlasRun;
-        else ws.atlasRun = structuredClone(updates.atlasRun);
-      }
-      if (updates.qaSurfaceVerifications !== undefined) ws.qaSurfaceVerifications = { ...updates.qaSurfaceVerifications };
       try {
         await persistenceService.saveNow();
         return ws;
@@ -201,13 +193,8 @@ export const workspaceService = {
     });
   },
 
-  /**
-   * Add agent to workspace's selectedAgentIds in the first empty slot.
-   * If hideFromGrid is true, skip — the agent is workspace-scoped but not
-   * supposed to appear in the grid (e.g. UI Atlas Agent, QA Tester).
-   */
-  addAgentToWorkspace(wsId: string, agentId: string, hideFromGrid?: boolean): void {
-    if (hideFromGrid) return;
+  /** Add agent to workspace's selectedAgentIds in the first empty slot. */
+  addAgentToWorkspace(wsId: string, agentId: string): void {
     const ws = workspaces.get(wsId);
     if (!ws) return;
     const totalSlots = ws.gridColumns * ws.gridRows;
@@ -246,10 +233,15 @@ export const workspaceService = {
   ): Promise<void> {
     let recoveryChanged = false;
     if (workspacesList && workspacesList.length > 0) {
-      // Lazy import — workspace.service runs at boot before any node:fs use.
-      const { existsSync, readFileSync, statSync } = await import('node:fs');
-      const { join } = await import('node:path');
       for (const [index, ws] of workspacesList.entries()) {
+        // Older installs stored state for features that now live in separate
+        // projects (UI Atlas, QA runs, Google Docs tracker). Drop it once.
+        for (const key of LEGACY_WORKSPACE_KEYS) {
+          if (key in ws) {
+            delete (ws as unknown as Record<string, unknown>)[key];
+            recoveryChanged = true;
+          }
+        }
         if (!ws.cwd) {
           const workspaceAgent = agents.find(agent => agent.workspaceId === ws.id)
             || agents.find(agent => ws.selectedAgentIds?.includes(agent.id));
@@ -265,90 +257,6 @@ export const workspaceService = {
         if (!Array.isArray(ws.lockedAgentIds)) {
           ws.lockedAgentIds = [];
           recoveryChanged = true;
-        }
-        if (!Array.isArray(ws.qaRuns)) {
-          ws.qaRuns = [];
-          recoveryChanged = true;
-        }
-        const previousQaRunCount = ws.qaRuns.length;
-        ws.qaRuns = compactQaRunHistory(ws.qaRuns.map(run => {
-          const interruptedHandoff = !!run.handoffStartedAt && !run.handedOffAt;
-          if (run.status !== 'queued' && run.status !== 'running') {
-            if (!interruptedHandoff) return run;
-            recoveryChanged = true;
-            return { ...run, handoffStartedAt: undefined, handoffError: 'Agent Forge restarted before the QA handoff completed. Try sending it again.' };
-          }
-          recoveryChanged = true;
-          return {
-            ...run,
-            status: 'failed',
-            verdict: 'inconclusive',
-            summary: 'Agent Forge restarted before this QA run completed.',
-            report: '⚪ INCONCLUSIVE — Agent Forge restarted before this QA run completed.',
-            validationErrors: ['Interrupted by server restart'],
-            finishedAt: Date.now(),
-            error: 'Interrupted by server restart; run it again to obtain a trustworthy result.',
-            handoffStartedAt: undefined,
-            handoffError: interruptedHandoff ? 'Agent Forge restarted before the QA handoff completed. Try sending it again.' : run.handoffError,
-          };
-        }), 30);
-        if (ws.qaRuns.length !== previousQaRunCount) recoveryChanged = true;
-        // Publication is a filesystem transaction followed by state
-        // persistence. If the process died between those boundaries, the
-        // canonical manifest is the durable commit record and must win over
-        // the stale in-flight state.
-        let recoveredPublishedAtlas = false;
-        if (ws.atlasRun?.status === 'running' || ws.atlasRun?.status === 'validating') {
-          if (ws.atlasProjectCwd) {
-            const manifestPath = join(ws.atlasProjectCwd, 'docs', 'ui-atlas', 'manifest.json');
-            try {
-              if (statSync(manifestPath).size <= 64 * 1024) {
-                const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
-                const publishedAt = Date.parse(manifest?.generatedAt);
-                if (manifest?.runId === ws.atlasRun.id && manifest?.status === 'complete' && Number.isFinite(publishedAt)) {
-                  ws.atlasRun = {
-                    ...ws.atlasRun,
-                    status: 'completed',
-                    phase: 'published',
-                    finishedAt: publishedAt,
-                    lastActivityAt: Math.max(ws.atlasRun.lastActivityAt, publishedAt),
-                    validationErrors: [],
-                    error: undefined,
-                  };
-                  ws.atlasLastScanAt = Math.max(ws.atlasLastScanAt || 0, publishedAt);
-                  recoveredPublishedAtlas = true;
-                  recoveryChanged = true;
-                }
-              }
-            } catch {}
-          }
-          // An in-flight process cannot survive a server restart. Keep its
-          // candidate and surface a resumable state instead of pretending the
-          // scan completed or silently starting it over.
-          if (!recoveredPublishedAtlas) {
-            recoveryChanged = true;
-            ws.atlasRun = {
-              ...ws.atlasRun,
-              status: 'paused',
-              finishedAt: Date.now(),
-              error: 'Agent Forge restarted before this Atlas run completed. Resume to continue from its candidate checkpoint.',
-            };
-          }
-        }
-
-        // One-time compatibility import for Atlases created before manifests
-        // existed. Never advance an existing timestamp from file mtime: only a
-        // validated candidate promotion may mark a new scan complete.
-        if (ws.atlasProjectCwd) {
-          const atlasMd = join(ws.atlasProjectCwd, 'docs', 'ui-atlas', 'atlas.md');
-          if (existsSync(atlasMd) && !ws.atlasLastScanAt) {
-            try {
-              const mtime = statSync(atlasMd).mtimeMs;
-              ws.atlasLastScanAt = mtime;
-              recoveryChanged = true;
-              console.log(`[workspace] imported legacy atlas timestamp for ${ws.name}`);
-            } catch {}
-          }
         }
         workspaces.set(ws.id, ws);
       }

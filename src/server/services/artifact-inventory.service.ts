@@ -7,12 +7,6 @@ import { getArtifactRoot } from './artifact-paths';
 
 export type ArtifactType =
   | 'chat-upload-original'
-  | 'qa-screenshot'
-  | 'qa-run-report'
-  | 'browser-temporary'
-  | 'ui-atlas-current'
-  | 'ui-atlas-history'
-  | 'ui-atlas-candidate'
   | 'persistence-backup'
   | 'support-bundle'
   | 'other-owned-temporary'
@@ -21,7 +15,7 @@ export type ArtifactType =
 export type ArtifactLifecycle = 'reserved' | 'committed' | 'unreferenced' | 'leased';
 
 export interface ArtifactOwnerRef {
-  kind: 'message' | 'qa-evidence' | 'atlas-run' | 'lease' | 'created-manifest';
+  kind: 'message' | 'lease' | 'created-manifest';
   id?: string;
 }
 
@@ -68,14 +62,6 @@ export function classifyArtifactRelativePath(relativePath: string): ArtifactType
   const normalized = relativePath.replace(/\\/g, '/').replace(/^\/+/, '');
   if (!normalized) return 'unknown';
   if (normalized.startsWith('chat-images/')) return 'chat-upload-original';
-  if (normalized.startsWith('qa/') && normalized.endsWith('.png')) return 'qa-screenshot';
-  if (normalized.startsWith('qa/') && /\.(md|json|html)$/i.test(normalized)) return 'qa-run-report';
-  if (normalized.startsWith('qa/')) return 'qa-screenshot';
-  if (normalized.startsWith('atlas-queries/')) return 'other-owned-temporary';
-  if (normalized.includes('/.history/') || normalized.startsWith('ui-atlas/history/')) return 'ui-atlas-history';
-  if (normalized.includes('atlas-candidates') || normalized.startsWith('ui-atlas/candidates/')) return 'ui-atlas-candidate';
-  if (normalized.endsWith('atlas.json') || normalized.endsWith('current.json')) return 'ui-atlas-current';
-  if (normalized.startsWith('browser/') || normalized.includes('playwright')) return 'browser-temporary';
   if (/data\.json\.|pids\.json\.|agent-forge\.lock\./.test(normalized)) return 'persistence-backup';
   if (normalized.startsWith('support/')) return 'support-bundle';
   return 'unknown';
@@ -88,21 +74,12 @@ export function collectArtifactReferences(data: Partial<PersistedData> | null | 
       if (typeof attachment.path === 'string' && attachment.path) refs.add(attachment.path);
     }
   }
-  for (const workspace of data?.workspaces ?? []) {
-    for (const run of workspace.qaRuns ?? []) {
-      for (const evidence of run.evidence ?? []) {
-        if (evidence.kind === 'screenshot' && evidence.ref) refs.add(evidence.ref);
-      }
-    }
-    if (workspace.atlasRun?.candidateRelPath) refs.add(workspace.atlasRun.candidateRelPath);
-  }
   return [...refs];
 }
 
 function emptyTypeCounts(): ArtifactInventoryReport['byType'] {
   const types: ArtifactType[] = [
-    'chat-upload-original', 'qa-screenshot', 'qa-run-report', 'browser-temporary',
-    'ui-atlas-current', 'ui-atlas-history', 'ui-atlas-candidate', 'persistence-backup',
+    'chat-upload-original', 'persistence-backup',
     'support-bundle', 'other-owned-temporary', 'unknown',
   ];
   return Object.fromEntries(types.map(type => [type, { files: 0, bytes: 0, referenced: 0, unreferenced: 0 }])) as ArtifactInventoryReport['byType'];
@@ -259,7 +236,7 @@ export async function buildArtifactInventory(options: {
     inventoryId,
     generatedAt,
     artifactRoot,
-    scannedSources: ['artifact-root', 'persisted-messages', 'qa-evidence', 'atlas-run', 'leases'],
+    scannedSources: ['artifact-root', 'persisted-messages', 'leases'],
     totals: { files: files.length, bytes: totalsBytes },
     byType,
     byLifecycle,

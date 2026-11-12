@@ -11,10 +11,6 @@
     "test:reliability": "bun test --randomize --seed 8675309",
     "test:coverage": "bun test --coverage --coverage-reporter=text --coverage-reporter=lcov && bun scripts/check-coverage-cli.ts",
     "check": "bun run typecheck && bun run test:reliability",
-    "tracker:reconcile": "bun scripts/reconcile-google-docs-tracker.ts",
-    "tracker:install": "bun scripts/install-tracker-reconciliation-launchd.ts",
-    "usage:sync": "bun scripts/sync-usage.ts",
-    "usage:sync:dry-run": "bun scripts/sync-usage.ts --dry-run",
     "smoke:live-thought": "bun scripts/live-thought-activation-smoke.ts"
   },
   "devDependencies": {
@@ -26,7 +22,6 @@
     "typescript": "^5"
   },
   "dependencies": {
-    "playwright": "^1.59.1",
     "react": "^19.2.4",
     "react-dom": "^19.2.4"
   }

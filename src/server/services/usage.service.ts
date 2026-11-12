@@ -26,12 +26,11 @@ const events: UsageEvent[] = (globalThis as any).__usageEvents ??= [];
 const SYNC_REFRESH_INTERVAL_MS = 60_000;
 const PROJECT_TURNS_CAP = 100;
 const machineId = sanitizeMachineId(process.env.AGENT_FORGE_MACHINE_ID || hostname() || 'local');
-// Live usage is runtime state, so it must not dirty Agent Forge's source tree
-// after every completed turn. The Git-backed directory contains snapshots only;
-// scripts/sync-usage.ts copies the current runtime shard there when requested.
+// Live usage is runtime state kept outside the source tree. Each machine writes
+// only its own shard; point AGENT_FORGE_USAGE_SYNC_DIR at a folder you already
+// sync between machines (Syncthing, a cloud drive, ...) to merge usage reports.
 const runtimeSyncDirectory = process.env.AGENT_FORGE_USAGE_SYNC_DIR
   || join(homedir(), '.agent-forge', 'usage-sync', 'usage');
-const repositorySnapshotDirectory = join(process.cwd(), '.agent-forge-sync', 'usage');
 const shardPath = join(runtimeSyncDirectory, `${machineId}.json`);
 let localShardEvents: UsageEvent[] = [];
 let syncEnabled = false;
@@ -143,13 +142,10 @@ function writeLocalShard(): void {
 function refreshFromShards(): void {
   if (!syncEnabled) return;
   try {
-    const directories = [...new Set([runtimeSyncDirectory, repositorySnapshotDirectory])];
-    const shardFiles = directories.flatMap(directory => {
-      if (!existsSync(directory)) return [];
-      return readdirSync(directory)
-        .filter(name => name.endsWith('.json'))
-        .map(name => ({ directory, name }));
-    });
+    const directory = runtimeSyncDirectory;
+    const shardFiles = existsSync(directory)
+      ? readdirSync(directory).filter(name => name.endsWith('.json')).map(name => ({ directory, name }))
+      : [];
     knownMachineIds = new Set([machineId, ...shardFiles.map(({ name }) => sanitizeMachineId(name.slice(0, -'.json'.length)))]);
     const machineCountChanged = machineCount !== knownMachineIds.size;
     machineCount = knownMachineIds.size;

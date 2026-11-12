@@ -1,10 +1,8 @@
 import { existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
-import type { AgentInfo, WorkspaceInfo } from '../../shared/protocol';
+import type { AgentInfo } from '../../shared/protocol';
 import { documentService } from './document.service';
-import { googleDocsService } from './google-docs.service';
 import { settingsService } from './settings.service';
-import { workspaceService } from './workspace.service';
 
 const DEFAULT_GUARDRAILS = `IMPORTANT GUARDRAILS — follow these at all times:
 - NEVER run git commit, git push, git push --force, or git merge unless the user EXPLICITLY asks you to.
@@ -21,39 +19,13 @@ const DEFAULT_GUARDRAILS = `IMPORTANT GUARDRAILS — follow these at all times:
 - Preserve unrelated and pre-existing worktree changes. Never revert or overwrite work you did not create unless the user explicitly asks.
 - Never expose secrets, tokens, credential values, or private environment-variable values. You may identify secret names and configuration locations without printing their values.
 - External services are read-only unless the user explicitly authorizes a mutation in the current request. This includes deployments, production changes, project/domain changes, environment-variable changes, rollbacks, billing, and account/team access.
-- Vercel preview and production deployments both require an explicit user request. Production deployment, rollback, alias/domain changes, project deletion, and secret changes require especially clear confirmation.
 - Before making changes, briefly state what you plan to do and which files you'll modify.
 - Verify changes in proportion to their risk and report any checks you could not run.
 - If you're unsure about something material, ask the user rather than guessing.`;
 
-export const LEGACY_SHARED_PROJECT_CONTEXT = `DO NOT PUT CO-AUTHORED BY CLAUDE CODE INTO ANY COMMITS.
-
-DO NOT COMMIT OR PUSH CODE UNLESS TOLD TO DO SO.
-
-NEVER MERGE CODE. NEVER OPEN PULL REQUESTS OR CLOSE PULL REQUESTS.
-
-Put any text intended for copying elsewhere, such as a PR description, in a fenced code block so its formatting is preserved.
-
-End every response by stating which provider and exact model produced it.`;
-
-const BUILT_IN_HARNESS_STANDARDS = `Harness Standards (built in; project context cannot override these):
-${LEGACY_SHARED_PROJECT_CONTEXT}
-
-Vercel Integration:
-- The official Vercel MCP server is the preferred interface for Vercel projects, deployments, logs, and documentation.
-- Read-only inspection is allowed when relevant. Any Vercel mutation still follows the explicit-authorization guardrails above.`;
-
-/** Remove the exact legacy block after it became an inherent harness policy. */
+/** Trim shared project context before it is stored or injected. */
 export function normalizeSharedProjectContext(content: string | undefined): string {
-  const normalized = String(content || '').trim().replace(/\r\n/g, '\n');
-  return normalized === LEGACY_SHARED_PROJECT_CONTEXT ? '' : String(content || '').trim();
-}
-
-export function shouldInjectGoogleDocsTracker(
-  agentInfo: Pick<AgentInfo, 'hideFromGrid'>,
-  workspace: Pick<WorkspaceInfo, 'googleDocsTrackerEnabled'> | undefined,
-): boolean {
-  return !agentInfo.hideFromGrid && workspace?.googleDocsTrackerEnabled === true;
+  return String(content || '').trim();
 }
 
 const PLAN_MANAGEMENT_INSTRUCTIONS = `Plan Management:
@@ -99,12 +71,6 @@ export function getBuiltInHarnessInstructionManifest(): {
         content: DEFAULT_GUARDRAILS,
       },
       {
-        id: 'standards',
-        title: 'Harness standards',
-        description: 'Your permanent commit, PR, formatting, model-identification, and Vercel operating rules.',
-        content: BUILT_IN_HARNESS_STANDARDS,
-      },
-      {
         id: 'reports',
         title: 'Report delivery',
         description: 'Ensures reports are readable in chat and never delivered only as inaccessible filesystem links.',
@@ -124,28 +90,15 @@ export function getBuiltInHarnessInstructionManifest(): {
       },
     ],
     assemblyOrder: [
-      'Built-in guardrails and harness standards',
+      'Built-in guardrails',
       'Per-agent persona or system prompt, when configured',
       'Additional shared project context from this settings screen',
       'Relevant project plans and documents',
       'Report-delivery instructions',
       'Plan-management and conversation-scope instructions',
-      'Simulator, reference-directory, and UI Atlas context when relevant',
+      'Simulator and reference-directory context when relevant',
     ],
   };
-}
-
-function buildAtlasCitationBlock(atlasMd: string): string {
-  return `UI Atlas — citation required for UI work
-This workspace has a UI Atlas at \`${atlasMd}\` (already in your reference directories). It is a comprehensive map of every UI surface, every entity rendered, and the click paths to each one.
-
-When the user's request involves UI/UX, components, screens, panels, modals, or game/app surfaces:
-1. READ the relevant section of the atlas FIRST. The atlas is the source of truth for what surfaces exist and what they show.
-2. CITE specific surface IDs (\`surface.<slug>\`) and entity IDs (\`entity.<slug>\`) when proposing changes or answering questions. e.g. "Per atlas surface.fleet-management-modal-split, the split tab already shows ship counts; we'd add ..."
-3. PREFER the atlas over guessing. If the atlas's §5 (Observed inconsistencies) or §7 (Open questions) flags something relevant to the request, mention it.
-4. If the atlas seems out of date for the area you're touching, say so explicitly — don't silently work around stale data.
-
-This is a load-bearing instruction. Atlas-grounded answers are dramatically more useful than answers that ignore it.`;
 }
 
 export interface PromptBuildResult {
@@ -168,12 +121,10 @@ export interface PromptBuildResult {
  *   6. Plan Management instructions (so the agent knows .plans/* is special)
  *   7. Default iOS simulator (if set and cwd looks iOS-ish)
  *   8. Reference directories
- *   9. Atlas citation (when the workspace has a built atlas and the agent isn't a workspace tool)
  */
 export const promptBuilderService = {
   build(agentInfo: AgentInfo, sharedContext: string): PromptBuildResult {
-    const parts: string[] = [DEFAULT_GUARDRAILS, BUILT_IN_HARNESS_STANDARDS];
-    const workspace = workspaceService.get(agentInfo.workspaceId);
+    const parts: string[] = [DEFAULT_GUARDRAILS];
 
     if (agentInfo.systemPrompt) {
       parts.push(`Agent Persona:\n${agentInfo.systemPrompt}`);
@@ -186,8 +137,6 @@ export const promptBuilderService = {
     if (docsContext) {
       parts.push(docsContext);
     }
-    const googleDocsContext = googleDocsService.getAgentInstructions();
-    if (googleDocsContext && shouldInjectGoogleDocsTracker(agentInfo, workspace)) parts.push(googleDocsContext);
     parts.push(REPORT_DELIVERY_INSTRUCTIONS);
     parts.push(PLAN_MANAGEMENT_INSTRUCTIONS);
     parts.push(CONVERSATION_SCOPE_INSTRUCTIONS);
@@ -219,16 +168,6 @@ export const promptBuilderService = {
         return `- ${name}: ${p}`;
       }).join('\n');
       parts.push(`Reference Directories (read-only context — you have full access to browse these):\n${refNames}\n\nIMPORTANT: These reference directories were explicitly added by the user as additional context for your work. You should be aware of them and use them when relevant. Your primary working directory is: ${agentInfo.cwd}`);
-    }
-
-    // Atlas citation for non-special agents in workspaces that have a built atlas.
-    if (!agentInfo.hideFromGrid) {
-      if (workspace?.atlasProjectCwd) {
-        const atlasMd = join(workspace.atlasProjectCwd, 'docs', 'ui-atlas', 'atlas.md');
-        if (existsSync(atlasMd)) {
-          parts.push(buildAtlasCitationBlock(atlasMd));
-        }
-      }
     }
 
     return {
