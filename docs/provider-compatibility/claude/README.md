@@ -2,7 +2,7 @@
 
 Qualified CLI floor for these fixtures: **Claude Code 2.1.241**.
 
-These files capture the success and failure shapes Agent Forge already observes. They lock the authentication classifier. The supported compatibility floor is **2.1.241**. Slice B runs that classifier in shadow mode: health and logs may show the typed state, but turn gating and retry stay on the previous adapter path.
+These files capture the success and failure output shapes Agent Forge has observed from the Claude CLI. `src/server/auth/classify-claude-auth.test.ts` replays them to lock the sign-in classifier that decides whether a Claude turn may start and which recovery action the UI offers.
 
 | Fixture | Meaning |
 |---|---|

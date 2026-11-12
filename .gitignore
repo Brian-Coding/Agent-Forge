@@ -40,18 +40,13 @@ data.json
 pids.json
 owned-processes.json
 agent-forge.lock
-# Persistence recovery/corruption/oversize snapshots are local safety copies.
-# Never add them to source control.
+# Persistence recovery/corruption/oversize snapshots are local safety copies
+# that contain private chat history. Never add them to source control.
 data.json.*
 pids.json.*
 owned-processes.json.*
 agent-forge.lock.*
-# Usage history is intentionally Git-backed one shard per machine. Ignore any
-# other runtime sync data and atomic-write temporary files.
-/.agent-forge-sync/*
-!/.agent-forge-sync/usage/
-!/.agent-forge-sync/usage/*.json
-/.agent-forge-sync/usage/*.tmp
+/.agent-forge-sync/
 /.agent-forge-backups/
 
 # Editor configs

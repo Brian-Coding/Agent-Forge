@@ -1,5 +1,12 @@
 {
   "name": "agent-forge",
+  "version": "1.0.0",
+  "description": "Local workbench for running several Claude Code and Codex agents side by side.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Brian-Coding/AI-Agent-Forge.git"
+  },
   "module": "src/server/index.ts",
   "type": "module",
   "private": true,

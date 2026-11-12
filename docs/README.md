@@ -1,35 +1,23 @@
-# Agent Forge Documentation Index
+# Agent Forge documentation
 
-This directory contains current operational documentation and detailed design references. Implementation authorization and sequencing live in [`.plans/README.md`](../.plans/README.md); dated snapshots live in [`improvements/`](../improvements/README.md).
+Start with **[Getting started](getting-started.md)** if this is your first time.
 
-## Current
+## Using Agent Forge
 
-- [Google Docs tracker reconciliation](./google-docs-tracker-reconciliation.md): active scheduled reconciliation design and safety boundary.
-- [Cross-machine token-usage sync](./usage-sync.md): active per-machine usage snapshot workflow.
-- [Harness evals](./harness-evals.md): durable criteria for evaluating whether harness changes are actually better.
-- [Runtime activation checklist](./runtime-activation-checklist.md): confirm which server session and source fingerprint are actually running after a controlled restart.
-- [Claude CLI compatibility fixtures](./provider-compatibility/claude/README.md): captured Claude 2.1.241 auth-status and turn-error shapes. Classifier baseline only; not a gating change.
+- [Getting started](getting-started.md): install, first workspace, first agent.
+- [Workspaces and agents](workspaces-and-agents.md): grid layout, providers, models, reasoning levels, personas, reference folders.
+- [Chat, plans, and shared instructions](chat-and-instructions.md): messages, images, queued follow-ups, slash commands, `.plans/`, and how agent context is assembled.
+- [Terminals, ports, Git, and simulators](tools.md): the tools around each agent pane.
+- [Usage and limits](usage-and-limits.md): token history and provider rate-limit windows.
+- [Configuration](configuration.md): ports, environment variables, and where state is stored.
+- [Windows launcher](windows-launcher.md): desktop and sign-in shortcuts on Windows.
 
-## Current reference with open work
+## Trust and internals
 
-- [Codex execution status — 2026-09-12](./codex-execution-status-2026-09-12.md): provider interruption evidence, targeted status fix, verification, and activation limits.
-- [Long-running agent reliability](./long-running-agent-reliability.md): incident analysis and operational reference; immediate liveness fixes exist, durable orchestration does not.
-- [Model mismatch and CLI stability](./model-mismatch-and-cli-stability.md): multi-machine CLI drift analysis; some parser hardening is implemented, version policy and consistent model normalization remain.
+- [Safety model](safety.md): what Agent Forge protects, and what it deliberately does not.
+- [Architecture](architecture.md): how the server, adapters, and browser UI fit together.
+- [Claude CLI compatibility fixtures](provider-compatibility/claude/README.md): captured CLI output shapes used by the auth classifier tests.
 
-## Paused reference
+## Contributing
 
-- [Grok Build 1.0.5 compatibility spike](./provider-compatibility/grok-build/README.md): Slice A evidence retained; product integration paused 2026-08-26. Grok is used in Cursor and Grok Bot, not Agent Forge agent selection.
-- [Unreal MCP with Codex and Agent Forge](./unreal-mcp-agent-forge.md): setup/design reference for an explicitly paused integration.
-- [Unreal MCP implementation prompt](./unreal-mcp-agent-forge-implementation-prompt.md): copy/paste execution brief; do not use until the user resumes the plan.
-
-## Superseded backlog
-
-- [QA Agent future work](./qa-agent-future-work.md): older unprioritized backlog. Still-valid ideas were reconsidered in the canonical development roadmap; this file no longer authorizes work.
-
-## Placement rules
-
-- Put plans, approval state, and development sequencing in `.plans/`.
-- Put current runbooks, incident analyses, architecture notes, and technical references in `docs/`.
-- Put point-in-time review snapshots in `improvements/` and date them.
-- Update this index when adding a durable document.
-- Prefer updating an existing document over creating a second document for the same decision.
+See [CONTRIBUTING.md](../CONTRIBUTING.md) and [AGENTS.md](../AGENTS.md).

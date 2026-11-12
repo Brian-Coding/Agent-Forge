@@ -1,106 +1,65 @@
 # Agent Forge
 
-Agent Forge is a local, browser-based harness for running multiple Claude Code and Codex agents against real project directories. It provides workspace-scoped agent panes, durable chat history, live turn progress, usage/limit reporting, image attachments, terminal/process supervision, browser QA, UI Atlas generation, and shared project instructions.
+Agent Forge is a local workbench for running several Claude Code and Codex agents side by side on your own projects. Each agent gets its own pane with chat, live progress, terminals, and file changes; workspaces keep related agents, project folders, and grid layouts together. Everything runs on your machine and talks only to the provider CLIs you already have installed.
 
-The application is intentionally local and single-user. Bun owns the main server and provider adapters; a small Node subprocess owns Playwright because its browser lifecycle is more reliable outside Bun on Windows.
+It is built for daily, hands-on use: you stay in charge, and agents do the work you ask for in the projects you point them at.
+
+## What you can do
+
+- **Run many agents at once.** Put Claude and Codex agents in a resizable grid, give each its own project folder, model, reasoning level, and persona, and switch providers mid-conversation without losing context.
+- **Chat with real progress.** Markdown replies, live "thinking" and tool activity, elapsed time, stall detection, queued follow-ups, retries, and up to 100 image attachments per message.
+- **Organize by workspace.** Group agents per project, lock panes in place, drag to rearrange, and keep an App URL handy for the thing you are building.
+- **Share instructions.** Built-in safety guardrails apply to every turn; add your own shared project instructions on top, and agents pick up `.plans/*.md` files from the project automatically.
+- **Stay close to the code.** See which files an agent changed, open the Git diff, check the branch, and run commands in per-agent terminals.
+- **Keep the machine tidy.** See which local ports are in use and by what, stop stray dev servers, and manage iOS simulators on macOS.
+- **Watch usage and limits.** Token usage by agent, model, and day, plus Claude and Codex rate-limit windows.
+- **Stay local.** The server binds to `127.0.0.1`, checks Host/Origin headers, and uses guarded, quarantine-first file operations for anything it deletes itself.
 
 ## Requirements
 
 - [Bun](https://bun.sh/) 1.3 or newer
-- Node.js for the Playwright browser worker
-- At least one installed and authenticated provider CLI: `codex` or `claude`
-- Chromium only when using Browser QA/UI Atlas or the live browser integration test
+- At least one provider CLI, installed and signed in:
+  - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (`claude`)
+  - [Codex CLI](https://github.com/openai/codex) (`codex`)
+- macOS, Linux, or Windows
 
-## Start
+## Quick start
 
 ```bash
+git clone https://github.com/Brian-Coding/AI-Agent-Forge.git
+cd AI-Agent-Forge
 bun install
 bun run dev
 ```
 
-Open the local URL printed by the server, normally `http://localhost:3333`. If that port is occupied, Agent Forge tries the next seven ports. `PORT` can select the starting port. The server binds to `127.0.0.1` by default; do not set `HOST` to a non-loopback interface without separately reviewing the security boundary.
+Open the URL the server prints (normally <http://localhost:3333>). Create a workspace, pick its project folder, then click **+ Add Agent**.
 
-For browser automation:
+See [Getting started](docs/getting-started.md) for a guided first session.
 
-```bash
-bunx playwright install chromium
-```
+## Documentation
 
-## Architecture
+- [Getting started](docs/getting-started.md)
+- [Workspaces and agents](docs/workspaces-and-agents.md)
+- [Chat, plans, and shared instructions](docs/chat-and-instructions.md)
+- [Terminals, ports, Git, and simulators](docs/tools.md)
+- [Usage and limits](docs/usage-and-limits.md)
+- [Configuration](docs/configuration.md)
+- [Safety model](docs/safety.md)
+- [Architecture](docs/architecture.md)
+- [Windows launcher](docs/windows-launcher.md)
 
-```text
-Browser UI (src/client/index.html)
-        │ HTTP + WebSocket
-        ▼
-Bun server (src/server)
-  ├─ workspaces, agents, chat, persistence, usage, limits
-  ├─ Claude/Codex adapter registry and normalized events
-  ├─ terminal and child-process supervision
-  ├─ QA and UI Atlas coordinators
-  └─ guarded local filesystem operations
-        │ local HTTP, spawned on demand
-        ▼
-Node + Playwright worker (scripts/browser-worker.mjs)
-```
+## Important: agents run with broad permissions
 
-Provider-specific parsing and launch behavior belongs in `src/server/agents/adapters/`. Shared lifecycle, persistence, QA, Atlas, and prompt behavior belongs in services. The client/server wire contract lives in `src/shared/protocol.ts`.
+Agent Forge launches Claude Code and Codex in non-interactive mode with their permission prompts turned off, so agents can edit files and run commands in the folders you give them. Point agents at projects under version control, review their changes, and read the [safety model](docs/safety.md) before using it on anything you cannot recover.
 
-### Chat message queues
+## Related project
 
-The server owns execution order for accepted chat commands. Browser queue previews are display-only: neither an idle status nor a server queue snapshot submits a prompt. The browser keeps locally unsent text commands in a separate in-memory outbox, preserving their full content and original request IDs through failed socket writes. After reconnect hydrates the agent list, it submits those commands once in order, including for busy agents whose server queue handles scheduling.
+UI Atlas and the browser/app QA tester that used to live inside Agent Forge are now a separate project: [AI-UI-Atlas-QA-Tester](https://github.com/Brian-Coding/AI-UI-Atlas-QA-Tester).
 
-Stop, kill, and removal clear the affected agent's local outbox; kill-all clears every local outbox. Reconnect replaces stale server previews without discarding locally unsent commands. The outbox lasts only for the current page lifetime, the server queue is process-local, and a successful socket write is not a durable-delivery acknowledgement. The browser does not automatically replay written commands after reconnect.
+## Contributing
 
-`src/client/message-queue.test.ts` executes the browser WebSocket hook against controlled transport events, covering queue/idle feedback, reconnect, multiple frames before a render, offline ordering, failed writes, cancellation, and distinct intentional submissions of identical text. After updating this client, restart Agent Forge and reload every open Agent Forge tab so each browser uses the current queue handling.
+Bug reports and pull requests are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md); if you are a coding agent, read [AGENTS.md](AGENTS.md).
 
-## State and artifacts
+## License
 
-- `data.json`: repo-relative application state for the current development installation
-- `pids.json` and `agent-forge.lock`: current checkout's process metadata
-- `.plans/`: source-controlled plan files; these files are canonical and are discovered directly
-- QA screenshots: stable platform data directory, normally `%LOCALAPPDATA%\AgentForge\artifacts` on Windows or `$XDG_DATA_HOME/agent-forge/artifacts` on Unix-like systems
-- Published UI Atlas: `docs/ui-atlas/` inside the target application repository
-- Cross-machine usage runtime shard: `~/.agent-forge/usage-sync/usage/`
-
-The current repo-relative core state is a known limitation. The canonical roadmap sequences recovery proof and explicit stable/development instance isolation before any live-state migration or release updater.
-
-## Safety boundary
-
-Agent Forge-owned destructive filesystem operations use protected-root checks, canonical path validation, link detection, bounded tree scans, quarantine-first deletion, and audit records. The HTTP server is loopback-only by default and applies Host/Origin checks plus strict wire/body validation.
-
-These protections do not intercept every raw shell command emitted by a provider. Claude and Codex currently run with broad provider permissions for compatibility. Use recoverable worktrees and provider sandbox modes where appropriate, and do not expose the server to a network as if it were an authenticated remote service.
-
-## Verification
-
-```bash
-# TypeScript plus deterministic randomized-order suite
-bun run check
-
-# Source coverage plus the weighted coverage ratchet
-bun run test:coverage
-```
-
-The live Chromium integration is opt-in:
-
-```powershell
-$env:RUN_BROWSER_INTEGRATION='1'
-$env:BROWSER_HEADLESS='1'
-bun test src/server/services/browser.service.integration.test.ts
-```
-
-On macOS/Linux:
-
-```bash
-RUN_BROWSER_INTEGRATION=1 BROWSER_HEADLESS=1 \
-  bun test src/server/services/browser.service.integration.test.ts
-```
-
-CI runs the randomized suite on Windows, macOS, and Linux, enforces source coverage on Linux, and runs the live Chromium smoke separately.
-
-## Project direction and documentation
-
-- [Plan lifecycle index](.plans/README.md): authoritative status of every plan.
-- [Documentation index](docs/README.md): operational and technical references.
-- [Historical reviews](improvements/README.md): dated audits retained as evidence, not active backlog.
-
-The immediate direction is conservative: close the current acceptance gaps, prove recovery without changing the daily driver, then prove stable and development instances can coexist. Packaging, automatic updates, Tauri, and any native rewrite come later—if they are still justified.
+[MIT](LICENSE)

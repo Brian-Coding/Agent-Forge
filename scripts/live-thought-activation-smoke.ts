@@ -1,14 +1,19 @@
 /**
- * Authenticated Claude/Codex activation smoke for Restore Live Thought.
- * Talks to a running Agent Forge over the local WebSocket.
+ * Live smoke test: creates a Claude and a Codex agent on a running Agent Forge,
+ * sends each a short prompt, and checks that live "thinking" progress streams
+ * over the local WebSocket. This uses your real provider CLIs and their quota.
  *
- *   bun scripts/live-thought-activation-smoke.ts
+ *   PORT=3333 WORKSPACE_ID=<id> bun run smoke:live-thought
  *
- * PORT defaults to 3334 (to avoid colliding with the default server port 3333).
+ * WORKSPACE_ID is the id of an existing workspace (visible in data.json).
  */
-const PORT = Number(process.env.PORT || 3334);
+const PORT = Number(process.env.PORT || 3333);
 const WS_URL = `ws://127.0.0.1:${PORT}`;
-const WORKSPACE_ID = process.env.WORKSPACE_ID || 'demo-workspace';
+const WORKSPACE_ID = process.env.WORKSPACE_ID || '';
+if (!WORKSPACE_ID) {
+  console.error('Set WORKSPACE_ID to an existing Agent Forge workspace id.');
+  process.exit(2);
+}
 const TURN_MS = Number(process.env.SMOKE_TURN_MS || 180_000);
 
 type Wire = Record<string, any>;
