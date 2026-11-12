@@ -18,9 +18,10 @@ test('server settings updates cannot replace a valid local workspace selection',
   expect(clientSource).toContain('workspaces.some(workspace => workspace.id === activeWorkspaceId)');
 });
 
-test('every published Atlas re-scan entry point requires confirmation', () => {
-  expect(clientSource).toContain("const ATLAS_RESCAN_CONFIRMATION = 'Re-scan the UI Atlas now?");
-  expect(clientSource.match(/window\.confirm\(ATLAS_RESCAN_CONFIRMATION\)\) onRescanAtlas\(/g)).toHaveLength(2);
+test('features that moved to separate projects stay out of the harness client', () => {
+  for (const removed of ['/api/atlas/', '/api/qa/', '/api/browser/', '/api/google-docs', '/api/integrations/', 'send_qa_message', 'provision_atlas_agent', 'AtlasPanel', 'hideFromGrid']) {
+    expect(clientSource).not.toContain(removed);
+  }
 });
 
 test('chat image batches use the 100-image native upload path instead of base64 WebSocket frames', () => {
@@ -122,10 +123,10 @@ test('folder-browser parent navigation preserves Windows drive roots and POSIX r
     `${normalizedClientSource.slice(start, end)}; return parentDirectoryPath;`,
   )() as (path: string) => string;
 
-  expect(parentDirectoryPath('C:\\Users\\dev\\dev')).toBe('C:/Users/dev');
+  expect(parentDirectoryPath('C:\\Users\\dev\\code')).toBe('C:/Users/dev');
   expect(parentDirectoryPath('C:\\Users')).toBe('C:/');
   expect(parentDirectoryPath('C:\\')).toBe('C:/');
-  expect(parentDirectoryPath('/Users/dev/dev')).toBe('/Users/dev');
+  expect(parentDirectoryPath('/Users/dev/code')).toBe('/Users/dev');
   expect(parentDirectoryPath('/')).toBe('/');
   expect(parentDirectoryPath('\\\\server\\share\\folder')).toBe('//server/share');
   expect(parentDirectoryPath('\\\\server\\share')).toBe('//server/share');

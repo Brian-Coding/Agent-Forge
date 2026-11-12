@@ -63,13 +63,17 @@ try {
     try { $ownsMutex = $restartMutex.WaitOne(60000) } catch [Threading.AbandonedMutexException] { $ownsMutex = $true }
     if (-not $ownsMutex) { throw 'Another Forge launch is still in progress.' }
     $bunPath = (Get-Command bun -ErrorAction Stop).Source
-    $chromePaths = @("$env:ProgramFiles\Google\Chrome\Application\chrome.exe", "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe", "$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe")
-    $chromePath = $chromePaths | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
-    if (-not $NoBrowser) {
-        if (-not $chromePath) { throw 'Google Chrome is not installed.' }
+    # Opens the default browser. Set AGENT_FORGE_CHROME_PROFILE to the display
+    # name of a Chrome profile to open Agent Forge in that profile instead.
+    $chromePath = $null
+    $profileDirectory = $null
+    if (-not $NoBrowser -and $env:AGENT_FORGE_CHROME_PROFILE) {
+        $chromePaths = @("$env:ProgramFiles\Google\Chrome\Application\chrome.exe", "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe", "$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe")
+        $chromePath = $chromePaths | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+        if (-not $chromePath) { throw 'AGENT_FORGE_CHROME_PROFILE is set but Google Chrome is not installed.' }
         $chromeState = Get-Content -LiteralPath "$env:LOCALAPPDATA\Google\Chrome\User Data\Local State" -Raw | ConvertFrom-Json
-        $profile = $chromeState.profile.info_cache.psobject.Properties | Where-Object { $_.Value.name -eq 'First' }
-        if (@($profile).Count -ne 1) { throw 'Expected exactly one Chrome profile named First.' }
+        $profile = $chromeState.profile.info_cache.psobject.Properties | Where-Object { $_.Value.name -eq $env:AGENT_FORGE_CHROME_PROFILE }
+        if (@($profile).Count -ne 1) { throw "Expected exactly one Chrome profile named $($env:AGENT_FORGE_CHROME_PROFILE)." }
         $profileDirectory = $profile.Name
     }
     Stop-VerifiedForge (Get-VerifiedForge)
@@ -110,7 +114,7 @@ try {
                     $readyOwner = Get-VerifiedForge
                     if (-not $readyOwner -or $readyOwner.Process.ProcessId -ne $forgeServer.Id) { throw 'The ready server does not own the Forge lock.' }
                     $launchedToken = $readyOwner.Token
-                    if (-not $NoBrowser) { Start-Process -FilePath $chromePath -ArgumentList @('--new-window', ('--profile-directory="' + $profileDirectory + '"'), $url) }
+                    if (-not $NoBrowser) { if ($chromePath) { Start-Process -FilePath $chromePath -ArgumentList @('--new-window', ('--profile-directory="' + $profileDirectory + '"'), $url) } else { Start-Process $url } }
                     $opened = $true
                     Write-Host "Agent Forge ready at $url. Keep this terminal open."
                     $restartMutex.ReleaseMutex(); $ownsMutex = $false

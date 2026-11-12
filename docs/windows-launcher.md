@@ -1,17 +1,36 @@
 # Windows launcher
 
-Run `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-windows-launcher.ps1` to install the desktop and current-user Startup shortcuts.
+Agent Forge runs anywhere Bun runs. On Windows there is also an optional launcher that gives you a desktop shortcut and starts Agent Forge when you sign in.
 
-The installer also disables the legacy **Agent Forge Startup** scheduled task when its single PowerShell action points to the sibling `legacy-bootstrap/start-agent-forge.ps1`. That older bootstrap launches `run-agent-forge-dev.ps1` in a hidden window and bypasses this launcher. The task definition is retained, and an unfamiliar same-name task causes installation to stop without changing the launchers. Keep that legacy task disabled: the current-user Startup shortcut is the one supported sign-in entry point. Disabling the task does not stop a server it already launched; run the desktop shortcut once to replace that instance.
+## Install
 
-At Windows sign-in, Agent Forge opens in a visible PowerShell terminal. Once the server reports its actual bound port, Chrome opens a new window using the profile named **First**. A browser cannot open before sign-in.
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-windows-launcher.ps1
+```
 
-Double-click **Agent Forge** on the desktop to restart. The launcher verifies the repository lock, Bun executable, server command, process creation time and lock token before stopping the previous server. It requests graceful shutdown, waits up to 20 seconds, then revalidates before force-stopping a stuck or legacy server tree. Restarting interrupts active work. Unrelated port occupants are never killed; Forge can use the next available port.
+This creates two shortcuts, both pointing at `scripts/start-agent-forge.ps1`:
 
-Windows can briefly omit a process's command line while it exits. The launcher retries that incomplete identity a bounded number of times; it accepts a confirmed exit or a newly complete identity and refuses to kill a process whose ownership remains unverifiable.
+- **Desktop → Agent Forge**: start or restart Agent Forge.
+- **Startup → Agent Forge**: start Agent Forge when you sign in.
 
-Ctrl+C requests normal cleanup. Closing the terminal is also detected by the server's parent-identity monitor, even when Windows does not forward a close signal. Cleanup saves state and stops owned work, and can take several seconds. This is graceful cleanup, not a Windows Job Object guarantee if Bun itself is hung or forcibly killed.
+The installer refuses to overwrite an unrelated shortcut with the same name.
 
-Startup and desktop shortcuts use the same launcher and explicitly request a normal visible window. The repository must remain at its installed location; rerun the installer after moving it. Chrome must contain exactly one profile named First, and Bun must be on PATH. Errors stay visible in the terminal. Each run retains diagnostic stdout/stderr logs in its own fresh `AgentForge-launch-*` directory under Windows temp. No existing temporary directories are deleted.
+## What the launcher does
 
-To disable automatic launch, remove only the **Agent Forge** shortcut from the current user's Windows Startup folder through File Explorer. The desktop shortcut remains usable.
+1. Opens a visible PowerShell window that owns the server process, so you can always see and close it.
+2. If an Agent Forge server from this checkout is already running, verifies it is really ours (repository lock, Bun executable, command line, process start time, and lock token) before asking it to shut down. It waits up to 20 seconds for a graceful exit, then re-checks before force-stopping a stuck server tree.
+3. Starts the new server and waits for it to report the port it actually bound.
+4. Opens that URL in your default browser.
+
+Unrelated programs on the same port are never stopped; Agent Forge simply binds the next free port. Restarting interrupts any agent turn that is running.
+
+## Options
+
+- `-NoBrowser`: start the server without opening a browser.
+- `AGENT_FORGE_CHROME_PROFILE`: set this environment variable to the display name of a Chrome profile to open Agent Forge in a new window of that profile instead of the default browser.
+
+## Notes
+
+- The repository must stay where it was when you ran the installer. If you move it, run the installer again.
+- Windows can briefly hide a process's command line while it exits. The launcher retries that check a bounded number of times and refuses to stop a process whose ownership it cannot confirm.
+- `scripts/test-windows-launcher.ps1` exercises the restart path end to end on a Windows machine.
