@@ -26,7 +26,7 @@ It is built for daily, hands-on use: you stay in charge, and agents do the work 
 ## Quick start
 
 ```bash
-git clone https://github.com/Brian-Coding/AI-Agent-Forge.git
+git clone --branch oss/v1 https://github.com/Brian-Coding/AI-Agent-Forge.git
 cd AI-Agent-Forge
 bun install
 bun run dev

@@ -18,7 +18,7 @@ codex --version    # if you use Codex
 ## 2. Install and start
 
 ```bash
-git clone https://github.com/Brian-Coding/AI-Agent-Forge.git
+git clone --branch oss/v1 https://github.com/Brian-Coding/AI-Agent-Forge.git
 cd AI-Agent-Forge
 bun install
 bun run dev
