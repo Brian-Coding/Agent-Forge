@@ -1,5 +1,8 @@
 import type { PersistedData } from '../shared/protocol';
-import index from '../client/index.html';
+import { fileURLToPath } from 'node:url';
+const indexHtml = await Bun.file(new URL('../client/index.html', import.meta.url)).text();
+import { vendorNotices } from './vendor-notices';
+import { createNetworkGuard } from './network-guard';
 
 import { persistenceService, PERSISTED_SCHEMA_VERSION } from './services/persistence.service';
 import { settingsService } from './services/settings.service';
@@ -87,7 +90,7 @@ async function releaseProcessLock(): Promise<void> {
 async function logOccupiedPreferredPorts(preferredPort: number): Promise<void> {
   if (process.platform !== 'win32') return;
   try {
-    const proc = Bun.spawn(['netstat', '-ano'], { stdout: 'pipe', stderr: 'pipe' });
+    const proc = Bun.spawn(['netstat', '-ano'], { detached: process.platform !== 'win32', stdout: 'pipe', stderr: 'pipe' });
     const result = await collectBoundedProcess(proc, {
       timeoutMs: 5_000,
       maxChars: 2 * 1024 * 1024,
@@ -162,39 +165,21 @@ await acquireProcessLock();
 await init();
 await captureRuntimeStartup();
 
-// --- Network guard --------------------------------------------------------
-// The server executes code on behalf of whoever can reach it (agents run
-// with permissions bypassed, terminals run arbitrary shell commands), so the
-// HTTP/WS surface must not be reachable cross-origin. Two layers:
-//   1. Bind to loopback by default (HOST env opts into LAN exposure).
-//   2. Reject requests whose Host/Origin isn't loopback — blocks DNS
-//      rebinding and cross-site WebSocket hijacking from malicious pages
-//      running in the user's own browser.
-
+// Bind and authorize one exact origin per launch (including the fallback port).
 const bindHostname = process.env.HOST || '127.0.0.1';
-const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
-// If the user explicitly bound a non-loopback interface, they opted into LAN
-// access — skip the strict Host check (Origin check still applies).
-const enforceLoopbackHost = LOOPBACK_HOSTS.has(bindHostname);
-
-function isRequestAllowed(req: Request): boolean {
-  try {
-    if (enforceLoopbackHost) {
-      const host = new URL(req.url).hostname;
-      if (!LOOPBACK_HOSTS.has(host)) return false;
-    }
-    // Browsers attach Origin on WS upgrades and cross-origin fetches.
-    // Non-browser clients (agent callbacks, curl) send none — allowed.
-    const origin = req.headers.get('origin');
-    if (origin) {
-      const originHost = new URL(origin).hostname;
-      if (!LOOPBACK_HOSTS.has(originHost)) return false;
-    }
-    return true;
-  } catch {
-    return false;
-  }
+if (!['127.0.0.1', 'localhost', '::1', '[::1]'].includes(bindHostname)) {
+  throw new Error('Agent Forge must bind to loopback');
 }
+const networkGuard = createNetworkGuard();
+const vendorBuild = await Bun.build({
+  entrypoints: [fileURLToPath(new URL('../client/vendor.ts', import.meta.url))],
+  target: 'browser', format: 'iife', minify: true,
+  define: { 'process.env.NODE_ENV': JSON.stringify('production') },
+});
+if (!vendorBuild.success) throw new Error('Could not bundle browser dependencies');
+const thirdPartyNotices = await vendorNotices();
+const vendorScript = await vendorBuild.outputs[0]!.text();
+const vendorStyle = Bun.file(new URL('../../node_modules/highlight.js/styles/github-dark.css', import.meta.url));
 
 // --- Server bind with port fallback -------------------------------------
 // Try preferredPort first; if Windows has the socket locked (typically an
@@ -210,13 +195,12 @@ function startServer(preferredPort: number) {
         port,
         hostname: bindHostname,
         maxRequestBodySize: MAX_CHAT_IMAGE_TOTAL_BYTES,
-        routes: {
-          '/': index,
-        },
         fetch(req, server) {
           const url = new URL(req.url);
 
-          if (!isRequestAllowed(req)) {
+          const host = bindHostname === '::1' ? '[::1]' : bindHostname;
+          const expectedOrigin = `http://${host}:${server.port}`;
+          if (!networkGuard.allows(req, expectedOrigin)) {
             return new Response('Forbidden', { status: 403 });
           }
 
@@ -226,6 +210,13 @@ function startServer(preferredPort: number) {
             return new Response('WebSocket upgrade failed', { status: 500 });
           }
 
+          if (url.pathname === '/' && req.method === 'GET') return new Response(indexHtml, { headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' } });
+          if (url.pathname === '/vendor.js') return new Response(vendorScript, { headers: { 'content-type': 'text/javascript' } });
+          if (url.pathname === '/third-party-notices.txt') return new Response(thirdPartyNotices);
+          if (url.pathname === '/vendor.css') return new Response(vendorStyle);
+          if (url.pathname === '/api/session' && req.method === 'GET') {
+            return Response.json({ token: networkGuard.token }, { headers: { 'cache-control': 'no-store' } });
+          }
           // REST routes
           if (url.pathname === '/api/directories') return handleDirectories(req);
           if (url.pathname === '/api/ports' && req.method === 'GET') return handleGetPorts(req);
@@ -281,7 +272,7 @@ if (server.port !== preferredPort) {
 
 // Provider limits: initial read now, then every minute.
 limitsService.start();
-console.log(`Server running at http://localhost:${server.port}`);
+console.log(`Server running at http://${bindHostname === '::1' ? '[::1]' : bindHostname}:${server.port}`);
 
 // --- Graceful and fatal shutdown ---
 // All stages are exactly-once and bounded. PIDs are not blindly cleared:

@@ -89,6 +89,7 @@ export const terminalService = {
       assertArgvWithinLimit(spawnArgs);
       const proc = Bun.spawn(spawnArgs, {
         cwd,
+        detached: process.platform !== 'win32',
         stdin: 'ignore',
         stdout: 'pipe',
         stderr: 'pipe',
@@ -130,8 +131,9 @@ export const terminalService = {
       readStream(proc.stderr).catch(e => console.error(`Terminal ${id} stderr error:`, e));
 
       // Handle exit
-      proc.exited.then((exitCode) => {
-        untrackPidOnce(managed);
+      proc.exited.then(async (exitCode) => {
+        const cleanup = await killProcessTree(proc);
+        if (cleanup.treeKill.succeeded || process.platform === 'win32') untrackPidOnce(managed);
         finalizeTerminal(managed, exitCode, false);
       }).catch(e => {
         // Keep the PID tracked: startup recovery must retry cleanup when the
@@ -155,11 +157,11 @@ export const terminalService = {
     }
     const pid = terminal.process.pid;
     const result = await killProcessTree(terminal.process);
-    if (result.rootExited && pid) untrackPidOnce(terminal);
+    if (result.rootExited && result.treeKill.succeeded && pid) untrackPidOnce(terminal);
     // Even an unconfirmed process is detached from the UI so it cannot keep
     // emitting output. Its PID intentionally stays persisted for recovery.
     finalizeTerminal(terminal, result.exitCode, true, true);
-    return result.rootExited;
+    return result.rootExited && result.treeKill.succeeded;
   },
 
   async killAll(): Promise<void> {

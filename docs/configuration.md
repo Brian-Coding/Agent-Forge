@@ -7,7 +7,7 @@ Agent Forge works with no configuration. Everything below is optional.
 | Setting | Default | Meaning |
 | --- | --- | --- |
 | `PORT` | `3333` | First port to try. If it is busy, the next seven ports are tried. |
-| `HOST` | `127.0.0.1` | Interface to bind. Leave this on loopback; see [Safety model](safety.md). |
+| `HOST` | `127.0.0.1` | Loopback interface to bind; other addresses are rejected. Use the printed hostname exactly; see [Safety model](safety.md). |
 | `AGENT_TURN_INACTIVITY_MS` | unset | Stop a turn after this many milliseconds with no provider output. Unset means long-running turns are never cut off automatically. |
 
 ## Providers

@@ -73,7 +73,7 @@ export function resolveGitDiffTarget(projectRoot: string, requestedPath: string)
 }
 
 export async function runGit(cwd: string, args: string[]): Promise<{ exitCode: number; stdout: string; stderr: string }> {
-  const proc = Bun.spawn(['git', '-C', cwd, ...args], { stdout: 'pipe', stderr: 'pipe' });
+  const proc = Bun.spawn(['git', '-C', cwd, ...args], { detached: process.platform !== 'win32', stdout: 'pipe', stderr: 'pipe' });
   const result = await collectBoundedProcess(proc, {
     timeoutMs: 10_000,
     terminationTimeoutMs: 3_000,

@@ -70,7 +70,7 @@ test('normalization isolates malformed records and repairs unsafe numeric state'
   expect(normalized.issues.length).toBeGreaterThanOrEqual(5);
 });
 
-test('normalization deeply repairs hostile workspace, QA, Atlas, message, and settings state', () => {
+test('normalization repairs supported state and discards removed feature fields', () => {
   const normalized = normalizePersistedData({
     ...emptyData(),
     agents: [{
@@ -135,10 +135,8 @@ test('normalization deeply repairs hostile workspace, QA, Atlas, message, and se
     selectedAgentIds: ['', 'agent-1'],
     lockedAgentIds: ['agent-1'],
     createdAt: 0,
-    qaSurfaceVerifications: { valid: 10 },
   });
-  expect(workspace.qaRuns.map((run: any) => run.id)).toEqual(['run-1']);
-  expect(workspace.atlasRun.candidateRelPath).toBe('docs/.agent-forge-atlas-candidates/atlas-1');
+  for (const field of ['qaRuns', 'atlasRun', 'qaSurfaceVerifications', 'googleDocsTrackerEnabled', 'atlasProjectCwd', 'testUrl']) expect(workspace).not.toHaveProperty(field);
   expect(workspace.injected).toBeUndefined();
   expect((normalized.data.messages[0] as any).imageAttachments).toHaveLength(1);
   expect((normalized.data.messages[0] as any).injected).toBeUndefined();

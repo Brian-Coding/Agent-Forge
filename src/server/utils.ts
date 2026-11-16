@@ -59,7 +59,7 @@ export function safeSpawn(
   opts: SpawnOptions.OptionsObject<'pipe', 'pipe', 'pipe'>,
 ): Subprocess<'pipe', 'pipe', 'pipe'> {
   assertArgvWithinLimit(args);
-  return Bun.spawn(args, opts) as Subprocess<'pipe', 'pipe', 'pipe'>;
+  return Bun.spawn(args, { ...opts, detached: process.platform !== 'win32' }) as Subprocess<'pipe', 'pipe', 'pipe'>;
 }
 
 export function jsonResponse(data: any, status = 200): Response {
@@ -217,10 +217,21 @@ function skippedTreeKill(error?: string): TreeKillResult {
   };
 }
 
-// Kill an entire process tree. Windows needs taskkill /T; POSIX gets a direct
-// process kill fallback because spawned CLIs are not always in their own group.
-// The optional dependency argument keeps timeout/failure behavior deterministic
-// in unit tests while preserving the existing one-argument call surface.
+// Every long-running POSIX child owns a process group (detached spawn).
+// Never equate a parent-only kill with successful descendant cleanup.
+async function groupHasLiveMembers(pid: number): Promise<boolean> {
+  const probe = Bun.spawn(['ps', '-eo', 'pid=,pgid=,stat='], { stdout: 'pipe', stderr: 'ignore' });
+  const timer = setTimeout(() => probe.kill('SIGKILL'), 500);
+  try {
+    const output = await new Response(probe.stdout).text();
+    if (await probe.exited !== 0) throw new Error('Process group verification failed');
+    return output.split('\n').some(line => {
+      const [member, group, state] = line.trim().split(/\s+/);
+      return (Number(group) === pid || Number(member) === pid) && !state?.startsWith('Z');
+    });
+  } finally { clearTimeout(timer); }
+}
+
 export async function treeKill(
   pid: number,
   options: ProcessTerminationOptions = {},
@@ -270,16 +281,19 @@ export async function treeKill(
   }
 
   try {
-    try {
-      process.kill(-pid, 'SIGKILL');
-    } catch {
-      process.kill(pid, 'SIGKILL');
-    }
-    return { attempted: true, succeeded: true, exitCode: null, timedOut: false };
+    try { process.kill(-pid, 'SIGKILL'); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error; }
+    const deadline = Date.now() + boundedTimeout(options.finalExitGraceMs, DEFAULT_FINAL_EXIT_GRACE_MS);
+    do {
+      if (!await groupHasLiveMembers(pid)) {
+        return { attempted: true, succeeded: true, exitCode: null, timedOut: false };
+      }
+      await new Promise(resolve => setTimeout(resolve, 20));
+    } while (Date.now() < deadline);
+    return { attempted: true, succeeded: false, exitCode: null, timedOut: true,
+      error: 'Owned process group cleanup could not be confirmed' };
   } catch (error) {
-    const message = errorText(error);
-    console.error(`treeKill(${pid}) failed (process may already be dead):`, error);
-    return { attempted: true, succeeded: false, exitCode: null, timedOut: false, error: message };
+    return { attempted: true, succeeded: false, exitCode: null, timedOut: false, error: errorText(error) };
   }
 }
 
@@ -293,7 +307,7 @@ export async function killProcessTree(
   deps: ProcessTerminationDependencies = defaultProcessTerminationDependencies,
 ): Promise<ProcessTerminationResult> {
   const emptyTreeResult = skippedTreeKill();
-  if (proc.exitCode != null || proc.signalCode != null) {
+  if (deps.platform === 'win32' && (proc.exitCode != null || proc.signalCode != null)) {
     return {
       rootExited: true,
       exitCode: proc.exitCode,

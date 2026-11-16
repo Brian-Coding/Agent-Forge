@@ -160,7 +160,7 @@ export function parseClaudeModelDiscovery(parsed: unknown): ModelOption[] {
 
 async function discoverCodexModelsOnce(): Promise<CodexModelDiscovery> {
   try {
-    const proc = Bun.spawn([resolveCliBinary('codex'), 'debug', 'models'], {
+    const proc = Bun.spawn([resolveCliBinary('codex'), 'debug', 'models'], { detached: process.platform !== 'win32',
       stdout: 'pipe',
       stderr: 'pipe',
       env: createCliEnv(),

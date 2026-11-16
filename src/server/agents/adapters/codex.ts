@@ -863,7 +863,7 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
       terminationPromise = killProcessTree(target).then(
         result => {
           terminationResult = result;
-          if (!result.rootExited) warnAndUnwind('the process did not exit after bounded kill attempts');
+          if (!result.rootExited || !result.treeKill.succeeded) warnAndUnwind('the process did not exit after bounded kill attempts');
           else unwind.trigger();
         },
         error => {
@@ -884,7 +884,7 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
         return requestTermination();
       }
       const gracefulExit = await waitForProcessExit(target, 1_000);
-      if (gracefulExit.status !== 'exited' && proc === target) await requestTermination();
+      if (proc === target) await requestTermination();
     };
 
     // Build args. The actual prompt is fed via stdin (`-`), so the system
@@ -1178,12 +1178,16 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
           }
 
           const exitOutcome = await waitForOperationOrUnwind(proc.exited, unwind);
+          if (process.platform !== 'win32' && !terminationResult) {
+            terminationResult = await killProcessTree(proc);
+            if (!terminationResult.treeKill.succeeded) warnAndUnwind('descendant cleanup was not confirmed');
+          }
           const rootExitConfirmed = exitOutcome.status === 'completed'
             || terminationResult?.rootExited === true;
           const exitCode = exitOutcome.status === 'completed'
             ? exitOutcome.value
             : terminationResult?.exitCode ?? -1;
-          if (rootExitConfirmed && proc.pid) persistenceService.untrackPid(proc.pid);
+          if (rootExitConfirmed && (process.platform === 'win32' || terminationResult?.treeKill.succeeded) && proc.pid) persistenceService.untrackPid(proc.pid);
           proc = null;
           await stopRolloutMonitor();
 

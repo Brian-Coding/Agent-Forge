@@ -8,7 +8,7 @@ import { safeRemoveTree } from '../services/safe-filesystem.mjs';
 
 export async function runSimctl(...args: string[]): Promise<{ ok: boolean; output: string }> {
   try {
-    const proc = Bun.spawn(['xcrun', 'simctl', ...args], {
+    const proc = Bun.spawn(['xcrun', 'simctl', ...args], { detached: process.platform !== 'win32',
       stdout: 'pipe',
       stderr: 'pipe',
     });

@@ -8,7 +8,7 @@ if (start < 0 || end < start) throw new Error('Could not locate the browser WebS
 
 // Execute the shipped hook with controlled renders and transport events. In
 // particular, several server frames may arrive before React renders again.
-function mountClient() {
+async function mountClient() {
   const slots: any[] = [];
   let cursor = 0;
   let effects: Array<() => void> = [];
@@ -79,6 +79,7 @@ function mountClient() {
     WebSocket: FakeSocket,
     location: { protocol: 'http:', host: 'queue-test.invalid' },
     fetch: async () => ({ ok: false }),
+    loadLaunchToken: async () => 'test-launch-token',
     setInterval: () => 1,
     clearInterval: () => {},
     setTimeout: (callback: () => void) => { timers.set(++timerId, callback); return timerId; },
@@ -96,16 +97,18 @@ function mountClient() {
     return client;
   }
   render();
+  await Promise.resolve();
   return {
     render,
     get client() { return client; },
     get socket() { return sockets.at(-1)!; },
     get sends() { return sockets.flatMap(socket => socket.sent).filter(frame => frame.type === 'send_message'); },
-    reconnect() {
+    async reconnect() {
       if (this.socket.readyState !== 3) this.socket.close();
       const pendingTimers = [...timers.values()];
       timers.clear();
       pendingTimers.forEach(callback => callback());
+      await Promise.resolve();
       this.socket.open();
     },
   };
@@ -121,8 +124,8 @@ function queueSnapshot(preview: string, agentId = agent.id) {
   };
 }
 
-test('a server queue preview followed by repeated idle frames never resubmits a user turn', () => {
-  const app = mountClient();
+test('a server queue preview followed by repeated idle frames never resubmits a user turn', async () => {
+  const app = await mountClient();
   app.socket.open();
   app.socket.receive(agents);
   app.render();
@@ -143,14 +146,14 @@ test('a server queue preview followed by repeated idle frames never resubmits a 
   expect(app.sends).toEqual([originalSend]);
 });
 
-test('reconnecting to another client’s server queue only displays its preview', () => {
-  const app = mountClient();
+test('reconnecting to another client’s server queue only displays its preview', async () => {
+  const app = await mountClient();
   app.socket.open();
   app.socket.receive(queueSnapshot('accepted in another tab'));
   expect(app.render().queued[agent.id]).toEqual(['accepted in another tab']);
   app.socket.receive(agents);
   app.render();
-  app.reconnect();
+  await app.reconnect();
   app.socket.receive(agents);
   app.socket.receive(queueSnapshot('accepted in another tab'));
   app.render();
@@ -158,8 +161,8 @@ test('reconnecting to another client’s server queue only displays its preview'
   expect(app.sends).toEqual([]);
 });
 
-test('offline messages survive server snapshots and flush in full once even when the agent is busy', () => {
-  const app = mountClient();
+test('offline messages survive server snapshots and flush in full once even when the agent is busy', async () => {
+  const app = await mountClient();
   const fullContent = 'A long offline prompt '.repeat(20);
   app.client.sendMessage(agent.id, fullContent);
   app.client.sendMessage(agent.id, 'second offline prompt');
@@ -177,13 +180,13 @@ test('offline messages survive server snapshots and flush in full once even when
   expect(new Set(app.sends.map(frame => frame.requestId)).size).toBe(2);
   expect(app.render().queued[agent.id]).toEqual(['server preview']);
   app.socket.receive(idle);
-  app.reconnect();
+  await app.reconnect();
   app.socket.receive(agents);
   expect(app.sends).toHaveLength(2);
 });
 
-test('a failed socket write retains the prompt and its request ID for reconnect', () => {
-  const app = mountClient();
+test('a failed socket write retains the prompt and its request ID for reconnect', async () => {
+  const app = await mountClient();
   app.socket.open();
   app.socket.receive(agents);
   app.render();
@@ -191,14 +194,14 @@ test('a failed socket write retains the prompt and its request ID for reconnect'
   expect(() => app.client.sendMessage(agent.id, 'keep this prompt')).not.toThrow();
   const attempt = app.socket.attempts.find(frame => frame.type === 'send_message');
   expect(app.render().queued[agent.id]).toEqual(['keep this prompt']);
-  app.reconnect();
+  await app.reconnect();
   app.socket.receive(agents);
   expect(app.sends).toHaveLength(1);
   expect(app.sends[0]).toMatchObject({ content: 'keep this prompt', requestId: attempt.requestId });
 });
 
-test('two intentional submissions of the same text remain distinct requests', () => {
-  const app = mountClient();
+test('two intentional submissions of the same text remain distinct requests', async () => {
+  const app = await mountClient();
   app.socket.open();
   app.client.sendMessage(agent.id, 'same text');
   app.client.sendMessage(agent.id, 'same text');
@@ -206,9 +209,9 @@ test('two intentional submissions of the same text remain distinct requests', ()
   expect(app.sends[0].requestId).not.toBe(app.sends[1].requestId);
 });
 
-test('stop, kill and remove cancel only that agent’s unsent prompts before reconnect', () => {
+test('stop, kill and remove cancel only that agent’s unsent prompts before reconnect', async () => {
   for (const action of ['stopAgent', 'killAgent', 'removeAgent']) {
-    const app = mountClient();
+    const app = await mountClient();
     app.client.sendMessage(agent.id, 'cancel this');
     app.client.sendMessage('agent-b', 'keep this');
     app.client[action](agent.id);
@@ -219,8 +222,8 @@ test('stop, kill and remove cancel only that agent’s unsent prompts before rec
   }
 });
 
-test('kill all and server agent removal cannot leave offline prompts to resurrect later', () => {
-  const app = mountClient();
+test('kill all and server agent removal cannot leave offline prompts to resurrect later', async () => {
+  const app = await mountClient();
   app.client.sendMessage(agent.id, 'removed agent prompt');
   app.socket.receive(queueSnapshot('removed server preview'));
   app.socket.receive({ type: 'agent_removed', agentId: agent.id });
@@ -233,19 +236,19 @@ test('kill all and server agent removal cannot leave offline prompts to resurrec
   app.client.sendMessage(agent.id, 'cancel all A');
   app.client.sendMessage('agent-b', 'cancel all B');
   app.client.killAll();
-  app.reconnect();
+  await app.reconnect();
   app.socket.receive({ type: 'agents_list', agents: [agent, { ...agent, id: 'agent-b' }] });
   expect(app.sends).toEqual([]);
 });
 
-test('reconnect discards stale server previews but retains locally unsent prompts', () => {
-  const app = mountClient();
+test('reconnect discards stale server previews but retains locally unsent prompts', async () => {
+  const app = await mountClient();
   app.socket.open();
   app.socket.receive(queueSnapshot('old server session'));
   app.render();
   app.socket.close();
   app.client.sendMessage(agent.id, 'still local');
-  app.reconnect();
+  await app.reconnect();
   expect(app.render().queued[agent.id]).toEqual(['still local']);
   app.socket.receive(agents);
   expect(app.sends.map(frame => frame.content)).toEqual(['still local']);

@@ -234,8 +234,8 @@ export const workspaceService = {
     let recoveryChanged = false;
     if (workspacesList && workspacesList.length > 0) {
       for (const [index, ws] of workspacesList.entries()) {
-        // Older installs stored state for features that now live in separate
-        // projects (UI Atlas, QA runs, Google Docs tracker). Drop it once.
+        // Defense for direct service callers: persistence already drops
+        // obsolete workspace fields at its allowlist boundary.
         for (const key of LEGACY_WORKSPACE_KEYS) {
           if (key in ws) {
             delete (ws as unknown as Record<string, unknown>)[key];

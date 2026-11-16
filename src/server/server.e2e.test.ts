@@ -152,7 +152,8 @@ test('full server boot recovers state, enforces transport guards, persists a mut
     expect((await fetch(`${baseUrl}/not-a-route`)).status).toBe(404);
 
     const frames: any[] = [];
-    const ws = new WebSocket(`ws://127.0.0.1:${port}/`);
+    const { token } = await (await fetch(`${baseUrl}/api/session`)).json() as any;
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/`, ['forge-auth.' + token]);
     ws.addEventListener('message', event => {
       try { frames.push(JSON.parse(String(event.data))); } catch {}
     });

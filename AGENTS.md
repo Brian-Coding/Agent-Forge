@@ -12,7 +12,7 @@ You are working on Agent Forge, a local Bun + TypeScript harness that runs Claud
 ## Conventions
 
 - Use Bun everywhere (`bun test`, `bun run`, `bunx`, `Bun.serve`, `Bun.spawn`). Do not add Express, Vite, Jest, or dotenv.
-- The browser UI is a single file, `src/client/index.html`, with React loaded from a CDN and no build step. Keep it that way unless a change is agreed first. `src/client/workspace-selection.test.ts` checks that its inline script still parses.
+- The browser UI is a single file, `src/client/index.html`, with dependencies bundled locally from `src/client/vendor.ts` on startup. Keep the UI in one file unless a change is agreed first. `src/client/workspace-selection.test.ts` checks that its inline script still parses.
 - Every WebSocket command is declared in `src/shared/protocol.ts` and validated with exact keys in `src/server/client-message.ts`. Change both together and add a case to `client-message.test.ts`.
 - Provider-specific code belongs in `src/server/agents/adapters/`. Everything else consumes normalized events.
 - Filesystem deletion goes through `src/server/services/safe-filesystem.mjs`. Process termination goes through the ownership checks in `process-ownership.ts`. Do not bypass them.

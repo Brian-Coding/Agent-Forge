@@ -3,7 +3,7 @@
 Agent Forge is one Bun process serving a single-page browser UI over HTTP and a WebSocket.
 
 ```text
-Browser UI  (src/client/index.html, React via CDN, no build step)
+Browser UI  (src/client/index.html, React from bun.lock, bundled at startup)
      │  HTTP + WebSocket on 127.0.0.1
      ▼
 Bun server  (src/server)
@@ -37,3 +37,7 @@ Provider CLIs (claude, codex) and terminal commands, one process tree per turn
 - `src/client/*.test.ts` exercise the browser code (including the WebSocket queue hook) against controlled transports.
 
 `bun run test:coverage` adds a weighted coverage ratchet (`scripts/check-coverage.ts`).
+
+## Persistence migration
+
+Schema 1 is current. Historical schema 2 is imported through the same allowlist and saved as schema 1 after preserving a recovery copy. Removed feature fields are discarded at normalization; no extracted feature runtime or report normalization remains.

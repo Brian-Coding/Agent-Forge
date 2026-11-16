@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+import { createProcessProbe, type ProcessIdentity } from '../platform/process-probe';
 import { jsonResponse } from '../utils';
 import { readJsonBody } from '../request-body';
 import { collectBoundedProcess } from '../services/bounded-subprocess';
@@ -6,13 +8,10 @@ import { workspaceService } from '../services/workspace.service';
 import { parseServerPort } from '../server-config';
 import {
   labelListeningPort,
-  parsePowerShellProcessJson,
-  parsePsPidCommandList,
-  parseWmicProcessList,
 } from '../services/port-labels';
 
 async function runPortCommand(args: string[], maxChars = 2 * 1024 * 1024) {
-  const proc = Bun.spawn(args, { stdout: 'pipe', stderr: 'pipe' });
+  const proc = Bun.spawn(args, { detached: process.platform !== 'win32', stdout: 'pipe', stderr: 'pipe' });
   const result = await collectBoundedProcess(proc, {
     timeoutMs: 5_000,
     terminationTimeoutMs: 2_000,
@@ -54,40 +53,6 @@ async function getProcessNamesByPidWindows(): Promise<Map<number, string>> {
   return map;
 }
 
-/** One extra spawn for command lines so labels can say "Vite · Acme Store" instead of "node". */
-async function getCommandLinesByPid(): Promise<Map<number, string>> {
-  const isWindows = process.platform === 'win32';
-  try {
-    if (isWindows) {
-      try {
-        const wmic = await runPortCommand(
-          ['wmic', 'process', 'get', 'ProcessId,CommandLine', '/FORMAT:LIST'],
-          4 * 1024 * 1024,
-        );
-        if (wmic.exitCode === 0) {
-          const parsed = parseWmicProcessList(wmic.stdout);
-          if (parsed.size > 0) return parsed;
-        }
-      } catch {
-        // WMIC is gone on many Windows 11 installs — fall through to CIM.
-      }
-      const powershell = await runPortCommand([
-        'powershell',
-        '-NoProfile',
-        '-NonInteractive',
-        '-Command',
-        'Get-CimInstance Win32_Process | Select-Object ProcessId,CommandLine | ConvertTo-Json -Compress',
-      ], 4 * 1024 * 1024);
-      if (powershell.exitCode === 0) return parsePowerShellProcessJson(powershell.stdout);
-      return new Map();
-    }
-    const ps = await runPortCommand(['ps', '-ax', '-o', 'pid=,command='], 4 * 1024 * 1024);
-    return ps.exitCode === 0 ? parsePsPidCommandList(ps.stdout) : new Map();
-  } catch {
-    return new Map();
-  }
-}
-
 function listenPort(): number | undefined {
   try {
     return parseServerPort(process.env.PORT);
@@ -96,19 +61,13 @@ function listenPort(): number | undefined {
   }
 }
 
-function decoratePorts(
+async function decoratePorts(
   ports: { port: number; pid: number; command: string }[],
   commandLines: Map<number, string>,
-): {
-  port: number;
-  pid: number;
-  command: string;
-  label: string;
-  self: boolean;
-}[] {
+) {
   const workspaces = workspaceService.getAll();
   const serverPort = listenPort();
-  return ports.map(port => {
+  return Promise.all(ports.map(async port => {
     const labeled = labelListeningPort({
       ...port,
       commandLine: commandLines.get(port.pid) || '',
@@ -116,8 +75,13 @@ function decoratePorts(
       listenPort: serverPort,
       selfPid: process.pid,
     });
-    return { ...port, label: labeled.label, self: labeled.self };
-  });
+    const observed = await portProbe.probe(port.pid);
+    const stopToken = observed.status === 'matched' && observed.identity?.startTimeMs && !labeled.self
+      ? randomUUID() : undefined;
+    if (stopToken) stopTickets.set(stopToken, { port: port.port, identity: observed.identity!, expires: Date.now() + 30_000 });
+    for (const [key, ticket] of stopTickets) if (ticket.expires < Date.now()) stopTickets.delete(key);
+    return { ...port, label: labeled.label, self: labeled.self, stopToken };
+  }));
 }
 
 // OS services and always-on consumer apps whose listeners are never the
@@ -153,7 +117,7 @@ export async function handleGetPorts(req: Request): Promise<Response> {
           return result.stdout;
         })(),
         getProcessNamesByPidWindows(),
-        getCommandLinesByPid(),
+        Promise.resolve(new Map<number, string>()),
       ]);
 
       const lines = netstatOut.trim().split('\n');
@@ -174,11 +138,11 @@ export async function handleGetPorts(req: Request): Promise<Response> {
         ports.push({ port, pid, command });
       }
       ports.sort((a, b) => a.port - b.port);
-      return jsonResponse({ ports: decoratePorts(ports, commandLines) });
+      return jsonResponse({ ports: await decoratePorts(ports, commandLines) });
     } else {
       const [result, commandLines] = await Promise.all([
         runPortCommand(['lsof', '-iTCP', '-sTCP:LISTEN', '-nP']),
-        getCommandLinesByPid(),
+        Promise.resolve(new Map<number, string>()),
       ]);
       if (result.exitCode !== 0) return jsonResponse({ ports: [] });
       const stdout = result.stdout;
@@ -204,30 +168,46 @@ export async function handleGetPorts(req: Request): Promise<Response> {
         ports.push({ port, pid, command });
       }
       ports.sort((a, b) => a.port - b.port);
-      return jsonResponse({ ports: decoratePorts(ports, commandLines) });
+      return jsonResponse({ ports: await decoratePorts(ports, commandLines) });
     }
   } catch {
     return jsonResponse({ ports: [] });
   }
 }
 
+const portProbe = createProcessProbe();
+const stopTickets = new Map<string, { port: number; identity: ProcessIdentity; expires: number }>();
+
+export function sameListenerIdentity(a: ProcessIdentity, b: ProcessIdentity): boolean {
+  return a.pid === b.pid && !!a.startTimeMs && a.startTimeMs === b.startTimeMs && !!a.name && a.name === b.name;
+}
+
 export async function handleKillPort(req: Request): Promise<Response> {
   try {
-    const body = (await readJsonBody(req, 4_096)) as { pid?: unknown };
+    const body = (await readJsonBody(req, 4_096)) as { pid?: unknown; port?: unknown; stopToken?: unknown };
     const pid = parseKillPid(body.pid);
-    if (pid === null) return jsonResponse({ error: 'Invalid or unsafe pid' }, 400);
-    const isWindows = process.platform === 'win32';
-    // taskkill is a native Win32 exe — same role as PowerShell's
-    // Stop-Process but without paying PowerShell's ~1-2s cold-start tax.
-    const result = await runPortCommand(isWindows
-      ? ['taskkill', '/F', '/PID', String(pid)]
-      : ['kill', '-9', String(pid)], 64_000);
-    return jsonResponse({
-      ok: result.exitCode === 0,
-      ...(result.exitCode === 0 ? {} : { error: (result.stderr || result.stdout || 'Process termination failed').slice(0, 500) }),
-    });
-  } catch (e: any) {
-    return jsonResponse({ ok: false, error: e.message }, 500);
+    if (pid === null || pid === process.ppid) return jsonResponse({ error: 'Invalid or unsafe pid' }, 400);
+    const ticket = typeof body.stopToken === 'string' ? stopTickets.get(body.stopToken) : undefined;
+    if (!ticket || ticket.expires < Date.now() || ticket.port !== body.port || ticket.identity.pid !== pid) {
+      return jsonResponse({ error: 'Refresh the port list before stopping this listener' }, 409);
+    }
+    stopTickets.delete(body.stopToken as string);
+    // Re-inventory listeners, then re-probe birth identity immediately before the signal.
+    const inventory = await (await handleGetPorts(new Request(req.url))).json() as any;
+    if (!inventory.ports.some((item: any) => item.pid === pid && item.port === ticket.port && !item.self)) {
+      return jsonResponse({ error: 'This process no longer owns the selected listener' }, 409);
+    }
+    const current = await portProbe.probe(pid);
+    if (current.status !== 'matched' || !current.identity || !sameListenerIdentity(ticket.identity, current.identity)) {
+      return jsonResponse({ error: 'The listener process changed; stop was refused' }, 409);
+    }
+    // Explicit external-process stop: this is not an ownership claim or tree cleanup.
+    const result = await runPortCommand(process.platform === 'win32'
+      ? ['taskkill', '/F', '/PID', String(pid)] : ['kill', '-TERM', String(pid)], 64_000);
+    return jsonResponse({ ok: result.exitCode === 0, scope: 'external-process',
+      ...(result.exitCode === 0 ? {} : { error: 'Process termination failed' }) });
+  } catch {
+    return jsonResponse({ ok: false, error: 'Could not revalidate or stop the listener' }, 500);
   }
 }
 

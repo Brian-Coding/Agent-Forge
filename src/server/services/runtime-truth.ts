@@ -234,7 +234,7 @@ function resolveGitDir(sourceRoot: string): string | undefined {
 
 async function readGitDirty(sourceRoot: string): Promise<boolean> {
   try {
-    const proc = Bun.spawn(['git', '-C', sourceRoot, 'status', '--porcelain', '-uno'], {
+    const proc = Bun.spawn(['git', '-C', sourceRoot, 'status', '--porcelain', '-uno'], { detached: process.platform !== 'win32',
       stdout: 'pipe',
       stderr: 'pipe',
       env: versionProbeEnv(),
@@ -267,7 +267,7 @@ async function probeOneProvider(
 ): Promise<RuntimeProviderIdentity> {
   try {
     const argv = command();
-    const proc = Bun.spawn([...argv, '--version'], {
+    const proc = Bun.spawn([...argv, '--version'], { detached: process.platform !== 'win32',
       stdout: 'pipe',
       stderr: 'pipe',
       env: versionProbeEnv(),

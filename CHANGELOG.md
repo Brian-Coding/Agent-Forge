@@ -1,0 +1,11 @@
+# Changelog
+
+## 1.0.1 — 2026-11-16 (private preview)
+
+- Require the exact launch origin and an ephemeral capability for WebSocket/HTTP mutations.
+- Launch owned POSIX process groups and verify descendant cleanup; revalidate selected external listeners before stopping them.
+- Treat project-directory changes as a provider-session boundary and refuse them during active turns.
+- Remove extracted-feature persistence normalization and repair the coverage gate.
+- Bundle React 19, Marked, DOMPurify 3.4.17, and Highlight.js from the lockfile; add browser sanitizer and file-link regression checks.
+- Support POSIX and file-URL project links; ignore dotenv variants; clarify private publication instructions.
+- Add real demo screenshots, architecture documentation, third-party notices, and [measured performance](docs/performance.md). The local bundle improves sampled UI loading while adding startup/build work.

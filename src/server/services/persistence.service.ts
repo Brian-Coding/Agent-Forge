@@ -11,8 +11,8 @@ import {
 } from './process-ownership';
 
 export const PERSISTED_SCHEMA_VERSION = 1;
-/** Legacy schema version 2 files are readable and are rewritten as schema version 1. */
-const PARKED_STUDIO_SCHEMA_VERSION = 2;
+/** Legacy schema 2 is imported using only the current allowlisted fields. */
+const LEGACY_SCHEMA_VERSION = 2;
 const MAX_ORPHAN_PIDS = 256;
 const MAX_ACTIVE_PIDS = 4_096;
 const DEFAULT_MAX_DATA_BYTES = 256 * 1024 * 1024;
@@ -46,8 +46,8 @@ export function normalizePersistedData(raw: unknown): PersistedDataNormalization
     if (issues.length < 200) issues.push(message);
     else if (issues.length === 200) issues.push('Additional normalization issues were omitted');
   };
-  if (raw.schemaVersion === PARKED_STUDIO_SCHEMA_VERSION) {
-    issue(`schemaVersion ${PARKED_STUDIO_SCHEMA_VERSION} (legacy schema 2 write) was downgraded to ${PERSISTED_SCHEMA_VERSION}`);
+  if (raw.schemaVersion === LEGACY_SCHEMA_VERSION) {
+    issue(`schemaVersion ${LEGACY_SCHEMA_VERSION} (legacy write) was downgraded to ${PERSISTED_SCHEMA_VERSION}`);
   } else if (raw.schemaVersion !== undefined && raw.schemaVersion !== PERSISTED_SCHEMA_VERSION) {
     throw new UnsupportedPersistenceVersionError(raw.schemaVersion);
   }
@@ -207,85 +207,6 @@ export function normalizePersistedData(raw: unknown): PersistedDataNormalization
     return [document as any];
   });
 
-  const normalizeQaRun = (candidate: unknown, path: string): Record<string, any> | null => {
-    if (!isRecord(candidate)
-      || !boundedString(candidate.id, 256, false)
-      || !boundedString(candidate.sourceAgentId, 256, false)
-      || typeof candidate.prompt !== 'string'
-      || !['queued', 'running', 'completed', 'failed', 'cancelled'].includes(candidate.status)
-      || !boundedString(candidate.browserSessionId, 256, false)
-      || finiteNonNegative(candidate.createdAt) === undefined) {
-      issue(`${path} was malformed`);
-      return null;
-    }
-    const run: Record<string, any> = {
-      id: candidate.id,
-      sourceAgentId: candidate.sourceAgentId,
-      prompt: candidate.prompt.slice(0, 1024 * 1024),
-      status: candidate.status,
-      browserSessionId: candidate.browserSessionId,
-      createdAt: candidate.createdAt,
-    };
-    for (const key of ['startedAt', 'finishedAt', 'handoffStartedAt', 'handedOffAt'] as const) {
-      const value = finiteNonNegative(candidate[key]);
-      if (value !== undefined) run[key] = value;
-    }
-    for (const key of ['rerunOf', 'verdict', 'summary', 'report', 'error', 'handoffError'] as const) {
-      const value = boundedString(candidate[key], key === 'report' ? 2 * 1024 * 1024 : 100_000, false);
-      if (value) run[key] = value;
-    }
-    const validationErrors = boundedStrings(candidate.validationErrors, 1_000, 10_000);
-    if (validationErrors.length > 0) run.validationErrors = validationErrors;
-    for (const key of ['assertions', 'evidence', 'findings'] as const) {
-      if (Array.isArray(candidate[key])) run[key] = candidate[key].slice(0, 1_000).filter(isRecord);
-    }
-    if (isRecord(candidate.usage)) {
-      run.usage = {
-        inputTokens: finiteNonNegative(candidate.usage.inputTokens) ?? 0,
-        outputTokens: finiteNonNegative(candidate.usage.outputTokens) ?? 0,
-        costUsd: finiteNonNegative(candidate.usage.costUsd) ?? 0,
-      };
-    }
-    return run;
-  };
-
-  const normalizeAtlasRun = (candidate: unknown, path: string): Record<string, any> | null => {
-    const runId = isRecord(candidate) ? boundedString(candidate.id, 96, false) : null;
-    if (!isRecord(candidate)
-      || !runId || !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,95}$/.test(runId)
-      || (candidate.mode !== 'build' && candidate.mode !== 'rescan')
-      || !['running', 'validating', 'paused', 'failed', 'completed', 'cancelled'].includes(candidate.status)
-      || !boundedString(candidate.browserSessionId, 256, false)
-      || finiteNonNegative(candidate.createdAt) === undefined
-      || finiteNonNegative(candidate.startedAt) === undefined
-      || finiteNonNegative(candidate.lastActivityAt) === undefined) {
-      issue(`${path} was malformed`);
-      return null;
-    }
-    const run: Record<string, any> = {
-      id: runId,
-      mode: candidate.mode,
-      status: candidate.status,
-      candidateRelPath: `docs/.agent-forge-atlas-candidates/${runId}`,
-      browserSessionId: candidate.browserSessionId,
-      createdAt: candidate.createdAt,
-      startedAt: candidate.startedAt,
-      lastActivityAt: candidate.lastActivityAt,
-    };
-    if (candidate.candidateRelPath !== run.candidateRelPath) issue(`${path}.candidateRelPath was repaired`);
-    for (const key of ['finishedAt', 'surfaceCount', 'entityCount', 'verifiedSurfaceCount', 'resumeCount'] as const) {
-      const value = finiteNonNegative(candidate[key]);
-      if (value !== undefined) run[key] = value;
-    }
-    for (const key of ['phase', 'error'] as const) {
-      const value = boundedString(candidate[key], 100_000, false);
-      if (value) run[key] = value;
-    }
-    const validationErrors = boundedStrings(candidate.validationErrors, 1_000, 10_000);
-    if (validationErrors.length > 0) run.validationErrors = validationErrors;
-    return run;
-  };
-
   const workspaceIds = new Set<string>();
   const workspaces = arrayField('workspaces', 2_000).flatMap((candidate, index) => {
     if (!isRecord(candidate)
@@ -298,12 +219,6 @@ export function normalizePersistedData(raw: unknown): PersistedDataNormalization
     workspaceIds.add(candidate.id);
     const selectedAgentIds = boundedStrings(candidate.selectedAgentIds, 1_024, 256, true);
     const lockedAgentIds = boundedStrings(candidate.lockedAgentIds, 1_024, 256);
-    const qaRuns = Array.isArray(candidate.qaRuns)
-      ? candidate.qaRuns.slice(0, 100).flatMap((run: unknown, runIndex: number) => {
-        const normalized = normalizeQaRun(run, `workspaces[${index}].qaRuns[${runIndex}]`);
-        return normalized ? [normalized] : [];
-      })
-      : [];
     const workspace: Record<string, any> = {
       id: candidate.id,
       name: candidate.name,
@@ -313,30 +228,9 @@ export function normalizePersistedData(raw: unknown): PersistedDataNormalization
       selectedAgentIds,
       lockedAgentIds,
       createdAt: finiteNonNegative(candidate.createdAt) ?? 0,
-      googleDocsTrackerEnabled: candidate.googleDocsTrackerEnabled === true,
-      qaRuns,
     };
     const cwd = boundedString(candidate.cwd, 32_768, false);
     if (cwd) workspace.cwd = cwd;
-    for (const key of ['testUrl', 'qaAgentId', 'atlasAgentId'] as const) {
-      const value = boundedString(candidate[key], key === 'testUrl' ? 8_192 : 256, false);
-      if (value) workspace[key] = value;
-    }
-    const atlasProjectCwd = boundedString(candidate.atlasProjectCwd, 32_768, false);
-    if (atlasProjectCwd) workspace.atlasProjectCwd = atlasProjectCwd;
-    const atlasLastScanAt = finiteNonNegative(candidate.atlasLastScanAt);
-    if (atlasLastScanAt !== undefined) workspace.atlasLastScanAt = atlasLastScanAt;
-    if (candidate.atlasRun !== undefined) {
-      const atlasRun = normalizeAtlasRun(candidate.atlasRun, `workspaces[${index}].atlasRun`);
-      if (atlasRun) workspace.atlasRun = atlasRun;
-    }
-    if (isRecord(candidate.qaSurfaceVerifications)) {
-      const verifications: Record<string, number> = {};
-      for (const [key, value] of Object.entries(candidate.qaSurfaceVerifications).slice(0, 10_000)) {
-        if (key.length <= 256 && finiteNonNegative(value) !== undefined) verifications[key] = value;
-      }
-      if (Object.keys(verifications).length > 0) workspace.qaSurfaceVerifications = verifications;
-    }
     return [workspace as any];
   });
 

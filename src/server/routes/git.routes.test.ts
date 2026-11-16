@@ -34,7 +34,12 @@ test('Git subprocess handling supports spaced paths, nonzero exits, and bounded 
     expect((await runGit(root, ['config', 'user.name', 'Fixture'])).exitCode).toBe(0);
     writeFileSync(join(root, 'large file.txt'), 'before\n');
     expect((await runGit(root, ['add', '.'])).exitCode).toBe(0);
-    expect((await runGit(root, ['commit', '-m', 'fixture'])).exitCode).toBe(0);
+    const commit = Bun.spawn(['git', '-C', root, 'commit', '-m', 'fixture'], { stdout: 'ignore', stderr: 'ignore', env: {
+      ...process.env,
+      GIT_AUTHOR_NAME: 'Brian-Coding', GIT_AUTHOR_EMAIL: '155658308+Brian-Coding@users.noreply.github.com',
+      GIT_COMMITTER_NAME: 'Brian-Coding', GIT_COMMITTER_EMAIL: '155658308+Brian-Coding@users.noreply.github.com',
+    } });
+    expect(await commit.exited).toBe(0);
     writeFileSync(join(root, 'large file.txt'), `before\n${'changed line\n'.repeat(40_000)}`);
     const diff = await runGit(root, ['diff', '--', 'large file.txt']);
     expect(diff.exitCode).toBe(0);

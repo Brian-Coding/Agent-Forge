@@ -4,12 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Agent Forge</title>
-  <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" integrity="sha384-DGyLxAyjq0f9SPpVevD6IgztCFlnMF6oW/XQGmfe+IsZ8TqEiDrcHkMLKI6fiB/Z" crossorigin="anonymous"></script>
-  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" integrity="sha384-gTGxhz21lVGYNMcdJOyq01Edg0jhn/c22nsx0kyqP0TxaV5WVdsSH1fSDUf5YJj1" crossorigin="anonymous"></script>
-  <script src="https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js" integrity="sha384-948ahk4ZmxYVYOc+rxN1H2gM1EJ2Duhp7uHtZ4WSLkV4Vtx5MUqnV+l7u9B+jFv+" crossorigin="anonymous"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.2.4/purify.min.js" integrity="sha512-Y1p/STLW/B+l+MPJ5K5OdILMwJa2gMFXXmC/qsyDuGH9uc1MZMUo6/8YQUg9Ut4ns8KGCrCtt+58UwmNFFiVvA==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github-dark.min.css" integrity="sha384-wH75j6z1lH97ZOpMOInqhgKzFkAInZPPSPlZpYKYTOqsaizPvhQZmAtLcPKXpLyH" crossorigin="anonymous">
-  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js" integrity="sha384-F/bZzf7p3Joyp5psL90p/p89AZJsndkSoGwRpXcZhleCWhd8SnRuoYo4d0yirjJp" crossorigin="anonymous"></script>
+  <script src="/vendor.js"></script>
+  <link rel="stylesheet" href="/vendor.css">
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
@@ -631,6 +627,9 @@
     .panel-content::-webkit-scrollbar, .commands-list::-webkit-scrollbar, .slash-autocomplete::-webkit-scrollbar, .emu-list::-webkit-scrollbar, .agent-list::-webkit-scrollbar { width: 6px; }
     .panel-content::-webkit-scrollbar-track, .emu-list::-webkit-scrollbar-track, .agent-list::-webkit-scrollbar-track { background: transparent; }
     .panel-content::-webkit-scrollbar-thumb, .emu-list::-webkit-scrollbar-thumb, .agent-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+    .chat-turn-content table { border-collapse: collapse; margin: 12px 0; width: 100%; }
+    .chat-turn-content th, .chat-turn-content td { padding: 8px 12px; border: 1px solid var(--border); text-align: left; }
+    .chat-turn-content th { background: var(--bg-tertiary); }
   </style>
 </head>
 <body>
@@ -639,6 +638,20 @@
 []
   </script>
   <script>
+    const nativeFetch = window.fetch.bind(window);
+    let launchToken = '';
+    async function loadLaunchToken() {
+      const response = await nativeFetch('/api/session', { cache: 'no-store' });
+      if (!response.ok) throw new Error('Unable to authorize this browser');
+      launchToken = (await response.json()).token;
+      return launchToken;
+    }
+    const fetch = (input, options = {}) => {
+      const method = String(options.method || 'GET').toUpperCase();
+      if (method === 'GET' || method === 'HEAD') return nativeFetch(input, options);
+      return (launchToken ? Promise.resolve(launchToken) : loadLaunchToken()).then(token =>
+        nativeFetch(input, { ...options, headers: { ...options.headers, 'x-forge-token': token } }));
+    }
     const { useState, useEffect, useRef, useCallback, useMemo } = React;
     const e = React.createElement;
     const ExecutionContext = React.createContext({ connected: false, liveTurnState: {}, statusStartTimes: {} });
@@ -936,10 +949,14 @@
         let reconnectTimer = null;
         let heartbeatTimer = null;
         let lastServerActivity = Date.now();
-        function connect() {
+        async function connect() {
           if (disposed) return;
           const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-          const ws = new WebSocket(protocol + '//' + location.host);
+          let token;
+          try { token = await loadLaunchToken(); }
+          catch { if (!disposed) reconnectTimer = setTimeout(connect, 1500); return; }
+          if (disposed) return;
+          const ws = new WebSocket(protocol + '//' + location.host, ['forge-auth.' + token]);
           ws.onopen = () => {
             // A new transport must hydrate authoritative state before showing
             // a retained running indicator or accepting old snapshot revisions.
@@ -1358,7 +1375,7 @@
         try { value = new URL(value).pathname; } catch { return null; }
       }
       if (/^\/[a-zA-Z]:[\\/]/.test(value)) value = value.slice(1);
-      return /^[a-zA-Z]:[\\/]/.test(value) ? value : null;
+      return (/^[a-zA-Z]:[\\/]/.test(value) || /^\/(?!\/)/.test(value)) ? value : null;
     }
 
     function rewriteProjectFileLinks(html, agentId) {
@@ -1385,7 +1402,7 @@
         return html;
       }
       if (window.DOMPurify && typeof window.DOMPurify.sanitize === 'function') {
-        return rewriteProjectFileLinks(window.DOMPurify.sanitize(html), agentId);
+        return window.DOMPurify.sanitize(rewriteProjectFileLinks(html, agentId), { ADD_ATTR: ['target'] });
       }
       return src.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     }
@@ -2854,9 +2871,10 @@
         return () => clearInterval(id);
       }, [loadPorts]);
 
-      const killPort = (pid) => {
+      const killPort = (listener) => {
+        const { pid, port, stopToken } = listener;
         setKilling(pid);
-        fetch('/api/ports/kill', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pid }) })
+        fetch('/api/ports/kill', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pid, port, stopToken }) })
           .then(() => { setTimeout(loadPorts, 500); setKilling(null); })
           .catch(() => setKilling(null));
       };
@@ -2890,7 +2908,7 @@
                   : e('button', {
                       className: 'sidebar-port-stop',
                       disabled: killing === p.pid,
-                      onClick: () => { if (confirm('Stop ' + label + ' on :' + p.port + '?')) killPort(p.pid); },
+                      onClick: () => { if (confirm('Stop ' + label + ' on :' + p.port + '?')) killPort(p); },
                       title: 'Stop ' + label + ' (PID ' + p.pid + ')',
                     }, killing === p.pid ? 'Stopping' : 'Stop')
               );

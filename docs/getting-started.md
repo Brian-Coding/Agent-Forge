@@ -2,7 +2,7 @@
 
 ## 1. Install the prerequisites
 
-- **Bun 1.3+**: <https://bun.sh/>
+- **Bun 1.4.4+**: <https://bun.sh/>
 - **A provider CLI**, installed and signed in. Agent Forge does not handle provider accounts itself; it drives the CLIs you already use.
   - Claude Code: install it, then run `claude` once and sign in.
   - Codex CLI: install it, then run `codex` once and sign in.
@@ -17,14 +17,16 @@ codex --version    # if you use Codex
 
 ## 2. Install and start
 
+This is a private preview; cloning requires access. A future publication will use a new repository, and these URLs will be updated then.
+
 ```bash
 git clone --branch oss/v1 https://github.com/Brian-Coding/AI-Agent-Forge.git
 cd AI-Agent-Forge
-bun install
+bun install --frozen-lockfile
 bun run dev
 ```
 
-The server prints the URL it bound, normally `http://localhost:3333`. If that port is busy it tries the next seven ports. Open the URL in your browser.
+The server prints the URL it bound, normally `http://127.0.0.1:3333`. If that port is busy it tries the next seven ports. Open the URL in your browser.
 
 ## 3. Create a workspace
 

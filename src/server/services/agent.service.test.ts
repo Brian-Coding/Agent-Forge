@@ -473,3 +473,27 @@ test('non-finite usage updates cannot poison an agent accounting snapshot', asyn
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test('project directory changes start a new provider session and refuse active turns', async () => {
+  const first = await mkdtemp(join(tmpdir(), 'forge-cwd-first-'));
+  const second = await mkdtemp(join(tmpdir(), 'forge-cwd-second-'));
+  const id = `cwd-${randomUUID()}`;
+  const save = persistenceService.saveNow;
+  persistenceService.saveNow = async () => {};
+  try {
+    loadTestAgent(id, first);
+    agentService.setCurrentSession(id, 'codex', undefined, 'old-session');
+    agentService.setStatus(id, 'working');
+    await expect(agentService.updateAgent(id, { cwd: second })).rejects.toThrow('active turn');
+    expect(agentService.getCurrentSessionId(id)).toBe('old-session');
+    agentService.setStatus(id, 'idle');
+    await agentService.updateAgent(id, { cwd: second });
+    expect(agentService.getCurrentSessionId(id)).toBeNull();
+    expect(agentService.getCurrentSessionProvider(id)).toBeNull();
+    await agentService.removeAgent(id);
+  } finally {
+    persistenceService.saveNow = save;
+    await rm(first, { recursive: true, force: true });
+    await rm(second, { recursive: true, force: true });
+  }
+});

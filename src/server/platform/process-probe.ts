@@ -98,7 +98,7 @@ async function lookupWindowsIdentity(pid: number): Promise<ProcessIdentity | nul
     '$epoch = [DateTimeOffset]$p.CreationDate;',
     'Write-Output (@{ pid = $p.ProcessId; name = $p.Name; startTimeMs = [int64]($epoch.ToUnixTimeMilliseconds()); parentPid = $p.ParentProcessId } | ConvertTo-Json -Compress)',
   ].join(' ');
-  const proc = Bun.spawn(['powershell', '-NoProfile', '-NonInteractive', '-Command', script], {
+  const proc = Bun.spawn(['powershell', '-NoProfile', '-NonInteractive', '-Command', script], { detached: process.platform !== 'win32',
     stdout: 'pipe',
     stderr: 'pipe',
   });
@@ -126,7 +126,7 @@ async function lookupWindowsIdentity(pid: number): Promise<ProcessIdentity | nul
 async function lookupPosixIdentity(pid: number): Promise<ProcessIdentity | null> {
   const { collectBoundedProcess } = await import('../services/bounded-subprocess');
   const { killProcessTree } = await import('../utils');
-  const proc = Bun.spawn(['ps', '-p', String(pid), '-o', 'pid=,ppid=,lstart=,comm='], {
+  const proc = Bun.spawn(['ps', '-p', String(pid), '-o', 'pid=,ppid=,lstart=,comm='], { detached: process.platform !== 'win32',
     stdout: 'pipe',
     stderr: 'pipe',
   });

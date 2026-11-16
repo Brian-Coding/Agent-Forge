@@ -70,7 +70,7 @@ export async function runClaudeAuthStatus(
 ): Promise<AuthStatusRunResult> {
   try {
     const command = [resolveCliBinary('claude')];
-    const proc = Bun.spawn([...command, 'auth', 'status'], {
+    const proc = Bun.spawn([...command, 'auth', 'status'], { detached: process.platform !== 'win32',
       stdout: 'pipe',
       stderr: 'pipe',
       env: versionProbeEnv(env),

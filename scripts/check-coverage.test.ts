@@ -52,3 +52,10 @@ test('coverage parser rejects truncated, duplicate, and internally impossible re
     { source: 'src/a.ts', fn: [2, 1], lines: [1, 1] },
   ]))).toThrow(/more hits than executable items/);
 });
+
+test('default required coverage files all exist in the current product', async () => {
+  const { DEFAULT_COVERAGE_REQUIREMENTS } = await import('./check-coverage');
+  for (const file of DEFAULT_COVERAGE_REQUIREMENTS.requiredFiles) {
+    expect(await Bun.file(new URL('../' + file, import.meta.url)).exists()).toBe(true);
+  }
+});

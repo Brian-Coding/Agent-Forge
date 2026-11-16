@@ -51,3 +51,7 @@ agent-forge.lock.*
 
 # Editor configs
 .cursor
+
+# Local Bun/dotenv configuration (examples may be committed).
+.env.*
+!.env.example

@@ -1,0 +1,36 @@
+import assert from 'node:assert/strict';
+import {createServer} from 'node:http';
+import {mkdir} from 'node:fs/promises';
+import {resolve} from 'node:path';
+import {chromium} from 'playwright';
+const origin=process.argv[2];
+const browser=await chromium.launch();
+try {
+  const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });
+  const errors = []; page.on('pageerror', e => errors.push(e.message));
+  const external = []; page.on('request', req => { if (!req.url().startsWith(origin)) external.push(new URL(req.url()).origin); });
+  await page.route('**/api/ports', route => route.fulfill({ json: { ports: [] } }));
+  await page.goto(origin); await page.getByText('Search is ready', { exact: true }).waitFor({ timeout: 10000 });
+  assert.equal(await page.evaluate(() => typeof window.DOMPurify.sanitize), 'function');
+  const sanitized = await page.evaluate(() => window.renderMarkdown('<img src=x onerror=alert(1)>\n\n[bad](javascript:alert(1))\n[local](file:///demo/acme/readme.md)\n[posix](/demo/acme/readme.md)\n[win](C:/demo/readme.md)', 'demo-0'));
+  assert.ok(!sanitized.includes('onerror') && !sanitized.includes('javascript:'));
+  assert.equal((sanitized.match(/api\/project-file/g) || []).length, 3);
+  await page.evaluate(() => { const value=window.DOMPurify; window.DOMPurify=null; const html=window.renderMarkdown('<img onerror=alert(1)>'); window.DOMPurify=value; if(!html.includes('&lt;img')) throw new Error('Unsafe fallback'); });
+  // Actual UI has a capability-bearing WebSocket and hydrates the fictional workspace.
+  assert.ok((await page.textContent('body'))?.includes('Acme Notes'));
+  assert.equal((await fetch(origin + '/api/ports/kill', { method: 'POST', body: '{}' })).status, 403);
+  const attacker = createServer((_req,res)=>{res.end('<!doctype html><title>Other local page</title>')});
+  await new Promise(resolve=>attacker.listen(0,'127.0.0.1',resolve));
+  try {
+    const other = await browser.newPage(); await other.goto(`http://127.0.0.1:${attacker.address().port}`);
+    const opened = await other.evaluate(url => new Promise(resolve => { const ws=new WebSocket(url); ws.onopen=()=>{ws.close();resolve(true)};ws.onerror=()=>resolve(false); }), origin.replace('http:', 'ws:'));
+    assert.equal(opened,false); await other.close();
+  } finally { await new Promise(resolve=>attacker.close(resolve)); }
+  assert.deepEqual(external, []); assert.deepEqual(errors, []);
+  if (process.argv[3] === 'capture') {
+    await mkdir(resolve('docs/images'), { recursive: true });
+    await page.screenshot({ path: resolve('docs/images/agent-forge.png') });
+  }
+  console.log('PASS: authorized UI, cross-port browser rejection, local dependencies, Markdown sanitization, POSIX/file/Windows links, escaped fallback');
+
+} finally { await browser.close(); }

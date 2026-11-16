@@ -196,7 +196,7 @@ async function _stopAgentImpl(agentId: string, reason: 'user' | 'timeout' | 'sys
   // Note: chat.service's finally block releases plan locks + sets status to
   // 'idle' + fires onIdle hooks after the adapter unwinds. We don't repeat
   // those side effects here — only run the defensive idle path when no turn
-  // is actually in flight, otherwise QA/Atlas idle hooks fire twice per stop.
+  // is actually in flight, otherwise idle hooks fire twice per stop.
   if (agent.info.status !== 'idle' && !chatService.hasActiveTurn(agentId)) {
     agent.info.status = 'idle';
     broadcast({ type: 'agent_updated', agent: agent.info });
@@ -597,6 +597,9 @@ export const agentService = {
       const previousSessionProvider = agent.currentSessionProvider;
       const previousSessionModel = agent.currentSessionModel;
       const cwdChanged = updates.cwd !== undefined && updates.cwd !== agent.info.cwd;
+      if (cwdChanged && (agent.info.status === 'working' || agent.info.status === 'thinking')) {
+        throw new Error('Stop the active turn before changing the project directory');
+      }
 
       try {
         if (updates.cwd !== undefined) {
@@ -622,7 +625,7 @@ export const agentService = {
           if (nextReasoningLevel === undefined) delete agent.info.reasoningLevel;
           else agent.info.reasoningLevel = nextReasoningLevel;
         }
-        if ((providerChanged || modelChanged) && (agent.currentSessionId || agent.currentSessionProvider || agent.currentSessionModel)) {
+        if ((cwdChanged || providerChanged || modelChanged) && (agent.currentSessionId || agent.currentSessionProvider || agent.currentSessionModel)) {
           agent.currentSessionId = null;
           agent.currentSessionProvider = null;
           agent.currentSessionModel = null;

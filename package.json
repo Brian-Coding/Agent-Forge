@@ -18,18 +18,28 @@
     "test:reliability": "bun test --randomize --seed 8675309",
     "test:coverage": "bun test --coverage --coverage-reporter=text --coverage-reporter=lcov && bun scripts/check-coverage-cli.ts",
     "check": "bun run typecheck && bun run test:reliability",
-    "smoke:live-thought": "bun scripts/live-thought-activation-smoke.ts"
+    "smoke:live-thought": "bun scripts/live-thought-activation-smoke.ts",
+    "test:browser": "bun scripts/browser-smoke.ts",
+    "browsers:install": "playwright install chromium",
+    "benchmark": "bun scripts/benchmark.ts"
   },
   "devDependencies": {
     "@types/bun": "latest",
     "@types/react": "^19.2.14",
-    "@types/react-dom": "^19.2.3"
+    "@types/react-dom": "^19.2.3",
+    "playwright": "1.62.1"
   },
   "peerDependencies": {
     "typescript": "^5"
   },
   "dependencies": {
+    "dompurify": "3.4.17",
+    "highlight.js": "11.11.1",
+    "marked": "15.0.12",
     "react": "^19.2.4",
     "react-dom": "^19.2.4"
+  },
+  "engines": {
+    "bun": ">=1.4.4"
   }
 }

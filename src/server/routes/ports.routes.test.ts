@@ -29,3 +29,19 @@ test('malformed JSON returns a bounded error response', async () => {
   expect(response.status).toBe(500);
   expect((await response.json() as any).ok).toBe(false);
 });
+
+test('a numeric PID alone never authorizes an external process stop', async () => {
+  const response = await handleKillPort(new Request('http://localhost/api/ports/kill', {
+    method: 'POST', body: JSON.stringify({ pid: 123456, port: 3000 }),
+  }));
+  expect(response.status).toBe(409);
+});
+
+test('listener identity rejects reused PIDs even within the same second tolerance window', async () => {
+  const { sameListenerIdentity } = await import('./ports.routes');
+  const original = { pid: 42, name: 'node', startTimeMs: 1000 };
+  expect(sameListenerIdentity(original, { ...original })).toBe(true);
+  expect(sameListenerIdentity(original, { ...original, startTimeMs: 2000 })).toBe(false);
+  expect(sameListenerIdentity(original, { ...original, name: 'other' })).toBe(false);
+  expect(sameListenerIdentity(original, { pid: 42, name: 'node' })).toBe(false);
+});
