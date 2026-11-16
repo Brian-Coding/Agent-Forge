@@ -12,9 +12,12 @@ try {
   await page.route('**/api/ports', route => route.fulfill({ json: { ports: [] } }));
   await page.goto(origin); await page.getByText('Search is ready', { exact: true }).waitFor({ timeout: 10000 });
   assert.equal(await page.evaluate(() => typeof window.DOMPurify.sanitize), 'function');
-  const sanitized = await page.evaluate(() => window.renderMarkdown('<img src=x onerror=alert(1)>\n\n[bad](javascript:alert(1))\n[local](file:///demo/acme/readme.md)\n[posix](/demo/acme/readme.md)\n[win](C:/demo/readme.md)', 'demo-0'));
+  const sanitized = await page.evaluate(() => window.renderMarkdown('<img src=x onerror=alert(1)>\n\n[bad](javascript:alert(1))\n[local](file:///demo/acme/notes%20list.md)\n[posix](/demo/acme/readme.md)\n[win](C:/demo/readme.md)', 'demo-0'));
   assert.ok(!sanitized.includes('onerror') && !sanitized.includes('javascript:'));
   assert.equal((sanitized.match(/api\/project-file/g) || []).length, 3);
+  const filePaths = await page.evaluate(html => [...new DOMParser().parseFromString(html, 'text/html').querySelectorAll('a[href]')].map(a => new URL(a.href, location.origin).searchParams.get('path')), sanitized);
+  assert.ok(filePaths.includes('/demo/acme/notes list.md'));
+  assert.equal(await page.evaluate(() => window.projectFilePathFromHref('file:///demo/caf%C3%A9.md')), '/demo/café.md');
   await page.evaluate(() => { const value=window.DOMPurify; window.DOMPurify=null; const html=window.renderMarkdown('<img onerror=alert(1)>'); window.DOMPurify=value; if(!html.includes('&lt;img')) throw new Error('Unsafe fallback'); });
   // Actual UI has a capability-bearing WebSocket and hydrates the fictional workspace.
   assert.ok((await page.textContent('body'))?.includes('Acme Notes'));

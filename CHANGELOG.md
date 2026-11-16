@@ -9,3 +9,5 @@
 - Bundle React 19, Marked, DOMPurify 3.4.17, and Highlight.js from the lockfile; add browser sanitizer and file-link regression checks.
 - Support POSIX and file-URL project links; ignore dotenv variants; clarify private publication instructions.
 - Add real demo screenshots, architecture documentation, third-party notices, and [measured performance](docs/performance.md). The local bundle improves sampled UI loading while adding startup/build work.
+
+Follow-up review: start descendant cleanup on provider exit even when inherited pipes remain open; retain the final streamed answer; remove the unused extracted Node-child helper; decode file-URL pathnames after parsing, including spaces and Unicode; extend real Markdown pipeline checks.

@@ -186,6 +186,7 @@ export const claudeAdapter: AgentAdapter<ClaudeRunState> = {
     let killed = false;
     let terminationPromise: Promise<void> | null = null;
     let terminationResult: ProcessTerminationResult | null = null;
+    let interruptStreams = false;
     let terminationWarningEmitted = false;
     const unwind = createProcessUnwindSignal();
 
@@ -201,7 +202,9 @@ export const claudeAdapter: AgentAdapter<ClaudeRunState> = {
       unwind.trigger();
     };
 
-    const requestTermination = (): Promise<void> => {
+    const requestTermination = (interrupt = true): Promise<void> => {
+      interruptStreams ||= interrupt;
+      if (interrupt && terminationResult) unwind.trigger();
       if (!proc) return Promise.resolve();
       if (terminationPromise) return terminationPromise;
       const target = proc;
@@ -209,7 +212,7 @@ export const claudeAdapter: AgentAdapter<ClaudeRunState> = {
         result => {
           terminationResult = result;
           if (!result.rootExited || !result.treeKill.succeeded) warnAndUnwind('the process did not exit after bounded kill attempts');
-          else unwind.trigger();
+          else if (interruptStreams) unwind.trigger();
         },
         error => {
           try { target.unref(); } catch {}
@@ -228,7 +231,7 @@ export const claudeAdapter: AgentAdapter<ClaudeRunState> = {
       } catch {
         return requestTermination();
       }
-      const gracefulExit = await waitForProcessExit(target, 1_000);
+      await waitForProcessExit(target, 1_000);
       if (proc === target) await requestTermination();
     };
 
@@ -300,6 +303,13 @@ export const claudeAdapter: AgentAdapter<ClaudeRunState> = {
           }
 
           if (proc.pid) persistenceService.trackPid(proc.pid);
+          // Descendants may inherit output pipes and outlive the provider.
+          // Start cleanup on root exit, without waiting for those pipes to close.
+          // Keep normal output draining so the provider's final events survive.
+          const ownedProcess = proc;
+          void ownedProcess.exited.then(() => {
+            if (process.platform !== 'win32' && proc === ownedProcess) return requestTermination(false);
+          }, error => warnAndUnwind(String(error)));
 
           // A stop/kill may have landed between handle registration and the
           // spawn above — honor it now instead of running a full orphan turn.
@@ -393,10 +403,7 @@ export const claudeAdapter: AgentAdapter<ClaudeRunState> = {
           }
 
           const exitOutcome = await waitForOperationOrUnwind(proc.exited, unwind);
-          if (process.platform !== 'win32' && !terminationResult) {
-            terminationResult = await killProcessTree(proc);
-            if (!terminationResult.treeKill.succeeded) warnAndUnwind('descendant cleanup was not confirmed');
-          }
+          if (process.platform !== 'win32') await requestTermination(false);
           const rootExitConfirmed = exitOutcome.status === 'completed'
             || terminationResult?.rootExited === true;
           const exitCode = exitOutcome.status === 'completed'
@@ -447,7 +454,7 @@ export const claudeAdapter: AgentAdapter<ClaudeRunState> = {
           const failedProc = proc;
           if (failedProc) {
             await requestTermination();
-            if (terminationResult?.rootExited && failedProc.pid) {
+            if (terminationResult?.rootExited && (process.platform === 'win32' || terminationResult.treeKill.succeeded) && failedProc.pid) {
               persistenceService.untrackPid(failedProc.pid);
             }
           }

@@ -1370,10 +1370,10 @@
     // to escaped plain text rather than raw HTML so a CDN miss can't reopen XSS.
     function projectFilePathFromHref(href) {
       let value = String(href || '');
-      try { value = decodeURIComponent(value); } catch {}
       if (/^file:\/\/\//i.test(value)) {
         try { value = new URL(value).pathname; } catch { return null; }
       }
+      try { value = decodeURIComponent(value); } catch { return null; }
       if (/^\/[a-zA-Z]:[\\/]/.test(value)) value = value.slice(1);
       return (/^[a-zA-Z]:[\\/]/.test(value) || /^\/(?!\/)/.test(value)) ? value : null;
     }

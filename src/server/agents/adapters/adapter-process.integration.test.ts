@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
-import { chmod, mkdir, rm } from 'node:fs/promises';
+import { chmod, mkdir, rm, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentEvent } from '../events';
@@ -77,6 +77,14 @@ async function waitFor(predicate: () => boolean, timeoutMs = 2_000): Promise<voi
 beforeAll(async () => {
   root = join(tmpdir(), `agent forge fake cli ${randomUUID()}`);
   await mkdir(root, { recursive: true });
+  await Bun.write(join(root, 'descendant.cjs'), `
+const fs = require('node:fs');
+const path = require('node:path');
+const depth = Number(process.argv[2]);
+fs.writeFileSync(path.join(__dirname, 'descendant-' + depth + '.pid'), String(process.pid));
+if (depth === 1) require('node:child_process').spawn(process.execPath, [__filename, '2'], { stdio: 'inherit' });
+setInterval(() => {}, 60000);
+`);
   const scriptSource = `
 const fs = require('node:fs');
 const provider = process.env.AGENT_FORGE_FAKE_PROVIDER;
@@ -86,6 +94,24 @@ process.stdin.setEncoding('utf8');
 process.stdin.on('data', chunk => { prompt += chunk; });
 process.stdin.on('end', () => {
   const emit = value => process.stdout.write(JSON.stringify(value) + '\\n');
+  if (prompt.includes('EXIT_WITH_DESCENDANTS')) {
+    const path = require('node:path');
+    const directory = process.cwd();
+    require('node:child_process').spawn(process.execPath, [path.join(directory, 'descendant.cjs'), '1'], { stdio: 'inherit' });
+    const timer = setInterval(() => {
+      if (!fs.existsSync(path.join(directory, 'descendant-2.pid'))) return;
+      clearInterval(timer);
+      if (provider === 'claude') emit({ type: 'result', result: 'Descendants launched.' });
+      else {
+        const outputIndex = args.indexOf('--output-last-message');
+        fs.writeFileSync(args[outputIndex + 1], 'Descendants launched.');
+        emit({ type: 'item.completed', item: { type: 'agent_message', text: 'Descendants launched.' } });
+        emit({ type: 'turn.completed' });
+      }
+      process.exit(0);
+    }, 10);
+    return;
+  }
   if (prompt.includes('GOAL_ABORT')) {
     const session = 'codex-goal-abort';
     const dir = require('node:path').join(process.env.CODEX_HOME, 'sessions');
@@ -286,3 +312,33 @@ test('a real CLI with an aborted goal continuation exposes stopped while retaini
   }
   expect(untracked).toEqual(tracked);
 }, 10_000);
+
+for (const provider of ['claude', 'codex'] as const) test.skipIf(process.platform === 'win32')(
+  `${provider} cleans inherited pipes and descendants when the provider exits first`, async () => {
+    for (const depth of [1, 2]) await rm(join(root, `descendant-${depth}.pid`), { force: true });
+    const fixture = makeContext(provider);
+    const adapter = provider === 'claude' ? claudeAdapter : codexAdapter;
+    const handle = adapter.createHandle('EXIT_WITH_DESCENDANTS', fixture.ctx, adapter.createState(fixture.ctx) as any);
+    const run = handle.run();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const result = await Promise.race([run, new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('Adapter waited on descendant-owned pipes')), 3000);
+      })]);
+      expect(result).toMatchObject({ lastAssistantMessage: 'Descendants launched.' });
+      expect(fixture.events).toContainEqual({ type: 'finish', reason: 'completed' });
+      for (const depth of [1, 2]) {
+        const pid = Number(await readFile(join(root, `descendant-${depth}.pid`), 'utf8'));
+        const probe = Bun.spawn(['ps', '-p', String(pid), '-o', 'stat='], { stdout: 'pipe' });
+        const state = (await new Response(probe.stdout).text()).trim();
+        await probe.exited;
+        expect(state === '' || state.startsWith('Z')).toBe(true);
+      }
+      expect(untracked).toEqual(tracked);
+    } finally {
+      clearTimeout(timer);
+      await handle.kill();
+      await run;
+    }
+  }, 8000,
+);
