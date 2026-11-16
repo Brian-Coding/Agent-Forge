@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.1 — 2026-11-16 (private preview)
+## Unreleased — 2026-11-16 (private preview)
 
 - Require the exact launch origin and an ephemeral capability for WebSocket/HTTP mutations.
 - Launch owned POSIX process groups and verify descendant cleanup; revalidate selected external listeners before stopping them.

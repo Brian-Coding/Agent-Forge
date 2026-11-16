@@ -24,15 +24,7 @@ async function runPortCommand(args: string[], maxChars = 2 * 1024 * 1024) {
   return result;
 }
 
-/**
- * Resolve every running PID → image-name in ONE shell-out using tasklist.
- * Previous implementation spawned a PowerShell per listening port, which on
- * Windows means 50-100 PowerShell processes per poll (and SidebarPorts polls
- * every 10 seconds). PowerShell's cold-start is ~1-2s; the overlapping
- * spawns pegged CPU at 70%+ while the UI sat idle.
- *
- * tasklist is a native Win32 binary, ~10ms startup, CSV-friendly output.
- */
+/** Batch executable names for inventory; identity probes separately supply birth times. */
 async function getProcessNamesByPidWindows(): Promise<Map<number, string>> {
   const map = new Map<number, string>();
   try {
@@ -63,14 +55,12 @@ function listenPort(): number | undefined {
 
 async function decoratePorts(
   ports: { port: number; pid: number; command: string }[],
-  commandLines: Map<number, string>,
 ) {
   const workspaces = workspaceService.getAll();
   const serverPort = listenPort();
   return Promise.all(ports.map(async port => {
     const labeled = labelListeningPort({
       ...port,
-      commandLine: commandLines.get(port.pid) || '',
       workspaces,
       listenPort: serverPort,
       selfPid: process.pid,
@@ -107,17 +97,14 @@ export async function handleGetPorts(req: Request): Promise<Response> {
     const ports: { port: number; pid: number; command: string }[] = [];
 
     if (isWindows) {
-      // Three bounded spawns: netstat, tasklist, and one command-line table.
-      // Used to be netstat + N PowerShell spawns where N is the number of
-      // listening ports on the machine.
-      const [netstatOut, pidToName, commandLines] = await Promise.all([
+      // Read listener PIDs and executable names without collecting arguments.
+      const [netstatOut, pidToName] = await Promise.all([
         (async () => {
           const result = await runPortCommand(['netstat', '-ano']);
           if (result.exitCode !== 0) throw new Error(result.stderr || 'netstat failed');
           return result.stdout;
         })(),
         getProcessNamesByPidWindows(),
-        Promise.resolve(new Map<number, string>()),
       ]);
 
       const lines = netstatOut.trim().split('\n');
@@ -138,12 +125,9 @@ export async function handleGetPorts(req: Request): Promise<Response> {
         ports.push({ port, pid, command });
       }
       ports.sort((a, b) => a.port - b.port);
-      return jsonResponse({ ports: await decoratePorts(ports, commandLines) });
+      return jsonResponse({ ports: await decoratePorts(ports) });
     } else {
-      const [result, commandLines] = await Promise.all([
-        runPortCommand(['lsof', '-iTCP', '-sTCP:LISTEN', '-nP']),
-        Promise.resolve(new Map<number, string>()),
-      ]);
+      const result = await runPortCommand(['lsof', '-iTCP', '-sTCP:LISTEN', '-nP']);
       if (result.exitCode !== 0) return jsonResponse({ ports: [] });
       const stdout = result.stdout;
       const lines = stdout.trim().split('\n').slice(1);
@@ -168,7 +152,7 @@ export async function handleGetPorts(req: Request): Promise<Response> {
         ports.push({ port, pid, command });
       }
       ports.sort((a, b) => a.port - b.port);
-      return jsonResponse({ ports: await decoratePorts(ports, commandLines) });
+      return jsonResponse({ ports: await decoratePorts(ports) });
     }
   } catch {
     return jsonResponse({ ports: [] });
