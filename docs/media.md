@@ -12,4 +12,6 @@ Node.js 20+ and ffmpeg on PATH are required for recording. Chromium uses the Pla
 
 Outputs: [GIF](images/forge-demo.gif), [MP4](images/forge-demo.mp4), [PNG](images/forge-demo.png). Source: [launcher](../scripts/demo.ts), [stand-ins](../scripts/demo/server.ts), [recorder](../scripts/demo/record.mjs).
 
+The demo process installs [offline services](../scripts/demo/offline-services.ts) for model discovery, provider health/auth and limits, including manual refreshes. It uses the same endpoints as the interactive UI; the recorder does not substitute model responses. An [isolated process regression](../scripts/demo/offline-services.test.ts) rejects unexpected provider subprocess or network access. User-entered terminal commands still run with the local user's permissions.
+
 Recordings depend on browser timing, so frame timings and generated run IDs may vary. The committed GIF stays below 5 MB. Inspect every frame before sharing recordings made against any other data. The scripted demonstrations establish workflow plumbing, not live Claude/Codex performance or compatibility.

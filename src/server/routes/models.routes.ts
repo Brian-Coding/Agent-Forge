@@ -1,9 +1,9 @@
 import { jsonResponse } from '../utils';
-import { getModelCatalog } from '../services/model-catalog.service';
+import { getModelCatalog, modelCatalogService } from '../services/model-catalog.service';
 
 export async function handleGetModels(
   req: Request,
-  loadCatalog: typeof getModelCatalog = getModelCatalog,
+  loadCatalog: typeof getModelCatalog = modelCatalogService.get,
 ): Promise<Response> {
   try {
     const url = new URL(req.url);

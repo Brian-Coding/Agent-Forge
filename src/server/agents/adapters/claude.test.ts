@@ -209,3 +209,22 @@ test('Claude result usage reconciles streamed tokens and supports result-only ze
     expect(usage.at(-1)?.costUsdDelta).toBe(0);
   }
 });
+
+test('Claude usage deduplicates message snapshots and accepts final downward corrections', () => {
+  const events: AgentEvent[] = [];
+  const ctx = makeContext(events);
+  const state = createClaudeRunState();
+  const snapshot = (id: string, input: number, output: number) => normalizeClaudeEvent({ type: 'assistant', message: { id, usage: { input_tokens: input, output_tokens: output }, content: [] } }, ctx, state, () => {});
+  const totals = () => events.filter(e => e.type === 'usage').reduce((sum, e) => ({ input: sum.input + (e.inputTokensDelta ?? 0), output: sum.output + (e.outputTokensDelta ?? 0), cost: sum.cost + (e.costUsdDelta ?? 0) }), { input: 0, output: 0, cost: 0 });
+  snapshot('one', 10, 3);
+  snapshot('one', 10, 3);
+  expect(totals()).toEqual({ input: 10, output: 3, cost: 0 });
+  snapshot('one', 10, 4);
+  snapshot('two', 20, 2);
+  snapshot('one', 10, 4);
+  expect(totals()).toEqual({ input: 30, output: 6, cost: 0 });
+  for (let i = 0; i < 2; i++) normalizeClaudeEvent({ type: 'result', usage: { input_tokens: 25, output_tokens: 5 }, total_cost_usd: 0.01 }, ctx, state, () => {});
+  expect(totals()).toEqual({ input: 25, output: 5, cost: 0.01 });
+  normalizeClaudeEvent({ type: 'result', usage: { input_tokens: -1, output_tokens: Infinity }, total_cost_usd: 'bad' }, ctx, state, () => {});
+  expect(totals()).toEqual({ input: 25, output: 5, cost: 0.01 });
+});

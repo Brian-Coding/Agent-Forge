@@ -12,6 +12,8 @@ import {
 } from '../agents/agent-kinds';
 
 const CACHE_TTL_MS = 10 * 60 * 1000;
+// The disposable demo substitutes this service before the server starts.
+export const modelCatalogService = { get: getModelCatalog };
 export const MODEL_DISCOVERY_TIMEOUT_MS = 10_000;
 const MAX_DISCOVERED_MODELS = 512;
 

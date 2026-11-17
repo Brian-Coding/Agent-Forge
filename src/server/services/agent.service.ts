@@ -380,13 +380,14 @@ export const agentService = {
     // window because each tool round re-sends context. Keep a high fixed cap
     // while rejecting NaN/Infinity outright.
     const saneDeltaCeiling = 100_000_000;
-    if (finitePositive(usage.inputTokensDelta)) {
-      agent.totalInputTokens += Math.min(Math.floor(usage.inputTokensDelta), saneDeltaCeiling);
+    const finiteDelta = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
+    if (finiteDelta(usage.inputTokensDelta)) {
+      agent.totalInputTokens = Math.max(0, agent.totalInputTokens + Math.max(-saneDeltaCeiling, Math.min(Math.trunc(usage.inputTokensDelta), saneDeltaCeiling)));
     }
-    if (finitePositive(usage.outputTokensDelta)) {
-      agent.totalOutputTokens += Math.min(Math.floor(usage.outputTokensDelta), saneDeltaCeiling);
+    if (finiteDelta(usage.outputTokensDelta)) {
+      agent.totalOutputTokens = Math.max(0, agent.totalOutputTokens + Math.max(-saneDeltaCeiling, Math.min(Math.trunc(usage.outputTokensDelta), saneDeltaCeiling)));
     }
-    if (finitePositive(usage.costUsdDelta)) agent.totalCostUsd += Math.min(usage.costUsdDelta, 1_000_000);
+    if (finiteDelta(usage.costUsdDelta)) agent.totalCostUsd = Math.max(0, agent.totalCostUsd + Math.max(-1_000_000, Math.min(usage.costUsdDelta, 1_000_000)));
     if (finitePositive(usage.turnsDelta)) agent.numTurns += Math.min(Math.floor(usage.turnsDelta), 1_000_000);
     if (typeof usage.modelRan === 'string' && usage.modelRan) agent.lastModelRan = usage.modelRan;
     persistenceService.save();

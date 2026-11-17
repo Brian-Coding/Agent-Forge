@@ -25,17 +25,17 @@ test('CLI environment removes recursive launcher flags, normalizes PATH, and pre
   }, {
     CUSTOM_SETTING: 'enabled',
     CLAUDECODE: 'cannot-be-reintroduced',
-  }, 'win32', 'C:\\Users\\fixture');
+  }, 'win32', 'C:\\Users\\dev');
 
   expect(env.CREDENTIAL_SENTINEL).toBe('preserved');
   expect(env.CUSTOM_SETTING).toBe('enabled');
   expect(Object.keys(env).filter(key => key.toLowerCase() === 'path')).toEqual(['Path']);
   expect(env.Path?.split(';').slice(0, 2)).toEqual([
-    'C:\\Users\\fixture\\.local\\bin',
-    'C:\\Users\\fixture\\.bun\\bin',
+    'C:\\Users\\dev\\.local\\bin',
+    'C:\\Users\\dev\\.bun\\bin',
   ]);
   expect(env.Path?.split(';').filter(path => path.toLowerCase() === 'c:\\tools')).toHaveLength(1);
-  expect(env.Path).toContain('C:\\Users\\fixture\\.local\\bin');
+  expect(env.Path).toContain('C:\\Users\\dev\\.local\\bin');
   expect(Object.keys(env).some(key => key.toLowerCase() === 'claudecode')).toBe(false);
   expect(Object.keys(env).some(key => key.toLowerCase().startsWith('vscode_'))).toBe(false);
   expect(Object.keys(env).some(key => key.toLowerCase().startsWith('npm_'))).toBe(false);
@@ -48,9 +48,9 @@ test('argv guard rejects oversized and multibyte command lines before spawn', ()
 });
 
 test('default Windows CLI directories include native user-local installers', () => {
-  expect(defaultCliDirs('win32', 'C:\\Users\\test-user')).toEqual([
-    'C:\\Users\\test-user\\.local\\bin',
-    'C:\\Users\\test-user\\.bun\\bin',
+  expect(defaultCliDirs('win32', 'C:\\Users\\dev')).toEqual([
+    'C:\\Users\\dev\\.local\\bin',
+    'C:\\Users\\dev\\.bun\\bin',
   ]);
 });
 

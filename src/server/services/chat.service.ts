@@ -1,4 +1,4 @@
-import { reportedNumber, reportedSum, type ReportedUsage } from '../../shared/reported-usage';
+import { type ReportedUsage } from '../../shared/reported-usage';
 import type { AgentEvent } from '../agents/events';
 import type { AgentHandle, AgentRunContext } from '../agents/types';
 import type { ChatImageAttachment } from '../../shared/protocol';
@@ -309,14 +309,14 @@ function handleEvent(agentId: string, event: AgentEvent): void {
       if (turn) {
         const deltas = { inputTokens: event.inputTokensDelta, outputTokens: event.outputTokensDelta, costUsd: event.costUsdDelta };
         for (const key of ['inputTokens', 'outputTokens', 'costUsd'] as const) {
-          const delta = reportedNumber(deltas[key]);
-          if (delta !== undefined) turn.reportedUsage[key] = reportedSum(turn.reportedUsage[key], delta);
+          const delta = deltas[key];
+          if (typeof delta === 'number' && Number.isFinite(delta)) {
+            turn.reportedUsage[key] = Math.max(0, (turn.reportedUsage[key] ?? 0) + delta);
+            turn.turnUsage[key] = Math.max(0, turn.turnUsage[key] + delta);
+          }
         }
         const finitePositive = (value: unknown): value is number =>
           typeof value === 'number' && Number.isFinite(value) && value > 0;
-        if (finitePositive(event.inputTokensDelta)) turn.turnUsage.inputTokens += event.inputTokensDelta;
-        if (finitePositive(event.outputTokensDelta)) turn.turnUsage.outputTokens += event.outputTokensDelta;
-        if (finitePositive(event.costUsdDelta)) turn.turnUsage.costUsd += event.costUsdDelta;
         if (finitePositive(event.turnsDelta)) turn.turnUsage.turns += event.turnsDelta;
         if (typeof event.modelRan === 'string' && event.modelRan) {
           turn.modelRan = event.modelRan;

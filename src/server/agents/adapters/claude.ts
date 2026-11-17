@@ -53,6 +53,8 @@ export interface ClaudeRunState {
   pendingSessionId: string | null;
   reportedInput?: number;
   reportedOutput?: number;
+  reportedCost?: number;
+  messageUsage: Map<string, { input?: number; output?: number }>;
 }
 
 export function createClaudeRunState(): ClaudeRunState {
@@ -64,6 +66,7 @@ export function createClaudeRunState(): ClaudeRunState {
     currentIsSubagent: false,
     startedToolIds: new Set<string>(),
     pendingSessionId: null,
+    messageUsage: new Map(),
   };
 }
 
@@ -612,13 +615,18 @@ export function normalizeClaudeEvent(
     if (usage && typeof usage === 'object') {
       const inputTokens = reportedSum(usage.input_tokens, usage.cache_creation_input_tokens, usage.cache_read_input_tokens);
       const outputTokens = reportedNumber(usage.output_tokens);
-      state.reportedInput = reportedSum(state.reportedInput, inputTokens);
-      state.reportedOutput = reportedSum(state.reportedOutput, outputTokens);
+      const usageKey = assistantMessageId ? `${event.parent_tool_use_id ?? ''}:${assistantMessageId}` : undefined;
+      const previous = usageKey ? state.messageUsage.get(usageKey) : undefined;
+      const inputDelta = inputTokens === undefined ? undefined : inputTokens - (previous?.input ?? 0);
+      const outputDelta = outputTokens === undefined ? undefined : outputTokens - (previous?.output ?? 0);
+      if (usageKey) state.messageUsage.set(usageKey, { input: inputTokens ?? previous?.input, output: outputTokens ?? previous?.output });
+      if (inputDelta !== undefined) state.reportedInput = Math.max(0, (state.reportedInput ?? 0) + inputDelta);
+      if (outputDelta !== undefined) state.reportedOutput = Math.max(0, (state.reportedOutput ?? 0) + outputDelta);
       ctx.emitAgentEvent({
         type: 'usage',
         contextTokens: inputTokens,
-        inputTokensDelta: inputTokens,
-        outputTokensDelta: outputTokens,
+        inputTokensDelta: inputDelta,
+        outputTokensDelta: outputDelta,
         modelRan: realMessageModel,
       });
     } else if (realMessageModel) {
@@ -734,22 +742,22 @@ export function normalizeClaudeEvent(
       );
     }
 
+    const finalInput = reportedSum(event.usage?.input_tokens, event.usage?.cache_creation_input_tokens, event.usage?.cache_read_input_tokens);
+    const finalOutput = reportedNumber(event.usage?.output_tokens);
+    const finalCost = reportedNumber(event.total_cost_usd);
     ctx.emitAgentEvent({
       type: 'usage',
       contextLimit,
       modelRan,
-      // Result usage is an aggregate, so only add what assistant snapshots did not report.
-      inputTokensDelta: (() => {
-        const total = reportedSum(event.usage?.input_tokens, event.usage?.cache_creation_input_tokens, event.usage?.cache_read_input_tokens);
-        return total === undefined ? undefined : Math.max(0, total - (state.reportedInput ?? 0));
-      })(),
-      outputTokensDelta: (() => {
-        const total = reportedNumber(event.usage?.output_tokens);
-        return total === undefined ? undefined : Math.max(0, total - (state.reportedOutput ?? 0));
-      })(),
-      costUsdDelta: reportedNumber(event.total_cost_usd),
+      // A final aggregate is authoritative, even when it corrects a snapshot down.
+      inputTokensDelta: finalInput === undefined ? undefined : finalInput - (state.reportedInput ?? 0),
+      outputTokensDelta: finalOutput === undefined ? undefined : finalOutput - (state.reportedOutput ?? 0),
+      costUsdDelta: finalCost === undefined ? undefined : finalCost - (state.reportedCost ?? 0),
       turnsDelta: typeof event.num_turns === 'number' ? event.num_turns : undefined,
     });
+    if (finalInput !== undefined) state.reportedInput = finalInput;
+    if (finalOutput !== undefined) state.reportedOutput = finalOutput;
+    if (finalCost !== undefined) state.reportedCost = finalCost;
     return;
   }
 

@@ -14,6 +14,7 @@ import { liveTurnStateService } from './live-turn-state.service';
 import { persistenceService } from './persistence.service';
 import { usageService } from './usage.service';
 import { authRecoveryStore } from '../auth/auth-recovery';
+import { createClaudeRunState, normalizeClaudeEvent } from '../agents/adapters/claude';
 
 const originalCodexAdapter = getAgentAdapter('codex')!;
 const originalSave = persistenceService.save;
@@ -600,4 +601,20 @@ test('last-run usage distinguishes reported zero, partial usage, and an unreport
   expect(agentService.buildPersistedAgents().find(a => a.id === id)?.lastRunUsage).toEqual({ inputTokens: 12, costUsd: 0 });
   await chatService.sendMessage(id, 'Second');
   expect(agentService.getAgent(id)?.lastRunUsage).toEqual({});
+});
+
+test('corrected provider totals reach last-run, live counters, and persisted usage history', async () => {
+  const id = loadAgent();
+  registerTestAdapter((_prompt, ctx) => ({
+    async run() {
+      const state = createClaudeRunState();
+      for (let i = 0; i < 2; i++) normalizeClaudeEvent({ type: 'assistant', message: { id: 'same', usage: { input_tokens: 20, output_tokens: 6 }, content: [] } }, ctx, state, () => {});
+      normalizeClaudeEvent({ type: 'result', result: 'Finished.', usage: { input_tokens: 12, output_tokens: 4 }, total_cost_usd: 0 }, ctx, state, () => {});
+      return undefined;
+    }, stop() {}, kill() {},
+  }));
+  await chatService.sendMessage(id, 'Run the accounting fixture');
+  expect(agentService.getAgent(id)?.lastRunUsage).toEqual({ inputTokens: 12, outputTokens: 4, costUsd: 0 });
+  expect(agentService.getTokenUsage(id)).toMatchObject({ totalInputTokens: 12, totalOutputTokens: 4, totalCostUsd: 0 });
+  expect(usageService.getEvents().filter(row => row.agentId === id)).toMatchObject([{ inputTokens: 12, outputTokens: 4 }]);
 });

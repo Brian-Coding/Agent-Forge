@@ -1,14 +1,12 @@
 import { broadcast } from '../../src/server/broadcast';
 import { registerAdapter } from '../../src/server/agents/registry';
 import { terminalService } from '../../src/server/services/terminal.service';
-import { limitsService } from '../../src/server/services/limits.service';
-import { usageService } from '../../src/server/services/usage.service';
+import { installOfflineDemoServices } from './offline-services';
 import { agentService } from '../../src/server/services/agent.service';
 import type { AgentAdapter } from '../../src/server/agents/types';
 
 // These overrides exist only in this disposable demo process, never in dev/start.
-limitsService.start = () => {};
-usageService.startSync = () => {};
+installOfflineDemoServices();
 for (const kind of ['claude', 'codex'] as const) {
   const adapter: AgentAdapter<null> = {
     kind, displayName: 'Scripted stand-in', createState: () => null,

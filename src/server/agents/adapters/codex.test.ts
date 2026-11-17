@@ -163,13 +163,13 @@ test('Codex attaches every image natively, including a 100-image batch', () => {
 });
 
 test('Codex bypasses the Windows cmd shim for a 100-image command line', () => {
-  const shim = 'C:\\Users\\tester\\AppData\\Roaming\\npm\\codex.cmd';
+  const shim = 'C:\\Users\\dev\\AppData\\Roaming\\npm\\codex.cmd';
   const node = 'C:\\Program Files\\nodejs\\node.exe';
-  const entrypoint = 'C:\\Users\\tester\\AppData\\Roaming\\npm\\node_modules\\@openai\\codex\\bin\\codex.js';
+  const entrypoint = 'C:\\Users\\dev\\AppData\\Roaming\\npm\\node_modules\\@openai\\codex\\bin\\codex.js';
   const command = resolveCodexLaunchCommand(shim, 'win32', path => path === entrypoint, node);
   const paths = Array.from(
     { length: 100 },
-    (_, index) => `C:\\Users\\tester\\AppData\\Local\\AgentForge\\artifacts\\chat-images\\agent-id\\1784568160143-${String(index).padStart(8, '0')}.png`,
+    (_, index) => `C:\\Users\\dev\\AppData\\Local\\AgentForge\\artifacts\\chat-images\\agent-id\\1784568160143-${String(index).padStart(8, '0')}.png`,
   );
   const args = buildCodexExecArgs(command, ['--json'], null, paths);
 

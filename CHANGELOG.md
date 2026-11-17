@@ -16,6 +16,8 @@ Follow-up review: start descendant cleanup on provider exit even when inherited 
 ### Portfolio evidence pass
 
 - Replaced bundled slash-command templates with original ones.
+- Keep demo model, authentication, and limits discovery offline; verify real demo endpoints.
+- Reconcile repeated Claude usage snapshots and final aggregate corrections in session/history accounting.
 - Show last-run reported tokens/cost and distinguish unknown from reported zero.
 - Add an account-free scripted workbench demo with real terminal checks and reproducible media.
 - Fall back to Linux `ss` when `lsof` is unavailable for port inventory.

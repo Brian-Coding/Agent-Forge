@@ -13,6 +13,8 @@ const browser = await chromium.launch();
 try {
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, ...(media ? { recordVideo: { dir: scratch, size: { width: 1440, height: 900 } } } : {}) });
   const page = await context.newPage();
+  page.setDefaultTimeout(15000);
+  page.setDefaultNavigationTimeout(15000);
   const recordingStartedAt = performance.now();
   // Keep local machine inventory and provider account discovery out of demo UI.
   // The remaining port entry is the real demo preview, not invented data.
@@ -20,8 +22,11 @@ try {
     const response = await route.fetch(); const body = await response.json();
     await route.fulfill({ json: { ...body, ports: (body.ports ?? []).filter(port => port.port === previewPort) } });
   });
-  await page.route('**/api/models*', route => route.fulfill({ json: { providers: [] } }));
   const errors = []; page.on('pageerror', error => errors.push(error.message));
+  const catalog = await (await fetch(origin + '/api/models?refresh=1')).json();
+  assert.ok(catalog.providers.codex && catalog.providers.claude);
+  const health = await (await fetch(origin + '/api/health')).json();
+  assert.ok(health.runtime.providers.every(provider => !provider.available && provider.cliName === 'Scripted stand-in'));
   await page.goto(origin);
   await page.getByText('Acme Notes · scripted demo', { exact: true }).first().waitFor();
   const trimStart = (performance.now() - recordingStartedAt) / 1000;

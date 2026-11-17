@@ -77,9 +77,9 @@ export type AgentEvent =
       type: 'usage';
       contextTokens?: number;        // snapshot: current context window usage
       contextLimit?: number;         // snapshot: provider's max context window
-      inputTokensDelta?: number;     // accumulate
-      outputTokensDelta?: number;    // accumulate
-      costUsdDelta?: number;         // accumulate
+      inputTokensDelta?: number;     // accumulate; negative corrects an earlier snapshot
+      outputTokensDelta?: number;    // accumulate; negative corrects an earlier snapshot
+      costUsdDelta?: number;         // accumulate; negative corrects an earlier snapshot
       turnsDelta?: number;           // accumulate
       modelRan?: string;             // snapshot: the model the CLI actually ran (from result.modelUsage)
     }
