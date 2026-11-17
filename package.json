@@ -21,7 +21,10 @@
     "smoke:live-thought": "bun scripts/live-thought-activation-smoke.ts",
     "test:browser": "bun scripts/browser-smoke.ts",
     "browsers:install": "playwright install chromium",
-    "benchmark": "bun scripts/benchmark.ts"
+    "benchmark": "bun scripts/benchmark.ts",
+    "demo": "bun scripts/demo.ts",
+    "demo:check": "bun scripts/demo.ts --check",
+    "media": "bun scripts/demo.ts --media"
   },
   "devDependencies": {
     "@types/bun": "latest",
