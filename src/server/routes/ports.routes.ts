@@ -1,3 +1,4 @@
+import { parseSsListeners } from '../services/listening-ports';
 import { randomUUID } from 'node:crypto';
 import { createProcessProbe, type ProcessIdentity } from '../platform/process-probe';
 import { jsonResponse } from '../utils';
@@ -127,8 +128,12 @@ export async function handleGetPorts(req: Request): Promise<Response> {
       ports.sort((a, b) => a.port - b.port);
       return jsonResponse({ ports: await decoratePorts(ports) });
     } else {
-      const result = await runPortCommand(['lsof', '-iTCP', '-sTCP:LISTEN', '-nP']);
-      if (result.exitCode !== 0) return jsonResponse({ ports: [] });
+      const result = await runPortCommand(['lsof', '-iTCP', '-sTCP:LISTEN', '-nP']).catch(() => null);
+      if (!result || result.exitCode !== 0) {
+        if (process.platform !== 'linux') return jsonResponse({ ports: [] });
+        const fallback = await runPortCommand(['ss', '-ltnpH']);
+        return jsonResponse({ ports: fallback.exitCode === 0 ? await decoratePorts(parseSsListeners(fallback.stdout)) : [] });
+      }
       const stdout = result.stdout;
       const lines = stdout.trim().split('\n').slice(1);
       const SYSTEM_PROCESSES = new Set([
