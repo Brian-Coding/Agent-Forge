@@ -1,12 +1,17 @@
 # Agent Forge
 
-A local workbench for supervising Claude Code and Codex across several projects. Keep conversations, queued turns, terminals, diffs, and usage together in a workspace grid.
+Supervise parallel coding agents as a daily engineering workflow: separate tasks, shared project context, real terminals, and human review before integration.
 
-The engineering focus is reliable orchestration: validated commands, durable state, provider adapters, reconnect-safe queues, and bounded process cleanup. Provider agents still run with broad local permissions; this is a workbench for trusted development projects, not a sandbox.
+[![CI](https://github.com/Brian-Coding/Agent-Forge/actions/workflows/ci.yml/badge.svg)](https://github.com/Brian-Coding/Agent-Forge/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-![Agent Forge with two fictional Acme Notes conversations](docs/images/agent-forge.png)
+**Try it without AI accounts:** `bun install --frozen-lockfile` then `bun run demo`. Open the printed URL and send a message in either pane. The disposable Acme Notes workspace uses scripted stand-ins; terminal tests and the preview server are real. Ctrl+C cleans up. Repository access is required while this preview is private.
 
-*Captured from the running app on Linux with fictional demo data. No model was called for this screenshot.*
+![Scripted agents in the real Forge grid with terminal checks and a preview port](docs/images/forge-demo.gif)
+
+*Linux recording of the running app, fictional data, scripted stand-ins, no model calls. [MP4](docs/images/forge-demo.mp4) · [Reproduce the recording](docs/media.md).*
+
+**Engineering evidence:** [Architecture](docs/architecture.md) · [Failure modes + tests](docs/FAILURE-MODES.md) · [Decisions](docs/decisions/README.md) · [Team rollout](docs/ADOPTION.md)
 
 ```mermaid
 flowchart LR
@@ -17,6 +22,12 @@ flowchart LR
   Adapters --> CLI[Owned provider process groups]
   Server --> Tools[Terminals, diffs, project watchers]
 ```
+
+## Why this matters for teams adopting AI
+
+Split a change into bounded implementation and verification tasks, give each writer a separate Git worktree, and supervise their progress in one grid. Per-agent queues, session ownership, exact-origin/token checks and owned-process cleanup keep the workbench predictable. Provider-reported last-run tokens/cost are visible; missing values say unknown.
+
+Humans still define acceptance criteria, review diffs, run independent checks and approve merges/releases. Forge does not verify an agent’s claim that tests passed, sandbox its shell, or enforce a spending cap. Start with two tasks in week 1, shadow existing reviews in week 2, then expand only if review effort and defects improve. The [three-week playbook](docs/ADOPTION.md) makes approval points explicit.
 
 ## What you can do
 
@@ -32,14 +43,15 @@ flowchart LR
 ## Requirements
 
 - [Bun](https://bun.sh/) 1.4.4 or newer (the tested version)
-- At least one provider CLI, installed and signed in:
+- Node.js 20+ for the account-free demo and browser checks; Linux port inventory needs `lsof` or `ss`.
+- For real agents, at least one provider CLI installed and signed in:
   - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (`claude`)
   - [Codex CLI](https://github.com/openai/codex) (`codex`)
-- macOS, Linux, or Windows
+- Linux is tested here. macOS and Windows paths exist; native validation remains outstanding.
 
 ## Quick start
 
-**Private preview:** this repository remains private. The commands below require repository access. Publication will use a new repository after its owner creates and seeds it; the clone URL will be updated then. No public repository is implied by these instructions.
+**Private preview:** cloning requires repository access. Use the account-free demo above first; the following starts your real provider workflow.
 
 ```bash
 git clone https://github.com/Brian-Coding/Agent-Forge.git
@@ -63,7 +75,11 @@ The browser dependencies are bundled locally from `bun.lock`; no CDN is required
 - [Usage and limits](docs/usage-and-limits.md)
 - [Configuration](docs/configuration.md)
 - [Safety model](docs/safety.md)
-- [Architecture](docs/architecture.md)
+- [Architecture and tradeoffs](docs/architecture.md)
+- [Failure modes and regression evidence](docs/FAILURE-MODES.md)
+- [Architecture decisions](docs/decisions/README.md)
+- [Team adoption playbook](docs/ADOPTION.md)
+- [Reproducible demo and media](docs/media.md)
 - [Measured performance and regression checks](docs/performance.md)
 - [Changelog](CHANGELOG.md)
 - [Windows launcher](docs/windows-launcher.md)

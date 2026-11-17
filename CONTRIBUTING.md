@@ -32,3 +32,7 @@ Open an issue with what you did, what you expected, what happened, your OS, Bun 
 ## License
 
 By contributing you agree that your contributions are licensed under the [MIT License](LICENSE).
+
+## Portfolio evidence and reproducible demos
+
+Read [failure modes](docs/FAILURE-MODES.md) and [decisions](docs/decisions/README.md) when changing a trust boundary. `bun run demo:check` exercises the account-free workflow. `bun run media` regenerates the fictional recording; inspect frames before committing. See [media instructions](docs/media.md).

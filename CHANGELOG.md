@@ -12,3 +12,10 @@
 - Add real demo screenshots, architecture documentation, third-party notices, and [measured performance](docs/performance.md). The local bundle improves sampled UI loading while adding startup/build work.
 
 Follow-up review: start descendant cleanup on provider exit even when inherited pipes remain open; retain the final streamed answer; remove the unused extracted Node-child helper; decode file-URL pathnames after parsing, including spaces and Unicode; extend real Markdown pipeline checks.
+
+### Portfolio evidence pass
+
+- Show last-run reported tokens/cost and distinguish unknown from reported zero.
+- Add an account-free scripted workbench demo with real terminal checks and reproducible media.
+- Fall back to Linux `ss` when `lsof` is unavailable for port inventory.
+- Document failure modes, architectural decisions and a practical team rollout.

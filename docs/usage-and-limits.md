@@ -14,3 +14,9 @@ The **Limits** sidebar (⏳) and the bottom bar show your providers' rate-limit 
 - **Codex:** read from the Codex CLI's app server, falling back to the rate-limit events Codex writes to its local session logs.
 
 Limits refresh every minute and when you click refresh. Each provider is cached separately, so one broken source never blanks the other.
+
+## Last-run accounting
+
+Each agent card shows provider-reported input tokens, output tokens and cost for its last finished process run. A reported zero is displayed as zero; missing usage says **unknown**. The record persists through restart. Interrupted runs can contain only partial accounting. Long-lived Codex processes can include several completed turns in one run total. Claude final usage reconciles streamed usage without adding the aggregate twice. Codex output uses the provider’s output aggregate directly.
+
+The historical Tokens dashboard also contains estimates and aggregates; it is not an invoice. No dollar cap or billing reconciliation is enforced. Set provider-side budgets before increasing concurrency. Scripted demos emit no fabricated usage.
