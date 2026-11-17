@@ -15,6 +15,7 @@ Follow-up review: start descendant cleanup on provider exit even when inherited 
 
 ### Portfolio evidence pass
 
+- Replaced bundled slash-command templates with original ones.
 - Show last-run reported tokens/cost and distinguish unknown from reported zero.
 - Add an account-free scripted workbench demo with real terminal checks and reproducible media.
 - Fall back to Linux `ss` when `lsof` is unavailable for port inventory.

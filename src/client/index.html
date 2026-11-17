@@ -634,9 +634,7 @@
 </head>
 <body>
   <div id="root"></div>
-  <script type="application/json" id="slash-commands-data">
-[]
-  </script>
+
   <script>
     const nativeFetch = window.fetch.bind(window);
     let launchToken = '';
@@ -686,30 +684,15 @@
       commands: ['M4 17l6-6-6-6', 'M12 19h8'],
     };
 
-    // Slash commands — loaded from <script type="application/json" id="slash-commands-data">
-    // at the top of the body. Each command has: id, name, command (slug), category,
-    // description, promptTemplate (with optional {args} placeholder).
-    const SLASH_COMMANDS = (() => {
-      try {
-        const el = document.getElementById('slash-commands-data');
-        return el ? JSON.parse(el.textContent) : [];
-      } catch (err) {
-        console.error('Failed to parse slash commands data:', err);
-        return [];
-      }
-    })();
-
-    // Default text substituted for {args} when the user applies a slash command
-    // without supplying their own arguments. Lets the agent fall back to either
-    // recent-conversation context or a general codebase pass.
-    const SLASH_DEFAULT_ARGS = 'If no specific target was provided here, infer one from our recent conversation; otherwise do a general pass over this codebase.';
+    // Original workflow templates arrive with the local browser bundle.
+    const SLASH_COMMANDS = window.forgeSlashCommands;
     const MAX_CHAT_IMAGES = 100;
     const MAX_CHAT_IMAGE_TOTAL_BYTES = 512 * 1024 * 1024;
     const CHAT_IMAGE_UPLOAD_CONCURRENCY = 4;
     const SUPPORTED_CHAT_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
 
     function expandSlashTemplate(template) {
-      return (template || '').replace(/\{args\}/g, SLASH_DEFAULT_ARGS).trim();
+      return (template || '').trim();
     }
 
     // Static fallback for model dropdowns; /api/models is authoritative when available.

@@ -14,7 +14,9 @@ If a provider reports that you are signed out or your token expired, the prompt 
 
 ## Slash commands
 
-Type `/` in the composer to pick from built-in prompt templates (code review, tests, debugging, planning, and more). The **Slash Commands** sidebar lists them all; click one to copy it.
+Type `/` in the composer to choose an original Agent Forge workflow template. Selecting one fills the composer so you can edit it before sending. The **Slash Commands** sidebar also lets you copy a template.
+
+The eight commands are `/diff-check`, `/task-map`, `/bug-proof`, `/pr-notes`, `/command-trace`, `/preview-check`, `/pane-handoff`, and `/scope-check`. Their short prompts live in the typed [catalog](../src/client/slash-commands.ts), bundled locally with the UI. They are starting instructions, not enforced permissions or guarantees about provider behavior.
 
 ## Plans
 
