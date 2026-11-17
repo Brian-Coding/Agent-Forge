@@ -42,8 +42,8 @@ flowchart LR
 **Private preview:** this repository remains private. The commands below require repository access. Publication will use a new repository after its owner creates and seeds it; the clone URL will be updated then. No public repository is implied by these instructions.
 
 ```bash
-git clone --branch oss/v1 https://github.com/Brian-Coding/AI-Agent-Forge.git
-cd AI-Agent-Forge
+git clone https://github.com/Brian-Coding/Agent-Forge.git
+cd Agent-Forge
 bun install --frozen-lockfile
 bun run dev
 ```

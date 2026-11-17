@@ -20,8 +20,8 @@ codex --version    # if you use Codex
 This is a private preview; cloning requires access. A future publication will use a new repository, and these URLs will be updated then.
 
 ```bash
-git clone --branch oss/v1 https://github.com/Brian-Coding/AI-Agent-Forge.git
-cd AI-Agent-Forge
+git clone https://github.com/Brian-Coding/Agent-Forge.git
+cd Agent-Forge
 bun install --frozen-lockfile
 bun run dev
 ```
