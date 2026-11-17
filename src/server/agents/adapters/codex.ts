@@ -1,3 +1,4 @@
+import { reportedNumber } from '../../../shared/reported-usage';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, extname, isAbsolute, join, relative, resolve, win32 as win32Path } from 'node:path';
@@ -597,13 +598,12 @@ export function handleCodexEvent(ctx: AgentRunContext, state: CodexRunState, eve
 
     const usage = event.usage;
     if (usage && typeof usage === 'object') {
-      const inputTokens = typeof usage.input_tokens === 'number' ? usage.input_tokens : 0;
-      const outputTokens = (typeof usage.output_tokens === 'number' ? usage.output_tokens : 0)
-        + (typeof usage.reasoning_output_tokens === 'number' ? usage.reasoning_output_tokens : 0);
+      const inputTokens = reportedNumber(usage.input_tokens);
+      const outputTokens = reportedNumber(usage.output_tokens);
       ctx.emitAgentEvent({
         type: 'usage',
-        inputTokensDelta: inputTokens > 0 ? inputTokens : undefined,
-        outputTokensDelta: outputTokens > 0 ? outputTokens : undefined,
+        inputTokensDelta: inputTokens,
+        outputTokensDelta: outputTokens,
         turnsDelta: 1,
       });
     }

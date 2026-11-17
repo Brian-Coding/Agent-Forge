@@ -195,3 +195,17 @@ test('eventReportsExpiredAuth ignores ordinary traffic', () => {
     message: { content: [{ type: 'text', text: 'Done — the token bucket refills hourly.' }] },
   })).toBe(false);
 });
+
+test('Claude result usage reconciles streamed tokens and supports result-only zero cost', () => {
+  for (const streamed of [false, true]) {
+    const events: AgentEvent[] = [];
+    const ctx = makeContext(events);
+    const state = createClaudeRunState();
+    if (streamed) normalizeClaudeEvent({ type: 'assistant', message: { usage: { input_tokens: 10, output_tokens: 2 }, content: [] } }, ctx, state, () => {});
+    normalizeClaudeEvent({ type: 'result', result: 'Done', usage: { input_tokens: 10, cache_read_input_tokens: 4, output_tokens: 3 }, total_cost_usd: 0 }, ctx, state, () => {});
+    const usage = events.filter(event => event.type === 'usage');
+    expect(usage.reduce((n, e) => n + (e.inputTokensDelta ?? 0), 0)).toBe(14);
+    expect(usage.reduce((n, e) => n + (e.outputTokensDelta ?? 0), 0)).toBe(3);
+    expect(usage.at(-1)?.costUsdDelta).toBe(0);
+  }
+});

@@ -3,7 +3,7 @@
  * is the only consumer. Provider-specific shapes never escape the adapter.
  *
  * Extended beyond the reference design with:
- *   - `usage`  — token + cost accounting (Claude reports natively; Codex skipped in Phase 3)
+ *   - `usage`  — token + cost accounting (provider-reported tokens; cost is optional)
  *   - `stderr` — retained for adapter diagnostics; the chat bridge suppresses it live
  */
 import type { ProviderTurnState } from '../../shared/protocol';

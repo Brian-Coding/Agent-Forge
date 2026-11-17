@@ -1,3 +1,4 @@
+import { normalizeReportedUsage } from '../../shared/reported-usage';
 import { rename } from 'node:fs/promises';
 import type { PersistedData } from '../../shared/protocol';
 import { migrateAgentRecord } from '../../shared/protocol';
@@ -122,6 +123,7 @@ export function normalizePersistedData(raw: unknown): PersistedDataNormalization
       totalOutputTokens: finiteNonNegative(migrated.totalOutputTokens),
       totalCostUsd: finiteNonNegative(migrated.totalCostUsd),
       numTurns: finiteNonNegative(migrated.numTurns),
+      lastRunUsage: normalizeReportedUsage(migrated.lastRunUsage),
     };
     if (migrated.provider === 'claude' || migrated.provider === 'codex') normalized.provider = migrated.provider;
     const model = boundedString(migrated.model, 256, false);

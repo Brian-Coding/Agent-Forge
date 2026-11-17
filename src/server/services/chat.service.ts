@@ -1,3 +1,4 @@
+import { reportedNumber, reportedSum, type ReportedUsage } from '../../shared/reported-usage';
 import type { AgentEvent } from '../agents/events';
 import type { AgentHandle, AgentRunContext } from '../agents/types';
 import type { ChatImageAttachment } from '../../shared/protocol';
@@ -53,6 +54,7 @@ interface TurnBuffer {
   // here; at turn-finalize the rolled-up totals get one entry in the usage
   // log via usageService.record() — so the log grows at most one row per
   // turn, not one row per internal API sub-call.
+  reportedUsage: ReportedUsage;
   turnUsage: { inputTokens: number; outputTokens: number; costUsd: number; turns: number };
   modelRan?: string;
   /** Automatic stale-session retries are unsafe after any tool/checkpoint. */
@@ -305,6 +307,11 @@ function handleEvent(agentId: string, event: AgentEvent): void {
       // Accumulate into the per-turn buffer for the usage-log record at finalize.
       const turn = turnBuffers.get(agentId);
       if (turn) {
+        const deltas = { inputTokens: event.inputTokensDelta, outputTokens: event.outputTokensDelta, costUsd: event.costUsdDelta };
+        for (const key of ['inputTokens', 'outputTokens', 'costUsd'] as const) {
+          const delta = reportedNumber(deltas[key]);
+          if (delta !== undefined) turn.reportedUsage[key] = reportedSum(turn.reportedUsage[key], delta);
+        }
         const finitePositive = (value: unknown): value is number =>
           typeof value === 'number' && Number.isFinite(value) && value > 0;
         if (finitePositive(event.inputTokensDelta)) turn.turnUsage.inputTokens += event.inputTokensDelta;
@@ -575,6 +582,7 @@ async function runChatTurn(agentId: string, content: string, options: ChatTurnOp
     persistedSystemMessages: new Set(),
     provider,
     resolvedModel: requestedResolvedModel,
+    reportedUsage: {},
     turnUsage: { inputTokens: 0, outputTokens: 0, costUsd: 0, turns: 0 },
     retrySafe: true,
     userMessageId: userMsg.id,
@@ -850,6 +858,7 @@ async function runChatTurn(agentId: string, content: string, options: ChatTurnOp
     // stamped from the CLI-reported ground truth when available so the Tokens
     // tab can break spend down per model.
     if (turnState) {
+      agentService.recordRunUsage(agentId, turnState.reportedUsage);
       usageService.record(agentId, provider, turnState.turnUsage, { model: turnState.modelRan || resolvedModel });
     }
 

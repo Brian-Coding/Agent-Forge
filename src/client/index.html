@@ -2395,6 +2395,12 @@
             }, 'Clear chat'),
           )
         ),
+        e('div', { className: 'token-info', title: 'Provider-reported totals for the last finished run. Unknown means the provider did not report it.' },
+          'Last run: ',
+          agent.lastRunUsage?.inputTokens ?? 'unknown', ' in / ',
+          agent.lastRunUsage?.outputTokens ?? 'unknown', ' out · ',
+          agent.lastRunUsage?.costUsd == null ? 'cost unknown' : '$' + agent.lastRunUsage.costUsd.toFixed(4)
+        ),
         // Context bar + token info
         tokenUsage && safeContextLimit > 0 && e(React.Fragment, null,
           e('div', { className: 'context-bar', title: 'Context: ' + Math.round(contextRatio * 100) + '% used' },

@@ -39,6 +39,8 @@ export interface WorkspaceInfo {
 }
 
 export interface AgentInfo {
+  /** Latest finished process run, including interrupted runs; absent counters are unknown. */
+  lastRunUsage?: import('./reported-usage').ReportedUsage;
   id: string;
   name: string;
   cwd: string;

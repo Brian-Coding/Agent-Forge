@@ -1,3 +1,4 @@
+import { reportedNumber, reportedSum } from '../../../shared/reported-usage';
 import { existsSync } from 'fs';
 import { extname, win32 as win32Path } from 'path';
 import {
@@ -50,6 +51,8 @@ export interface ClaudeRunState {
   currentIsSubagent: boolean;
   startedToolIds: Set<string>;
   pendingSessionId: string | null;
+  reportedInput?: number;
+  reportedOutput?: number;
 }
 
 export function createClaudeRunState(): ClaudeRunState {
@@ -607,14 +610,15 @@ export function normalizeClaudeEvent(
     if (realMessageModel) commitClaudeSession(ctx, state);
     const usage = event.message?.usage;
     if (usage && typeof usage === 'object') {
-      const inputTokens = (usage.input_tokens || 0)
-        + (usage.cache_creation_input_tokens || 0)
-        + (usage.cache_read_input_tokens || 0);
+      const inputTokens = reportedSum(usage.input_tokens, usage.cache_creation_input_tokens, usage.cache_read_input_tokens);
+      const outputTokens = reportedNumber(usage.output_tokens);
+      state.reportedInput = reportedSum(state.reportedInput, inputTokens);
+      state.reportedOutput = reportedSum(state.reportedOutput, outputTokens);
       ctx.emitAgentEvent({
         type: 'usage',
-        contextTokens: inputTokens > 0 ? inputTokens : undefined,
-        inputTokensDelta: inputTokens > 0 ? inputTokens : undefined,
-        outputTokensDelta: typeof usage.output_tokens === 'number' ? usage.output_tokens : undefined,
+        contextTokens: inputTokens,
+        inputTokensDelta: inputTokens,
+        outputTokensDelta: outputTokens,
         modelRan: realMessageModel,
       });
     } else if (realMessageModel) {
@@ -734,7 +738,16 @@ export function normalizeClaudeEvent(
       type: 'usage',
       contextLimit,
       modelRan,
-      costUsdDelta: typeof event.total_cost_usd === 'number' ? event.total_cost_usd : undefined,
+      // Result usage is an aggregate, so only add what assistant snapshots did not report.
+      inputTokensDelta: (() => {
+        const total = reportedSum(event.usage?.input_tokens, event.usage?.cache_creation_input_tokens, event.usage?.cache_read_input_tokens);
+        return total === undefined ? undefined : Math.max(0, total - (state.reportedInput ?? 0));
+      })(),
+      outputTokensDelta: (() => {
+        const total = reportedNumber(event.usage?.output_tokens);
+        return total === undefined ? undefined : Math.max(0, total - (state.reportedOutput ?? 0));
+      })(),
+      costUsdDelta: reportedNumber(event.total_cost_usd),
       turnsDelta: typeof event.num_turns === 'number' ? event.num_turns : undefined,
     });
     return;

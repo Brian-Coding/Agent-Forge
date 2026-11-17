@@ -585,3 +585,19 @@ test('a blocked auth finish preserves the user prompt and records session recove
   expect(authRecoveryStore.canRetry(id, incident!.incidentId, false)).toMatchObject({ ok: true });
 });
 
+
+test('last-run usage distinguishes reported zero, partial usage, and an unreported next run', async () => {
+  const id = loadAgent();
+  registerTestAdapter((_prompt, ctx, attempt) => ({
+    async run() {
+      if (attempt === 1) ctx.emitAgentEvent({ type: 'usage', inputTokensDelta: 12, costUsdDelta: 0 });
+      ctx.emitAgentEvent({ type: 'result', text: 'Finished.' });
+      return undefined;
+    }, stop() {}, kill() {},
+  }));
+  await chatService.sendMessage(id, 'First');
+  expect(agentService.getAgent(id)?.lastRunUsage).toEqual({ inputTokens: 12, costUsd: 0 });
+  expect(agentService.buildPersistedAgents().find(a => a.id === id)?.lastRunUsage).toEqual({ inputTokens: 12, costUsd: 0 });
+  await chatService.sendMessage(id, 'Second');
+  expect(agentService.getAgent(id)?.lastRunUsage).toEqual({});
+});
