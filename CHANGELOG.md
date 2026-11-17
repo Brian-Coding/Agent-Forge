@@ -2,6 +2,7 @@
 
 ## Unreleased — 2026-11-16 (private preview)
 
+- Preserve the workspace App URL across restarts while continuing to discard removed feature state.
 - Require the exact launch origin and an ephemeral capability for WebSocket/HTTP mutations.
 - Launch owned POSIX process groups and verify descendant cleanup; revalidate selected external listeners before stopping them.
 - Treat project-directory changes as a provider-session boundary and refuse them during active turns.

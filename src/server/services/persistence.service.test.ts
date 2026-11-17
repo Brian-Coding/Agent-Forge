@@ -103,6 +103,9 @@ test('normalization repairs supported state and discards removed feature fields'
       selectedAgentIds: [null, '', 'agent-1'],
       lockedAgentIds: ['agent-1', 7],
       createdAt: Number.NEGATIVE_INFINITY,
+      testUrl: 'http://localhost:5173',
+      googleDocsTrackerEnabled: true,
+      atlasProjectCwd: 'C:\\repo',
       qaRuns: [null, {
         id: 'run-1',
         sourceAgentId: 'agent-1',
@@ -135,8 +138,9 @@ test('normalization repairs supported state and discards removed feature fields'
     selectedAgentIds: ['', 'agent-1'],
     lockedAgentIds: ['agent-1'],
     createdAt: 0,
+    testUrl: 'http://localhost:5173',
   });
-  for (const field of ['qaRuns', 'atlasRun', 'qaSurfaceVerifications', 'googleDocsTrackerEnabled', 'atlasProjectCwd', 'testUrl']) expect(workspace).not.toHaveProperty(field);
+  for (const field of ['qaRuns', 'atlasRun', 'qaSurfaceVerifications', 'googleDocsTrackerEnabled', 'atlasProjectCwd']) expect(workspace).not.toHaveProperty(field);
   expect(workspace.injected).toBeUndefined();
   expect((normalized.data.messages[0] as any).imageAttachments).toHaveLength(1);
   expect((normalized.data.messages[0] as any).injected).toBeUndefined();
@@ -147,6 +151,45 @@ test('normalization repairs supported state and discards removed feature fields'
   const repeated = normalizePersistedData(normalized.data);
   expect(repeated.issues).toEqual([]);
   expect(repeated.data).toEqual(normalized.data);
+});
+
+test('App URL survives saving and loading while removed workspace state is discarded', async () => {
+  const directory = await fixtureDirectory();
+  const options = { dataFile: join(directory, 'data.json'), pidFile: join(directory, 'pids.json') };
+  const service = createPersistenceService(options);
+  service.setBuildPersistedData(() => ({
+    ...emptyData(),
+    workspaces: [{
+      id: 'workspace-1', name: 'Workspace', sortOrder: 0, gridColumns: 3, gridRows: 2,
+      selectedAgentIds: [], lockedAgentIds: [], createdAt: 1,
+      testUrl: 'http://localhost:5173/notes?view=all',
+      qaRuns: [], atlasRun: {}, qaSurfaceVerifications: {},
+      googleDocsTrackerEnabled: true, atlasProjectCwd: '/tmp/old-atlas',
+    }],
+  }));
+  await service.saveNow();
+
+  const loaded = await createPersistenceService(options).load();
+  expect(loaded?.workspaces[0]?.testUrl).toBe('http://localhost:5173/notes?view=all');
+  for (const field of ['qaRuns', 'atlasRun', 'qaSurfaceVerifications', 'googleDocsTrackerEnabled', 'atlasProjectCwd']) {
+    expect(loaded?.workspaces[0]).not.toHaveProperty(field);
+  }
+});
+
+test('App URL normalization accepts bounded strings and reports malformed values', () => {
+  for (const testUrl of ['', 'x'.repeat(8_192), undefined, null, 42, 'x'.repeat(8_193)]) {
+    const result = normalizePersistedData({
+      ...emptyData(),
+      workspaces: [{ id: 'workspace-1', name: 'Workspace', testUrl }],
+    });
+    if (typeof testUrl === 'string' && testUrl.length <= 8_192) {
+      expect(result.data.workspaces[0]?.testUrl).toBe(testUrl);
+      expect(result.issues).toEqual([]);
+    } else {
+      expect(result.data.workspaces[0]).not.toHaveProperty('testUrl');
+      expect(result.issues).toEqual(testUrl === undefined ? [] : ['workspaces[0].testUrl was dropped']);
+    }
+  }
 });
 
 test('a failed data write rejects, leaves prior state intact, and does not poison retries', async () => {

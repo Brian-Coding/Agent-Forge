@@ -231,6 +231,9 @@ export function normalizePersistedData(raw: unknown): PersistedDataNormalization
     };
     const cwd = boundedString(candidate.cwd, 32_768, false);
     if (cwd) workspace.cwd = cwd;
+    const testUrl = boundedString(candidate.testUrl, 8_192);
+    if (testUrl !== null) workspace.testUrl = testUrl;
+    else if (candidate.testUrl !== undefined) issue(`workspaces[${index}].testUrl was dropped`);
     return [workspace as any];
   });
 
