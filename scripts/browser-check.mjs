@@ -3,6 +3,7 @@ import {createServer} from 'node:http';
 import {mkdir} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import {chromium} from 'playwright';
+import {checkComposerFocus} from '../src/client/composer-focus.browser.mjs';
 const origin=process.argv[2];
 const browser=await chromium.launch();
 try {
@@ -22,6 +23,7 @@ try {
   await page.evaluate(() => { const value=window.DOMPurify; window.DOMPurify=null; const html=window.renderMarkdown('<img onerror=alert(1)>'); window.DOMPurify=value; if(!html.includes('&lt;img')) throw new Error('Unsafe fallback'); });
   // Actual UI has a capability-bearing WebSocket and hydrates the fictional workspace.
   assert.ok((await page.textContent('body'))?.includes('Acme Notes'));
+  await checkComposerFocus(page);
   // Exercise the bundled catalog through the real composer, without submitting.
   const composer = page.locator('.terminal-panel textarea').first();
   await composer.fill('/diff-ch');
@@ -52,6 +54,6 @@ try {
     await mkdir(resolve('docs/images'), { recursive: true });
     await page.screenshot({ path: resolve('docs/images/agent-forge.png') });
   }
-  console.log('PASS: authorized UI, cross-port browser rejection, local dependencies, Markdown sanitization, POSIX/file/Windows links, escaped fallback');
+  console.log('PASS: authorized UI, two-pane composer focus, cross-port browser rejection, local dependencies, Markdown sanitization, POSIX/file/Windows links, escaped fallback');
 
 } finally { await browser.close(); }

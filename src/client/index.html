@@ -2086,6 +2086,7 @@
 
       const handleSubmit = async () => {
         if (!agent || uploadProgress) return;
+        const submitFocus = document.activeElement;
         const text = input.trim();
         // If there are pending images, send them (with or without text)
         if (pendingImagesRef.current.length > 0) {
@@ -2119,7 +2120,12 @@
         setAutoScrollEnabled(true);
         requestAnimationFrame(() => {
           if (contentRef.current) contentRef.current.scrollTop = contentRef.current.scrollHeight;
-          inputRef.current?.focus();
+          // A frame (or image upload) can finish after the user moves to another
+          // control. Only restore unchanged focus, or focus lost by disabling
+          // the submitting control; never redirect another composer's keystrokes.
+          if (document.activeElement === submitFocus || document.activeElement === document.body) {
+            inputRef.current?.focus();
+          }
         });
       };
 
