@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — 2026-11-16 (private preview)
+## Unreleased — 2026-11-16
 
 - Preserve the workspace App URL across restarts while continuing to discard removed feature state.
 - Require the exact launch origin and an ephemeral capability for WebSocket/HTTP mutations.

@@ -17,8 +17,6 @@ codex --version    # if you use Codex
 
 ## 2. Install and start
 
-This is a private preview; cloning requires access. A future publication will use a new repository, and these URLs will be updated then.
-
 ```bash
 git clone https://github.com/Brian-Coding/Agent-Forge.git
 cd Agent-Forge

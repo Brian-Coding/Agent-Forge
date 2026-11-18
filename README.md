@@ -5,7 +5,7 @@ Supervise parallel coding agents as a daily engineering workflow: separate tasks
 [![CI](https://github.com/Brian-Coding/Agent-Forge/actions/workflows/ci.yml/badge.svg)](https://github.com/Brian-Coding/Agent-Forge/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**Try it without AI accounts:** `bun install --frozen-lockfile` then `bun run demo`. Open the printed URL and send a message in either pane. The disposable Acme Notes workspace uses scripted stand-ins; terminal tests and the preview server are real. Ctrl+C cleans up. Repository access is required while this preview is private.
+**Try it without AI accounts:** `bun install --frozen-lockfile` then `bun run demo`. Open the printed URL and send a message in either pane. The disposable Acme Notes workspace uses scripted stand-ins; terminal tests and the preview server are real. Ctrl+C cleans up.
 
 ![Scripted agents in the real Forge grid with terminal checks and a preview port](docs/images/forge-demo.gif)
 
@@ -51,7 +51,7 @@ Humans still define acceptance criteria, review diffs, run independent checks an
 
 ## Quick start
 
-**Private preview:** cloning requires repository access. Use the account-free demo above first; the following starts your real provider workflow.
+Try the account-free demo above first; the following starts your real provider workflow.
 
 ```bash
 git clone https://github.com/Brian-Coding/Agent-Forge.git
