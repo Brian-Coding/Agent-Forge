@@ -34,11 +34,11 @@ Humans still define acceptance criteria, review diffs, run independent checks an
 - **Run many agents at once.** Put Claude and Codex agents in a resizable grid, give each its own project folder, model, reasoning level, and persona, and switch providers while keeping the visible chat history. Provider/model or project changes start a fresh provider session.
 - **Chat with real progress.** Markdown replies, live "thinking" and tool activity, elapsed time, stall detection, queued follow-ups, retries, and up to 100 image attachments per message.
 - **Organize by workspace.** Group agents per project, lock panes in place, drag to rearrange, and keep an App URL handy for the thing you are building.
-- **Share instructions.** Built-in safety guardrails apply to every turn; add your own shared project instructions on top, and agents pick up `.plans/*.md` files from the project automatically.
+- **Share instructions.** Built-in safety guardrails apply to every turn; add your own shared project instructions on top. Forge includes references to active or pending-review `.plans/*.md` files automatically.
 - **Stay close to the code.** See which files an agent changed, open the Git diff, check the branch, and run commands in per-agent terminals.
 - **Keep the machine tidy.** See which local ports are in use and by what, stop stray dev servers, and manage iOS simulators on macOS.
 - **Watch usage and limits.** Token usage by agent, model, and day, plus Claude and Codex rate-limit windows.
-- **Stay local.** The server binds to `127.0.0.1`, checks Host/Origin headers, and uses guarded, quarantine-first file operations for anything it deletes itself.
+- **Stay local.** The server binds to `127.0.0.1`, checks Host/Origin headers, and guards temporary-output cleanup and Xcode DerivedData quarantine with path and symlink checks.
 
 ## Requirements
 

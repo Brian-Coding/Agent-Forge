@@ -129,7 +129,7 @@ async function init() {
 
   // Register the collector before any migration/recovery calls saveNow(). A
   // save made without a collector is intentionally a no-op, which previously
-  // left recovered state and the default workspace undurable.
+  // left recovered state and the default workspace unsaved.
   persistenceService.setBuildPersistedData((): PersistedData => ({
     schemaVersion: PERSISTED_SCHEMA_VERSION,
     agents: agentService.buildPersistedAgents() as any,
@@ -157,9 +157,8 @@ async function init() {
   usageService.startSync();
 }
 
-// Lock FIRST — kill any prior bun.exe — THEN load data.json. If we load
-// first, a still-running prior instance could mutate data.json between
-// our read and our kill, and we'd save our older state on top of it.
+// Acquire the lock before loading state. A verified prior instance must
+// exit gracefully first so its final save cannot race this instance's load.
 await acquireProcessLock();
 
 await init();

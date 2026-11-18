@@ -20,7 +20,7 @@ The eight commands are `/diff-check`, `/task-map`, `/bug-proof`, `/pr-notes`, `/
 
 ## Plans
 
-Agents are told to keep plans as Markdown files in the project's `.plans/` folder. Agent Forge watches that folder and includes the relevant plans in each agent's context. Put a `Lifecycle:` line near the top of a plan (Draft, Approved, In Progress, Paused, Completed, ...) so agents know whether they may act on it. A `.plans/README.md` catalog, if present, is read first.
+Agents are told to keep plans as Markdown files in the project's `.plans/` folder. Agent Forge watches that folder and includes titles, lifecycle states, and file paths for active or pending-review plans in each agent's context; agents read the files for full content. Put a `Lifecycle:` line near the top of a plan (Draft, Approved, In Progress, Paused, Completed, ...) so agents know whether they may act on it. Agents are instructed to read a `.plans/README.md` catalog first when present.
 
 ## How agent context is assembled
 
@@ -29,7 +29,7 @@ Open **Settings** (gear icon) to see exactly what every agent receives. For each
 1. **Built-in guardrails** (read-only): safety and change-control rules, e.g. never commit, push, merge, or run destructive commands unless you explicitly ask; protect existing work; never print secrets.
 2. The agent's **persona**, if set.
 3. Your **shared project instructions** from the Settings screen (editable; applies to all agents in this Agent Forge instance).
-4. Relevant **plans** from `.plans/`.
+4. Relevant **plan references** from `.plans/` and any legacy inline plans.
 5. Report-delivery, plan-management, and conversation-scope instructions.
 6. The default **iOS simulator** (when set and relevant) and the agent's **reference folders**.
 

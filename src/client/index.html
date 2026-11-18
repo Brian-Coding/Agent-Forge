@@ -2795,55 +2795,6 @@
       return e('span', { className: state.status === 'uncertain' ? 'status-stuck' : '', title: state.text }, state.label);
     }
 
-    function AgentsSidebar({ agents, selectedAgents, totalPanels, onToggle, onRemove, onNewAgent, onEdit, statusStartTimes, liveTurnState }) {
-      return e(React.Fragment, null,
-        e('div', { className: 'sidebar-header' },
-          e('span', null, 'Agents'),
-          e('div', { className: 'sidebar-header-actions' },
-            e('button', { className: 'sidebar-btn', onClick: onNewAgent, title: 'New Agent' }, '+')
-          )
-        ),
-        e('div', { className: 'agent-list' },
-          agents.length === 0
-            ? e('div', { style: { padding: 12, color: 'var(--text-muted)', fontSize: 12 } }, 'No agents yet.')
-            : agents.map(agent =>
-                e('div', {
-                  key: agent.id,
-                  className: 'agent-item' + (selectedAgents.includes(agent.id) ? ' selected' : ''),
-                  onClick: () => onToggle(agent.id)
-                },
-                  e(AgentStatusDot, { agent }),
-                  e('div', { className: 'agent-info' },
-                    e('div', { className: 'agent-name' }, agent.name),
-                    e('div', { className: 'agent-status' },
-                      e(AgentStatusText, { agent, statusStartTimes, liveTurnState })
-                    )
-                  ),
-                  onEdit && e('button', {
-                    className: 'agent-edit-btn',
-                    onClick: (ev) => { ev.stopPropagation(); onEdit(agent); },
-                    title: 'Edit agent',
-                    'aria-label': 'Edit agent ' + agent.name,
-                  }, '\u270E'),
-                  e('button', {
-                    className: 'agent-delete-btn',
-                    onClick: (ev) => { ev.stopPropagation(); if (confirm('Delete agent "' + agent.name + '"?')) onRemove(agent.id); },
-                    title: 'Delete agent',
-                    'aria-label': 'Delete agent ' + agent.name,
-                  }, '\u00D7')
-                )
-              )
-        ),
-        e('div', { style: { padding: '8px' } },
-          e('button', { className: 'btn btn-primary', style: { width: '100%' }, onClick: onNewAgent }, '+ New Agent')
-        ),
-        e('div', { className: 'shortcuts-hint' },
-          e('span', null, e(React.Fragment, null, e('kbd', null, 'Ctrl+N'), ' new ', e('kbd', null, 'Esc'), ' stop'))
-        )
-      );
-    }
-
-    // Workspaces Sidebar
     // Sidebar bottom ports widget
     function SidebarPorts() {
       const [ports, setPorts] = useState([]);

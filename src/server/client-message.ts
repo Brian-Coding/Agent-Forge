@@ -9,8 +9,6 @@ const MAX_TEXT_CHARS = 1024 * 1024;
 const MAX_COMMAND_CHARS = 128 * 1024;
 const MAX_ID_LIST = 1_024;
 
-export const COMMAND_ENVELOPE_KEYS = ['protocolVersion', 'requestId', 'clientSessionId', 'sentAt'] as const;
-
 export interface ClientCommandMeta {
   protocolVersion?: number;
   requestId?: string;

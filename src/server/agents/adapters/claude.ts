@@ -15,7 +15,7 @@ import {
 import { isRealClaudeModelId, stripModelTier } from '../agent-kinds';
 import { persistenceService } from '../../services/persistence.service';
 import { currentAuthCoordinator, type AuthStartPermit } from '../../auth/provider-auth-coordinator';
-import { summarizeToolInput, type AgentEvent } from '../events';
+import { summarizeToolInput } from '../events';
 import { drainStreamToString, parseNdjsonLines, flushNdjsonLeftover } from '../stream-utils';
 import type { AgentAdapter, AgentHandle, AgentRunContext } from '../types';
 
@@ -260,7 +260,7 @@ export const claudeAdapter: AgentAdapter<ClaudeRunState> = {
       if (existsSync(dir)) args.push('--add-dir', dir);
     }
 
-    // Appended system prompt (guardrails + persona + project context + notes + docs + ...).
+    // Appended system prompt (guardrails, persona, project context and plans).
     // The bridge builds this via prompt-builder.service so the prompt itself is provider-agnostic.
     if (ctx.systemPrompt) {
       args.push('--append-system-prompt', ctx.systemPrompt);

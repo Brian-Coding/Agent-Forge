@@ -1,6 +1,6 @@
 # Claude CLI compatibility fixtures
 
-Qualified CLI floor for these fixtures: **Claude Code 2.1.241**.
+Auth-classifier fixture version and configured compatibility floor: **Claude Code 2.1.241**. These fixtures do not certify live-provider compatibility.
 
 These files capture the success and failure output shapes Agent Forge has observed from the Claude CLI. `src/server/auth/classify-claude-auth.test.ts` replays them to lock the sign-in classifier that decides whether a Claude turn may start and which recovery action the UI offers.
 

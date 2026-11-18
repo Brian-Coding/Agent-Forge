@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { safeRemoveTree } from '../src/server/services/safe-filesystem.mjs';
+import { killProcessTree, waitForProcessExit } from '../src/server/utils';
 
 const root = await mkdtemp(join(tmpdir(), 'forge-browser-'));
 const project = join(root, 'acme-notes'); await mkdir(project);
@@ -19,16 +21,34 @@ await writeFile(join(root, 'data.json'), JSON.stringify({ schemaVersion: 1, agen
   ], sharedContext: '', documents: [], settings: { activeWorkspaceId: 'acme' }, workspaces: [{ id: 'acme', name: 'Acme Notes', cwd: project, gridColumns: 2, gridRows: 1, sortOrder: 0, selectedAgentIds: agents.map(a => a.id), lockedAgentIds: [], createdAt: now }], usageEvents: [],
 }));
 const wrapper = join(root, 'server.mjs');
-await writeFile(wrapper, `const m=await import(${JSON.stringify(new URL('../src/server/index.ts', import.meta.url).href)}); await Bun.stdin.text(); await m.shutdown({reason:'browser smoke'});`);
-const proc = Bun.spawn([process.execPath, wrapper], { cwd: root, stdin: 'pipe', stdout: 'ignore', stderr: 'ignore', env: {
-  ...process.env, HOST: '127.0.0.1', PORT: String(port), AI_HARNESS_CLAUDE_CREDENTIALS_JSON: join(root, 'no-credentials.json'), AI_HARNESS_CLAUDE_LIMITS_JSON: join(root, 'no-limits.json'), AI_HARNESS_CODEX_SESSIONS_DIR: join(root, 'no-sessions'), AGENT_FORGE_ARTIFACT_ROOT: join(root, 'artifacts'),
+await writeFile(wrapper, `import { installOfflineDemoServices } from ${JSON.stringify(new URL('./demo/offline-services.ts', import.meta.url).href)};
+installOfflineDemoServices();
+const m=await import(${JSON.stringify(new URL('../src/server/index.ts', import.meta.url).href)}); await Bun.stdin.text(); await m.shutdown({reason:'browser smoke'});`);
+const proc = Bun.spawn([process.execPath, wrapper], { cwd: root, detached: process.platform !== 'win32', stdin: 'pipe', stdout: 'ignore', stderr: 'ignore', env: {
+  PATH: process.env.PATH, SystemRoot: process.env.SystemRoot,
+  HOST: '127.0.0.1', PORT: String(port), AGENT_FORGE_ARTIFACT_ROOT: join(root, 'artifacts'),
+  AGENT_FORGE_USAGE_SYNC_DIR: join(root, 'usage'), AGENT_FORGE_MACHINE_ID: 'fictional-browser-check',
 } });
 try {
-  for(let i=0;i<150;i++) { try { if ((await fetch(origin + '/api/harness/instructions')).ok) break; } catch {} await Bun.sleep(100); }
+  let ready = false;
+  for (let i = 0; i < 150; i++) {
+    if (proc.exitCode !== null) throw new Error(`Browser fixture server exited with code ${proc.exitCode}`);
+    try { ready = (await fetch(origin + '/api/harness/instructions', { signal: AbortSignal.timeout(500) })).ok; } catch {}
+    if (ready) break;
+    await Bun.sleep(100);
+  }
+  assert.ok(ready, 'Browser fixture server did not become ready');
   const check = Bun.spawn(['node', resolve(import.meta.dir, 'browser-check.mjs'), origin, process.env.FORGE_CAPTURE_PREVIEW === '1' ? 'capture' : 'check'], { stdout: 'inherit', stderr: 'inherit' });
   assert.equal(await check.exited, 0, 'Browser acceptance checks failed');
 } finally {
   proc.stdin.end();
-  const timer=setTimeout(()=>proc.kill('SIGKILL'),5000); await proc.exited; clearTimeout(timer);
-  await rm(root,{recursive:true,force:true});
+  const exit = await waitForProcessExit(proc, 5_000);
+  if (exit.status !== 'exited') {
+    const stopped = await killProcessTree(proc);
+    assert.ok(stopped.rootExited, 'Could not stop the browser fixture server; temporary state retained');
+  }
+  await safeRemoveTree({ targetPath: root, allowedRoot: dirname(root), expectedTargetName: /^forge-browser-/,
+    reason: 'Remove disposable browser fixture state', allowNonEmpty: true, mode: 'delete', permanent: true, audit: false });
+  assert.equal(exit.status, 'exited', 'Browser fixture server did not shut down cleanly');
+  if (exit.status === 'exited') assert.equal(exit.exitCode, 0, 'Browser fixture server shutdown failed');
 }

@@ -1,5 +1,5 @@
 import type { ServerWebSocket } from 'bun';
-import type { ClientMessage, ServerMessage } from '../shared/protocol';
+import type { ClientMessage } from '../shared/protocol';
 import { clients, clientLastPong, broadcast, sendTo } from './broadcast';
 import { agentService } from './services/agent.service';
 import { settingsService } from './services/settings.service';

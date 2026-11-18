@@ -118,7 +118,7 @@ function basename(p: string): string {
  *   - LS:                           { path }          → basename of the path
  *   - MultiEdit / batch operations: { files | changes } → first basename + count
  */
-export function summarizeToolInput(toolName: string, input: unknown): string {
+export function summarizeToolInput(_toolName: string, input: unknown): string {
   if (!input || typeof input !== 'object') return '';
   const payload = input as Record<string, unknown>;
 

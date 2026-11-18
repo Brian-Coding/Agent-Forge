@@ -8,7 +8,6 @@ import { atomicWriteFile } from './atomic-file';
 import {
   decideOwnership,
   isOwnedProcessRecord,
-  type OwnedProcessRecordV2,
 } from './process-ownership';
 
 export const PERSISTED_SCHEMA_VERSION = 1;

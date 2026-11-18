@@ -1,6 +1,5 @@
 import type { ReportedUsage } from '../../shared/reported-usage';
-﻿import { existsSync } from 'fs';
-import { join } from 'path';
+import { existsSync } from 'fs';
 import type { AgentInfo, AgentProvider, AgentStatus, AgentTurnOutcome, ChatImageAttachment, ChatMessage } from '../../shared/protocol';
 import type { ChatTurnOptions } from './chat.service';
 import { isChatAgentKind, isRealClaudeModelId, stripModelTier } from '../agents/agent-kinds';
@@ -21,13 +20,6 @@ import {
   validateChatImageAttachments,
 } from './chat-image.service';
 
-// MAX_OUTPUT_BUFFER, DEFAULT_GUARDRAILS, readWithTimeout, and the Claude-specific
-// spawn/parse code (spawnProcess, readStreamJson, readStderr, _sendMessageImpl)
-// were removed in Phase 1D. Claude-specific logic now lives in:
-//   src/server/agents/adapters/claude.ts          (Phase 2)
-//   src/server/services/chat.service.ts           (bridge — Phase 1 stub)
-//   src/server/services/prompt-builder.service.ts (system-prompt assembly)
-
 interface ManagedAgent {
   info: AgentInfo;
   /**
@@ -41,7 +33,6 @@ interface ManagedAgent {
   currentSessionProvider: AgentProvider | null;
   currentSessionModel: string | null;
   lastFileChange: string[];
-  pendingTimeouts: ReturnType<typeof setTimeout>[];
   contextTokens: number;
   contextLimit: number;
   totalInputTokens: number;
@@ -143,24 +134,6 @@ function addMessage(agentId: string, role: ChatMessage['role'], content: string,
   return msg;
 }
 
-function agentTimeout(agentId: string, callback: () => void, ms: number): ReturnType<typeof setTimeout> {
-  const agent = agents.get(agentId);
-  const timer = setTimeout(() => {
-    if (agent) agent.pendingTimeouts = agent.pendingTimeouts.filter(t => t !== timer);
-    callback();
-  }, ms);
-  if (agent) agent.pendingTimeouts.push(timer);
-  return timer;
-}
-
-function clearAgentTimeouts(agentId: string): void {
-  const agent = agents.get(agentId);
-  if (agent) {
-    for (const timer of agent.pendingTimeouts) clearTimeout(timer);
-    agent.pendingTimeouts = [];
-  }
-}
-
 // --- File Watcher ---
 // Agents subscribe to a process-local hub keyed by canonical project root.
 // Physical OS watchers are shared; per-agent file_changed semantics stay the same.
@@ -193,7 +166,6 @@ async function _stopAgentImpl(agentId: string, reason: 'user' | 'timeout' | 'sys
   const { chatService } = await import('./chat.service');
   chatService.stop(agentId, reason);
 
-  clearAgentTimeouts(agentId);
   // Note: chat.service's finally block releases plan locks + sets status to
   // 'idle' + fires onIdle hooks after the adapter unwinds. We don't repeat
   // those side effects here — only run the defensive idle path when no turn
@@ -215,7 +187,6 @@ async function _killAgentImpl(agentId: string): Promise<boolean> {
   const { chatService } = await import('./chat.service');
   chatService.kill(agentId);
 
-  clearAgentTimeouts(agentId);
   await documentService.releaseLocksForAgent(agentId);
   return runDurableMutation(async () => {
     const current = agents.get(agentId);
@@ -235,8 +206,8 @@ async function _killAgentImpl(agentId: string): Promise<boolean> {
 
 export const agentService = {
   // --- Lifecycle bus ---
-  // Other services (qa, atlas, and the upcoming chat.service bridge)
-  // subscribe via these. Listeners persist across HMR via globalThis.
+  // Chat and terminal services subscribe here. Listeners persist across
+  // module reloads via globalThis.
   onAgentIdle(listener: AgentLifecycleListener): void {
     if (!lifecycleListeners.onIdle.includes(listener)) lifecycleListeners.onIdle.push(listener);
   },
@@ -459,7 +430,6 @@ export const agentService = {
         currentSessionProvider: null,
         currentSessionModel: null,
         lastFileChange: [],
-        pendingTimeouts: [],
         contextTokens: 0,
         contextLimit: 200000,
         totalInputTokens: 0,
@@ -816,9 +786,7 @@ export const agentService = {
   // --- Agent Control ---
 
   /**
-   * Delegate to chat.service so all message-sending paths (ws, qa, atlas)
-   * funnel through the same bridge. chat.service owns the per-agent
-   * sendLock chain.
+   * Delegate message sends to the chat bridge, which owns the per-agent queue.
    */
   async sendMessage(agentId: string, content: string, options?: ChatTurnOptions): Promise<void> {
     // Dynamic import to avoid module-load-time circular reference. chat.service
@@ -923,7 +891,6 @@ export const agentService = {
     console.log('Shutting down all agent processes...');
     const { chatService } = await import('./chat.service');
     for (const agentId of agents.keys()) {
-      clearAgentTimeouts(agentId);
       chatService.kill(agentId);
     }
     // Wait (capped) for killed turns to finish unwinding — their finally
@@ -1034,7 +1001,6 @@ export const agentService = {
           ? null
           : currentSessionModel,
         lastFileChange: [],
-        pendingTimeouts: [],
         contextTokens: agentData.contextTokens || 0,
         contextLimit: agentData.contextLimit || 200000,
         totalInputTokens: agentData.totalInputTokens || 0,

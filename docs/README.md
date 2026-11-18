@@ -16,7 +16,12 @@ Start with **[Getting started](getting-started.md)** if this is your first time.
 
 - [Safety model](safety.md): what Agent Forge protects, and what it deliberately does not.
 - [Architecture](architecture.md): how the server, adapters, and browser UI fit together.
+- [Failure modes](FAILURE-MODES.md): safeguards, regression tests, and remaining gaps.
+- [Architecture decisions](decisions/README.md): concurrency, process ownership, and local authorization.
+- [Team adoption](ADOPTION.md): bounded tasks, human approval, and pilot measurements.
 - [Claude CLI compatibility fixtures](provider-compatibility/claude/README.md): captured CLI output shapes used by the auth classifier tests.
+- [Demo and media](media.md): reproduce the account-free workflow and recordings.
+- [Performance](performance.md): local measurements and reproduction commands.
 
 ## Contributing
 

@@ -88,7 +88,7 @@ function exited(exitCode: number): ProcessExitWaitResult {
 const timedOut: ProcessExitWaitResult = { status: 'timed-out' };
 
 function terminationHarness(
-  root: FakeProcess,
+  _root: FakeProcess,
   taskkillOutcomes: ProcessExitWaitResult[],
   rootOutcomes: ProcessExitWaitResult[],
 ) {

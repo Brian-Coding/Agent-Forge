@@ -20,7 +20,7 @@ Each agent is one provider CLI session with its own:
 - **Reference folders**: extra directories the agent may read for context (passed to the CLI as additional directories).
 - **Persona / system prompt**: optional text added to that agent's instructions.
 
-You can switch an existing agent's provider or model mid-conversation. When the provider changes, Agent Forge feeds the new provider a bounded summary of the recent conversation so it can pick up where the other left off.
+You can switch an existing agent's provider or model mid-conversation. When the provider changes, Agent Forge feeds the new provider a bounded excerpt of the recent conversation so it can pick up where the other left off.
 
 ## Arranging panes
 

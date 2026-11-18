@@ -1,6 +1,5 @@
 import {
   closeSync,
-  existsSync,
   fsyncSync,
   openSync,
   readFileSync,
@@ -243,8 +242,4 @@ export async function releaseProcessLockFile(
       || existing.owner.token !== handle.owner.token) return false;
     return unlinkIfUnchanged(handle.path, existing.raw);
   });
-}
-
-export function processLockExists(path: string): boolean {
-  return existsSync(path);
 }

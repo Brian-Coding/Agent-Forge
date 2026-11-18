@@ -5,8 +5,8 @@ import type { AgentAdapter } from './types';
 
 /**
  * Adapter registry. Both Claude and Codex are wired here. Add a new
- * provider by implementing the AgentAdapter contract and adding it to
- * the map below — no other code changes required.
+ * provider by extending the shared provider types and model definitions,
+ * implementing AgentAdapter, and registering it here.
  */
 const adapters: Partial<Record<ChatAgentKind, AgentAdapter<any>>> = {
   claude: claudeAdapter,
@@ -22,14 +22,6 @@ export function registerAdapter(adapter: AgentAdapter<any>): void {
 
 export function getAgentAdapter(kind: ChatAgentKind): AgentAdapter<any> | null {
   return adapters[kind] ?? null;
-}
-
-export function hasAgentAdapter(kind: ChatAgentKind): boolean {
-  return adapters[kind] != null;
-}
-
-export function listRegisteredKinds(): ChatAgentKind[] {
-  return Object.keys(adapters) as ChatAgentKind[];
 }
 
 /**

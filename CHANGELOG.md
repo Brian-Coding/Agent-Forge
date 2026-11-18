@@ -9,11 +9,11 @@
 - Remove extracted-feature persistence normalization and repair the coverage gate.
 - Bundle React 19, Marked, DOMPurify 3.4.17, and Highlight.js from the lockfile; add browser sanitizer and file-link regression checks.
 - Support POSIX and file-URL project links; ignore dotenv variants; clarify private publication instructions.
-- Add real demo screenshots, architecture documentation, third-party notices, and [measured performance](docs/performance.md). The local bundle improves sampled UI loading while adding startup/build work.
+- Add real demo screenshots, architecture documentation, third-party notices, and [reproducible local performance measurements](docs/performance.md). Browser dependencies are served locally from the lockfile.
 
 Follow-up review: start descendant cleanup on provider exit even when inherited pipes remain open; retain the final streamed answer; remove the unused extracted Node-child helper; decode file-URL pathnames after parsing, including spaces and Unicode; extend real Markdown pipeline checks.
 
-### Portfolio evidence pass
+### Reliability and workflow evidence
 
 - Replaced bundled slash-command templates with original ones.
 - Keep demo model, authentication, and limits discovery offline; verify real demo endpoints.
@@ -22,3 +22,5 @@ Follow-up review: start descendant cleanup on provider exit even when inherited 
 - Add an account-free scripted workbench demo with real terminal checks and reproducible media.
 - Fall back to Linux `ss` when `lsof` is unavailable for port inventory.
 - Document failure modes, architectural decisions and a practical team rollout.
+- Isolate browser and benchmark fixtures from provider discovery and usage sync; retain raw benchmark samples with explicit measurement limits.
+- Remove the obsolete Windows-only live smoke script; live-provider validation remains a separate manual task. Align the Windows workflow with the documented Bun minimum and enforce unused-declaration checks.

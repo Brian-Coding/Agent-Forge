@@ -67,29 +67,6 @@ export interface AgentInfo {
   modelMismatch?: { requested: string; ran: string; at: number } | null;
 }
 
-export interface ModelOption {
-  id: string;
-  label: string;
-  description?: string;
-  supportedReasoningLevels?: string[];
-  defaultReasoningLevel?: string;
-}
-
-export interface AgentProviderDefinition {
-  kind: AgentProvider;
-  label: string;
-  supportsResume: boolean;
-  supportsReasoningLevel: boolean;
-  models: ModelOption[];
-  defaultModel: string;
-  reasoningLevels?: string[];
-  defaultReasoningLevel?: string;
-}
-
-export interface ModelCatalogResponse {
-  providers: Record<AgentProvider, AgentProviderDefinition>;
-}
-
 /**
  * Server-side persistence shape for an agent: the wire AgentInfo plus the
  * fields that aren't surfaced to the UI (current session, token accounting,

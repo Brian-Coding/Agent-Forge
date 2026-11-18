@@ -4,8 +4,8 @@
 // anymore. Source-controlled `.plans/*.md` files are canonical; only legacy
 // inline documents and missing-source recovery records remain in data.json.
 import type { LiveDocument } from '../../shared/protocol';
-import { existsSync, mkdirSync, readFileSync, readdirSync } from 'fs';
-import { join, basename, normalize, resolve } from 'path';
+import { existsSync, readFileSync, readdirSync } from 'fs';
+import { basename, normalize, resolve } from 'path';
 import { projectWatcherHub } from './project-watcher.service';
 import { generateId } from '../utils';
 import { persistenceService } from './persistence.service';
@@ -13,7 +13,6 @@ import { runDurableMutation } from './durable-mutation';
 
 // HMR-safe state
 const documents: Map<string, LiveDocument> = (globalThis as any).__documentsMap ??= new Map<string, LiveDocument>();
-const planWriteFromServer: Set<string> = (globalThis as any).__planWriteFromServer ??= new Set<string>();
 
 type DocumentExtra = { status?: LiveDocument['status']; lockedBy?: string; filePath?: string; lastEditedBy?: string };
 
@@ -224,7 +223,6 @@ export const documentService = {
 
   async syncPlanFromFile(agentId: string, agentName: string, isRunning: boolean, workspaceId: string | undefined, filePath: string): Promise<void> {
     filePath = normalize(resolve(filePath));
-    if (planWriteFromServer.has(filePath)) return;
     try {
       const file = Bun.file(filePath);
       if (await file.exists()) {

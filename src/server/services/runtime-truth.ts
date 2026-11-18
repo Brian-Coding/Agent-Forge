@@ -65,7 +65,7 @@ export function createRuntimeTruth(options: RuntimeTruthOptions = {}) {
   const bunVersion = options.bunVersion ?? Bun.version;
   let capture: StartupCapture | null = null;
 
-  const fingerprintAt = (label: 'running' | 'disk'): { fingerprint?: string; complete: boolean } => {
+  const fingerprintAt = (): { fingerprint?: string; complete: boolean } => {
     const chunks: string[] = [];
     let complete = true;
     for (const relative of CRITICAL_RUNTIME_FILES) {
@@ -98,7 +98,7 @@ export function createRuntimeTruth(options: RuntimeTruthOptions = {}) {
   const buildManifest = async (): Promise<RuntimeManifest> => {
     if (!capture) await captureStartup();
     const started = capture!;
-    const disk = fingerprintAt('disk');
+    const disk = fingerprintAt();
     return {
       contractVersion: AUTH_CONTRACT_VERSION,
       serverSessionId: started.serverSessionId,
@@ -113,7 +113,7 @@ export function createRuntimeTruth(options: RuntimeTruthOptions = {}) {
   };
 
   async function captureStartup(): Promise<StartupCapture> {
-    const running = fingerprintAt('running');
+    const running = fingerprintAt();
     const source = await Promise.resolve(
       options.readGitIdentity
         ? options.readGitIdentity(sourceRoot)
@@ -151,7 +151,7 @@ export function createRuntimeTruth(options: RuntimeTruthOptions = {}) {
     },
     peekCompact() {
       if (!capture) return null;
-      const disk = fingerprintAt('disk');
+      const disk = fingerprintAt();
       return {
         startedAt: capture.startedAt,
         bunVersion: capture.bunVersion,

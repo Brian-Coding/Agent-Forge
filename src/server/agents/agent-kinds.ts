@@ -5,8 +5,6 @@
 
 export type ChatAgentKind = 'claude' | 'codex';
 
-export const CHAT_AGENT_KINDS: readonly ChatAgentKind[] = ['claude', 'codex'] as const;
-
 export interface ModelOption {
   id: string;          // The exact string passed to --model
   label: string;       // What the UI dropdown shows

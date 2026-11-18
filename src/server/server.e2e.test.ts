@@ -115,6 +115,8 @@ test('full server boot recovers state, enforces transport guards, persists a mut
   const wrapperEntry = join(directory, 'server-wrapper.mjs');
   await writeFile(wrapperEntry, [
     "import { pathToFileURL } from 'node:url';",
+    `const { installOfflineDemoServices } = await import(${JSON.stringify(new URL('../../scripts/demo/offline-services.ts', import.meta.url).href)});`,
+    'installOfflineDemoServices();',
     'const serverModule = await import(pathToFileURL(process.argv[2]).href);',
     'await Bun.stdin.text();',
     "await serverModule.shutdown({ reason: 'end-to-end test shutdown' });",
@@ -125,13 +127,16 @@ test('full server boot recovers state, enforces transport guards, persists a mut
     stdout: 'pipe',
     stderr: 'pipe',
     env: {
-      ...process.env,
+      PATH: process.env.PATH,
+      SystemRoot: process.env.SystemRoot,
       PORT: String(port),
       HOST: '127.0.0.1',
       AI_HARNESS_CLAUDE_CREDENTIALS_JSON: join(directory, 'missing-claude-credentials.json'),
       AI_HARNESS_CLAUDE_LIMITS_JSON: join(directory, 'missing-claude-limits.json'),
       AI_HARNESS_CODEX_SESSIONS_DIR: join(directory, 'missing-codex-sessions'),
       AGENT_FORGE_ARTIFACT_ROOT: join(directory, 'artifacts'),
+      AGENT_FORGE_USAGE_SYNC_DIR: join(directory, 'usage'),
+      AGENT_FORGE_MACHINE_ID: 'fictional-e2e',
     },
   });
   const stdout = drain(proc.stdout);

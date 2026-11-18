@@ -5,7 +5,7 @@ Thanks for helping. Agent Forge is a small, opinionated tool for running coding 
 ## Set up
 
 ```bash
-bun install
+bun install --frozen-lockfile
 bun run dev      # start the server
 bun run check    # typecheck + full test suite (randomized order, fixed seed)
 ```
@@ -15,7 +15,7 @@ You do not need a provider account to run the tests; adapter tests use scripted 
 ## Before you open a pull request
 
 - `bun run check` passes.
-- New behavior has a test next to the code (`something.test.ts`). For persistence, process, or provider changes, also run `bun run test:coverage`.
+- New behavior has a test next to the code (`something.test.ts`). For persistence, process, provider, or safety changes, also run `bun run test:coverage`.
 - UI changes: describe what you checked in the browser, and include a screenshot when it helps.
 - Keep the wire contract in `src/shared/protocol.ts` and the validator in `src/server/client-message.ts` in sync.
 - Provider-specific logic stays in `src/server/agents/adapters/`.
@@ -33,6 +33,17 @@ Open an issue with what you did, what you expected, what happened, your OS, Bun 
 
 By contributing you agree that your contributions are licensed under the [MIT License](LICENSE).
 
-## Portfolio evidence and reproducible demos
+## Reproducible validation
 
-Read [failure modes](docs/FAILURE-MODES.md) and [decisions](docs/decisions/README.md) when changing a trust boundary. `bun run demo:check` exercises the account-free workflow. `bun run media` regenerates the fictional recording; inspect frames before committing. See [media instructions](docs/media.md).
+The Linux CI gate runs the following after the frozen install above. Browser checks need Node.js 20+ and Playwright's Chromium (`bun run browsers:install`; Linux CI uses `bunx playwright install --with-deps chromium`).
+
+```bash
+bun run check
+bun run test:coverage
+bun run test:browser
+bun run demo:check
+```
+
+Measured on Linux with Bun 1.4.4 on November 17, 2026: **415 tests across 74 files**, with **78.75% weighted line coverage** and **83.35% function coverage** across 71 LCOV source records. Coverage does not include the inline browser script or child-process execution; the browser and demo gates check those paths separately.
+
+These checks use fixtures and scripted providers; they do not evaluate model quality or certify live CLI compatibility. Read [failure modes](docs/FAILURE-MODES.md) and [decisions](docs/decisions/README.md) when changing a trust boundary. `bun run media` regenerates the fictional recording; run it only when updating demo media and inspect the frames. See [media instructions](docs/media.md).

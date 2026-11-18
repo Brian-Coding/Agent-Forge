@@ -17,7 +17,7 @@
  * after the first API response of a session — missing fields are normal.
  */
 import { join, dirname } from 'path';
-import { homedir, tmpdir } from 'os';
+import { homedir } from 'os';
 import { mkdirSync, renameSync, writeFileSync } from 'fs';
 
 let data: any = {};

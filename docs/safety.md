@@ -20,8 +20,8 @@ Every turn starts with a fixed set of instructions you can read in **Settings â†
 ## What the server protects
 
 - **Loopback only.** The server binds to `127.0.0.1` by default and rejects non-loopback binds. Requests must match the bound scheme, hostname, and port. Other loopback names and ports are different origins. WebSocket connections and HTTP mutations also need an unguessable per-launch token. The UI obtains it from a same-origin, non-cacheable `/api/session` response. Non-browser automation can obtain that token locally and explicitly send `x-forge-token` or the `forge-auth.<token>` WebSocket subprotocol. Missing browser origins do not substitute for a token.
-- **Strict input.** Every WebSocket command and HTTP body is size-limited and validated against an exact schema; unknown fields are rejected.
-- **Guarded file operations.** When Agent Forge itself removes files (temporary folders, uploaded images), it resolves real paths, refuses symlinks and junctions, refuses broad or protected roots such as your home folder, bounds tree walks, prefers quarantine over permanent deletion, and writes an audit record.
+- **Bounded input.** WebSocket commands have exact schemas and reject unknown fields. HTTP bodies have byte limits and route-specific validation; not every HTTP route rejects extra JSON fields.
+- **Guarded cleanup.** Codex temporary-output cleanup and Xcode DerivedData cleanup resolve real paths, refuse symlinks and junctions, reject broad or protected roots, bound tree walks, and write audit records. DerivedData moves to recoverable quarantine; disposable Codex output is permanently removed. Lock files and failed atomic-write temporary files use separate, narrowly scoped cleanup routines.
 - **Owned process cleanup.** Provider and terminal launches own POSIX process groups. Cleanup signals the group and checks for live members, including after the root exits; a failed parent-only fallback cannot claim tree success. Windows uses bounded `taskkill /T`. Processes that deliberately create a new session can escape this mechanism; it is not an OS sandbox.
 - **Explicit external stops.** The port panel can stop a listener you select even if Forge did not start it. A short-lived selection token binds the port to the observed PID, executable name, and start time; the server rechecks the listener and birth identity before signaling. This stops that process only, and is separate from owned tree cleanup. System/self/parent PIDs are refused. Portable PID checks cannot eliminate the final OS-level PID-reuse race.
 - **Durable state.** State is written atomically with bounded sizes; corrupt or oversized files are preserved for recovery instead of being overwritten.
@@ -29,7 +29,7 @@ Every turn starts with a fixed set of instructions you can read in **Settings â†
 ## What it does not do
 
 - There is **no user login**. Other local processes running as you are trusted and can acquire the launch token. Do not expose the service through a tunnel or reverse proxy.
-- It does not sandbox provider CLIs. Use the CLIs' own sandbox modes, containers, or a separate OS user if you need isolation.
+- It launches provider CLIs with their sandbox and approval prompts disabled. Use a container or a separate OS user to isolate Forge and its children; there is no setting in Forge to enable the CLIs' sandbox modes.
 
 ## Reporting a vulnerability
 

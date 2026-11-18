@@ -10,7 +10,6 @@ import type {
   UsageEvent,
   UsageReport,
   UsageProjectGroup,
-  UsageTurnRow,
   UsageWindowReport,
   WindowTokenSummary,
 } from '../../shared/protocol';

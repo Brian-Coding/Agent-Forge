@@ -27,7 +27,7 @@ export async function runSimctl(...args: string[]): Promise<{ ok: boolean; outpu
   }
 }
 
-export async function handleListSimulators(req: Request): Promise<Response> {
+export async function handleListSimulators(_req: Request): Promise<Response> {
   const result = await runSimctl('list', 'devices', '--json');
   if (!result.ok) {
     return jsonResponse({ error: result.output, devices: {} }, 500);
@@ -84,7 +84,7 @@ function bodyError(error: unknown): Response {
   );
 }
 
-export async function handleCleanDerivedData(req: Request): Promise<Response> {
+export async function handleCleanDerivedData(_req: Request): Promise<Response> {
   if (process.platform !== 'darwin') {
     return jsonResponse({ ok: false, message: 'DerivedData cleanup is only available on macOS' }, 400);
   }

@@ -21,11 +21,11 @@ Provider CLIs (claude, codex) and terminal commands, one process tree per turn
 ## Key ideas
 
 - **The server owns the truth.** Agent status, the command queue, live turn state, and history live on the server. The browser renders snapshots and never re-submits work on its own after a reconnect; it only replays commands it never managed to send.
-- **Adapters isolate providers.** Everything provider-specific (CLI flags, stream parsing, session resume, model discovery, error shapes) lives in `src/server/agents/adapters/`. They emit normalized events from `src/server/agents/events.ts`; the rest of the server is provider-agnostic.
+- **Adapters normalize turn execution.** CLI launch flags, stream parsing, session resume, and turn error shapes live in `src/server/agents/adapters/`. They emit normalized events from `src/server/agents/events.ts` to the chat bridge. Authentication, model discovery, and limits retain provider-specific integrations in `auth/` and `services/`.
 - **One prompt builder.** `services/prompt-builder.service.ts` assembles guardrails, persona, shared instructions, plans, and reference folders for every provider. The Settings screen reads the same constants, so what you see is what agents get.
 - **Wire contract in one place.** `src/shared/protocol.ts` defines every WebSocket message and persisted type. `client-message.ts` validates incoming commands against it with exact-key checks.
 - **Durable, bounded state.** `persistence.service.ts` writes `data.json` atomically, normalizes and bounds everything it loads, coalesces writes, and preserves damaged files rather than overwriting them.
-- **Proven process ownership.** Every child process is recorded with identity evidence; startup only cleans up orphans it can prove it owns. A lock file keeps two servers from sharing one state folder.
+- **Proven process ownership.** Provider and terminal processes are recorded with identity evidence; startup only cleans up orphans it can prove it owns. A lock file keeps two servers from sharing one state folder.
 - **Shared watchers.** Agents working in the same project share one file watcher per canonical root for file-change and `.plans/` updates.
 
 ## Tests
@@ -44,7 +44,7 @@ Schema 1 is current. Historical schema 2 is imported through the same allowlist 
 
 ## Concurrency and failure boundaries
 
-One queue per agent allows parallel tasks while preserving order within a conversation. A command request ID prevents repeat execution after reconnect within the running server; it is not a durable distributed exactly-once protocol. Cancellation invalidates the old turn epoch, so late provider callbacks cannot modify a new turn. The [chat integration suite](../src/server/services/chat.service.integration.test.ts) tests both races and concurrent agents.
+One queue per agent allows parallel tasks while preserving order within a conversation. A command request ID prevents repeat execution while it remains in the running server's bounded deduplication cache; it is not a durable distributed exactly-once protocol. Cancellation invalidates the old turn epoch, so late provider callbacks cannot modify a new turn. The [chat integration suite](../src/server/services/chat.service.integration.test.ts) tests both races and concurrent agents.
 
 Workspace grouping deliberately does not lock source files. Use Git worktrees for writers. Canonical-root watcher sharing reduces duplicate observation, but cannot resolve conflicting edits. Persisted state uses an exclusive instance lock plus atomic writes; runtime queues do not survive restart. Provider/model changes invalidate the resume identity.
 
@@ -56,6 +56,6 @@ Last-run usage is a separate record from historical estimates: missing counters 
 
 ## Tradeoffs and evidence
 
-The inline UI remains large and untyped; it has focused script/queue/browser tests, but splitting it is future structural work. Large provider adapters carry protocol and lifecycle complexity. The chosen pass adds narrow typed accounting instead of restructuring those paths without behavioral need. [Performance](performance.md) records the measured local-bundle startup cost and browser improvement, with no new speed claim from this pass.
+The inline UI remains large and untyped; it has focused script/queue/browser tests, but splitting it is future structural work. Large provider adapters carry protocol and lifecycle complexity. Typed accounting and normalized events bound their integration with the rest of the server. [Performance](performance.md) records local startup/build measurements and their limits.
 
 Read the [decision records](decisions/README.md), [failure-to-test map](FAILURE-MODES.md), and [team rollout](ADOPTION.md) before expanding automation.

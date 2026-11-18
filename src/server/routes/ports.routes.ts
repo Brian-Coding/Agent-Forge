@@ -75,9 +75,8 @@ async function decoratePorts(
   }));
 }
 
-// OS services and always-on consumer apps whose listeners are never the
-// user's dev servers. Killing these from the sidebar would also be a footgun
-// (taskkill /F on svchost can blue-screen-adjacent break the session).
+// Hide OS services and common background applications from the dev-server
+// inventory. Force-stopping system services can disrupt the Windows session.
 const WINDOWS_SYSTEM_IMAGES = new Set([
   'svchost', 'System', 'Idle', 'lsass', 'services', 'wininit', 'winlogon',
   'csrss', 'smss', 'spoolsv', 'dasHost', 'SearchIndexer', 'SearchHost',
@@ -91,7 +90,7 @@ const WINDOWS_SYSTEM_IMAGES = new Set([
 // not servers anyone started on purpose. Dev servers live on chosen ports.
 const EPHEMERAL_PORT_START = process.platform === 'win32' ? 49152 : 32768;
 
-export async function handleGetPorts(req: Request): Promise<Response> {
+export async function handleGetPorts(_req: Request): Promise<Response> {
   try {
     const isWindows = process.platform === 'win32';
     const seen = new Set<string>();

@@ -16,7 +16,7 @@ import {
 import { persistenceService } from '../../services/persistence.service';
 import { currentAuthCoordinator, type AuthStartPermit } from '../../auth/provider-auth-coordinator';
 import { createFreshTempDirectorySync, safeRemoveTree } from '../../services/safe-filesystem.mjs';
-import { summarizeToolInput, type AgentEvent } from '../events';
+import { summarizeToolInput } from '../events';
 import { drainStreamToString, parseNdjsonLines, flushNdjsonLeftover } from '../stream-utils';
 import type { AgentAdapter, AgentHandle, AgentRunContext } from '../types';
 
@@ -38,8 +38,8 @@ import type { AgentAdapter, AgentHandle, AgentRunContext } from '../types';
  * Codex can print a known non-fatal "failed to record rollout items"
  * diagnostic on stderr; it is filtered out.
  *
- * The agent-forge system prompt (guardrails + persona + notes + docs + atlas
- * citation) is prepended to the user prompt with delimiter markers since
+ * The Agent Forge system prompt (guardrails, persona, project context and
+ * plans) is prepended to the user prompt with delimiter markers since
  * Codex has no `--append-system-prompt` flag equivalent.
  */
 
@@ -229,35 +229,6 @@ export function handleCodexRolloutEvent(ctx: AgentRunContext, state: CodexRunSta
   }
   for (const text of extractCodexRolloutCommentary(event)) {
     emitCodexThinking(ctx, state, text);
-  }
-}
-
-async function emitContextFromRollout(ctx: AgentRunContext, threadId: string): Promise<void> {
-  const path = await findRolloutPath(threadId);
-  if (!path) return;
-  const f = Bun.file(path);
-  const size = f.size;
-  if (!size) return;
-  const start = Math.max(0, size - 262_144);
-  const text = await f.slice(start, size).text();
-  const lines = text.split('\n');
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const line = lines[i];
-    if (!line || !line.includes('token_count')) continue;
-    try {
-      const payload = JSON.parse(line)?.payload;
-      if (payload?.type !== 'token_count' || !payload.info) continue;
-      const total = payload.info.last_token_usage?.total_tokens;
-      const window = payload.info.model_context_window;
-      const contextTokens = typeof total === 'number' && total >= 0 ? total : undefined;
-      const contextLimit = typeof window === 'number' && window > 0 ? window : undefined;
-      if (contextTokens !== undefined || contextLimit !== undefined) {
-        ctx.emitAgentEvent({ type: 'usage', contextTokens, contextLimit });
-      }
-      return;
-    } catch {
-      // first line of the slice may be cut mid-JSON — keep walking back
-    }
   }
 }
 
@@ -584,7 +555,7 @@ export function handleCodexEvent(ctx: AgentRunContext, state: CodexRunState, eve
   // cached_input_tokens is a subset of it, per codex-rs TokenUsage), so it is
   // NOT a context snapshot — a long agentic turn sums to millions of tokens.
   // Context fullness comes from the session rollout file after the turn
-  // (see emitContextFromRollout); here we only accumulate per-turn spend.
+  // (see emitSnapshotFromRollout); here we only accumulate per-turn spend.
   if (event.type === 'turn.completed') {
     ctx.emitAgentEvent({ type: 'provider-turn', state: { status: 'completed', source: 'jsonl', at: Date.now() } });
     const completedMessage = state.pendingTurnAssistantMessage.trim();

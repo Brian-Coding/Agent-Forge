@@ -1,6 +1,6 @@
 # Windows launcher
 
-Agent Forge runs anywhere Bun runs. On Windows there is also an optional launcher that gives you a desktop shortcut and starts Agent Forge when you sign in.
+Agent Forge includes an optional Windows launcher that gives you a desktop shortcut and starts Forge when you sign in. The current validation is on Linux; the Windows launcher still needs native validation.
 
 ## Install
 
