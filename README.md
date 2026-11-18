@@ -90,7 +90,7 @@ Agent Forge launches Claude Code and Codex in non-interactive mode with their pe
 
 ## Related project
 
-UI Atlas and the browser/app QA tester that used to live inside Agent Forge are now a separate project: [AI-UI-Atlas-QA-Tester](https://github.com/Brian-Coding/AI-UI-Atlas-QA-Tester).
+UI Atlas and the browser/app QA tester that used to live inside Agent Forge are now a separate project: [AI-UI-Atlas](https://github.com/Brian-Coding/AI-UI-Atlas).
 
 ## Contributing
 
