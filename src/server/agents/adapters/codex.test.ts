@@ -80,13 +80,17 @@ test('rollout reports identified goal boundaries without finishing the CLI or fo
   expect(events).toHaveLength(3);
 });
 
-test('Codex creates fresh isolated output directories under the platform temp root', () => {
+test('Codex creates isolated turn directories inside one private temp cleanup root', () => {
   const ctx = makeContext([]);
   const first = codexAdapter.createState(ctx);
   const second = codexAdapter.createState(ctx);
   try {
     expect(first.outputDirectory).not.toBe(second.outputDirectory);
-    expect(dirname(first.outputDirectory)).toBe(realpathSync(tmpdir()));
+    expect(first.outputRoot).toBe(second.outputRoot);
+    expect(dirname(first.outputRoot)).toBe(realpathSync(tmpdir()));
+    expect(first.outputRoot).not.toBe(realpathSync(tmpdir()));
+    expect(dirname(first.outputDirectory)).toBe(first.outputRoot);
+    expect(dirname(second.outputDirectory)).toBe(second.outputRoot);
     expect(first.outputPath).toBe(join(first.outputDirectory, 'last-message.txt'));
     expect(existsSync(first.outputDirectory)).toBe(true);
     expect(existsSync(second.outputDirectory)).toBe(true);

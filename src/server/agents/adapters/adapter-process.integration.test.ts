@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { chmod, mkdir, rm, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -94,6 +95,14 @@ process.stdin.setEncoding('utf8');
 process.stdin.on('data', chunk => { prompt += chunk; });
 process.stdin.on('end', () => {
   const emit = value => process.stdout.write(JSON.stringify(value) + '\\n');
+  if (prompt.includes('FINAL_FILE_')) {
+    const outputIndex = args.indexOf('--output-last-message');
+    fs.writeFileSync(args[outputIndex + 1], 'Codex final-file result.');
+    emit({ type: 'thread.started', thread_id: 'codex-final-file-session' });
+    if (prompt.includes('FINAL_FILE_HANG')) setInterval(() => {}, 60_000);
+    else process.exitCode = prompt.includes('FINAL_FILE_NONZERO') ? 23 : 0;
+    return;
+  }
   if (prompt.includes('EXIT_WITH_DESCENDANTS')) {
     const path = require('node:path');
     const directory = process.cwd();
@@ -277,7 +286,48 @@ test('Codex adapter exercises real tool streaming, final-file recovery, usage, a
   expect(fixture.events.some(event => event.type === 'usage' && event.turnsDelta === 1)).toBe(true);
   expect(fixture.events).toContainEqual({ type: 'finish', reason: 'completed' });
   expect(untracked).toEqual(tracked);
+  expect(existsSync(state.outputPath)).toBe(false);
+  expect(existsSync(state.outputDirectory)).toBe(false);
 });
+
+for (const outcome of ['SUCCESS', 'NONZERO', 'HANG'] as const) {
+  test(`Codex removes final-message output with a temp-directory cwd after ${outcome}`, async () => {
+    const originalCwd = process.cwd();
+    const fixture = makeContext('codex');
+    const state = codexAdapter.createState(fixture.ctx);
+    const handle = codexAdapter.createHandle(`FINAL_FILE_${outcome}`, fixture.ctx, state);
+    let run: ReturnType<typeof handle.run> | undefined;
+    try {
+      // Exercise the real protected-cwd check even when the test checkout is
+      // outside the system temp directory. The fake provider writes only the
+      // final-message file, so successful recovery proves it existed.
+      process.chdir(root);
+      run = handle.run();
+      if (outcome === 'HANG') {
+        await waitFor(() => fixture.getSession() === 'codex-final-file-session');
+        expect(await readFile(state.outputPath, 'utf8')).toBe('Codex final-file result.');
+        await handle.kill();
+      }
+      const result = await run;
+      expect(fixture.events).toContainEqual({
+        type: 'finish',
+        reason: outcome === 'HANG' ? 'killed' : outcome === 'NONZERO' ? 'exit:23' : 'completed',
+      });
+      if (outcome === 'SUCCESS') {
+        expect(result).toMatchObject({ lastAssistantMessage: 'Codex final-file result.' });
+      }
+      expect(existsSync(state.outputPath)).toBe(false);
+      expect(existsSync(state.outputDirectory)).toBe(false);
+      expect(untracked).toEqual(tracked);
+    } finally {
+      await handle.kill();
+      await run;
+      process.chdir(originalCwd);
+      // Remove only this fixture's directory if a cleanup regression left it.
+      await rm(state.outputDirectory, { recursive: true, force: true });
+    }
+  }, 10_000);
+}
 
 test('adapter cancellation terminates the real child and completes without an orphan', async () => {
   const fixture = makeContext('codex');

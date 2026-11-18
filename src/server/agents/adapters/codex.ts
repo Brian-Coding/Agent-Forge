@@ -1,7 +1,7 @@
 import { reportedNumber } from '../../../shared/reported-usage';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, extname, isAbsolute, join, relative, resolve, win32 as win32Path } from 'node:path';
+import { extname, isAbsolute, join, relative, resolve, win32 as win32Path } from 'node:path';
 import {
   ArgvTooLongError,
   createCliEnv,
@@ -775,19 +775,30 @@ export function handleCodexEvent(ctx: AgentRunContext, state: CodexRunState, eve
 
 // --- Adapter ----------------------------------------------------------------
 
+// Keep one private container per process. The platform temp directory can
+// contain protected paths (including Forge's checkout), so it cannot serve as
+// the allowed cleanup root. Only per-turn children are removed.
+let codexOutputRoot: string | undefined;
+
 export const codexAdapter: AgentAdapter<CodexRunState> = {
   kind: 'codex',
   displayName: 'Codex',
 
   createState(ctx) {
     const stem = safePaneFileStem(ctx.paneId);
+    const outputRoot = codexOutputRoot ??= createFreshTempDirectorySync({
+      prefix: 'agent-forge-codex-output-',
+      protectedPaths: [ctx.cwd],
+    });
     const outputDirectory = createFreshTempDirectorySync({
       prefix: `agent-forge-codex-${stem.slice(0, 36)}-`,
+      baseDirectory: outputRoot,
+      approvedBaseDirectories: [outputRoot],
       protectedPaths: [ctx.cwd],
     });
     return {
       outputDirectory,
-      outputRoot: dirname(outputDirectory),
+      outputRoot,
       outputPath: join(outputDirectory, 'last-message.txt'),
       toolOpen: false,
       hasFinalAssistantMessage: false,
