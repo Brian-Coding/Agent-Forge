@@ -1,7 +1,7 @@
-import { writeFile } from 'node:fs/promises';
-import { dirname, join, resolve } from 'node:path';
+import { rm, writeFile } from 'node:fs/promises';
+import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { createFreshTempDirectorySync, safeRemoveTree } from '../src/server/services/safe-filesystem.mjs';
+import { createFreshTempDirectorySync } from '../src/server/services/safe-filesystem.mjs';
 import { killProcessTree, waitForProcessExit } from '../src/server/utils';
 
 const root = resolve(import.meta.dir, '..');
@@ -87,11 +87,8 @@ for (let i = 0; i < sampleCount; i++) {
     if (!build.success) throw new Error('Benchmark browser asset build failed');
     samples.push({ startup_ms: startupMs, build_ms: performance.now() - buildStartedAt, request_ms: requests });
   } finally {
-    if (canRemoveState) await safeRemoveTree({
-      targetPath: state, allowedRoot: dirname(state), expectedTargetName: /^forge-benchmark-/,
-      reason: 'Remove disposable benchmark state', allowNonEmpty: true,
-      mode: 'delete', permanent: true, audit: false,
-    });
+    // `state` is this run's own fresh temporary directory.
+    if (canRemoveState) await rm(state, { recursive: true, force: true });
   }
 }
 

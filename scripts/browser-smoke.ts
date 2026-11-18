@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
-import { safeRemoveTree } from '../src/server/services/safe-filesystem.mjs';
+import { join, resolve } from 'node:path';
 import { killProcessTree, waitForProcessExit } from '../src/server/utils';
 
 const root = await mkdtemp(join(tmpdir(), 'forge-browser-'));
@@ -47,8 +46,8 @@ try {
     const stopped = await killProcessTree(proc);
     assert.ok(stopped.rootExited, 'Could not stop the browser fixture server; temporary state retained');
   }
-  await safeRemoveTree({ targetPath: root, allowedRoot: dirname(root), expectedTargetName: /^forge-browser-/,
-    reason: 'Remove disposable browser fixture state', allowNonEmpty: true, mode: 'delete', permanent: true, audit: false });
+  // `root` is this run's own mkdtemp directory.
+  await rm(root, { recursive: true, force: true });
   assert.equal(exit.status, 'exited', 'Browser fixture server did not shut down cleanly');
   if (exit.status === 'exited') assert.equal(exit.exitCode, 0, 'Browser fixture server shutdown failed');
 }
