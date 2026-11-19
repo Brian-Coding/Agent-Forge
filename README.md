@@ -7,9 +7,9 @@ Supervise parallel coding agents as a daily engineering workflow: separate tasks
 
 **Try it without AI accounts:** `bun install --frozen-lockfile` then `bun run demo`. Open the printed URL and send a message in either pane. The disposable Acme Notes workspace uses scripted stand-ins; terminal tests and the preview server are real. Ctrl+C cleans up.
 
-![Scripted agents in the real Forge grid with terminal checks and a preview port](docs/images/forge-demo.gif)
+[![Agent Forge running 18 live Claude Code and Codex agents across six workspaces](docs/images/forge-showcase.gif)](docs/images/forge-showcase.mp4)
 
-*Linux recording of the running app, fictional data, scripted stand-ins, no model calls. [MP4](docs/images/forge-demo.mp4) · [Reproduce the recording](docs/media.md).*
+*A live run of six sample projects as six workspaces with 18 agents: Claude Code (Sonnet 5.5) and Codex. Shows real provider output, queued follow-ups, a diff review, terminals and a preview port. Sped up 2×. [Full 73-second video (MP4)](docs/images/forge-showcase.mp4) · [How it was recorded](docs/media.md#live-showcase) · [Offline scripted demo](docs/images/forge-demo.gif)*
 
 **Engineering evidence:** [Architecture](docs/architecture.md) · [Failure modes + tests](docs/FAILURE-MODES.md) · [Decisions](docs/decisions/README.md) · [Team rollout](docs/ADOPTION.md)
 

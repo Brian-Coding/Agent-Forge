@@ -1,4 +1,20 @@
-# Reproduce the demo recording
+# Recordings
+
+## Live showcase
+
+[MP4](images/forge-showcase.mp4) · [GIF](images/forge-showcase.gif) · stills: [six agents running](images/forge-showcase.png), [terminal and machine ports](images/forge-showcase-terminal.png), [finished results](images/forge-showcase-results.png)
+
+This is one real session of Agent Forge on Linux. It is not scripted.
+
+- **Projects:** six small, original sample projects created for the recording (a React todo app, a Bun API, a Node CLI, a canvas game, a docs site and a Python script). Each one is its own workspace.
+- **Agents:** 18 in total. 15 ran Claude Code (Sonnet 5.5) and 3 ran Codex (GPT-6.1 Terra, low reasoning).
+- **Turns:** every prompt was typed through the browser UI and every reply is unedited provider output. Agents in each workspace share the project directory, so some replies mention edits made by their neighbours.
+- **What it covers:** small tasks, a follow-up queued while a pane was busy, a second round of follow-ups, `/diff-check` review in the Reviewer pane, `npm test` and `npm run serve` in terminals, and the machine ports panel.
+- **Scale:** at least 14 turns ran at the same time, and the session ran 34 turns in 2.4 minutes. Claude usage reported by the app came to about $1.70.
+
+Frames were captured with the Chromium screencast and played back at **2× speed**. Any stretch where the screen did not change for more than 3 seconds was shortened. The ports panel was filtered to the session's own preview port (5190) to hide unrelated processes on the recording machine. The 7-day Codex usage pill is real account data.
+
+## Reproduce the offline demo recording
 
 These are recordings of the running application on Linux with fictional Acme Notes data. No generated mockups, live provider output, personal projects or accounts are used.
 
