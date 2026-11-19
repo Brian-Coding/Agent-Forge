@@ -6,6 +6,7 @@ import { killProcessTree, waitForProcessExit } from '../src/server/utils';
 
 const root = await mkdtemp(join(tmpdir(), 'forge-browser-'));
 const project = join(root, 'acme-notes'); await mkdir(project);
+const home = join(root, 'home'); await mkdir(join(home, 'projects'), { recursive: true });
 const reservation = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Response('') });
 const port = reservation.port!; await reservation.stop(true);
 const origin = `http://127.0.0.1:${port}`;
@@ -25,6 +26,7 @@ installOfflineDemoServices();
 const m=await import(${JSON.stringify(new URL('../src/server/index.ts', import.meta.url).href)}); await Bun.stdin.text(); await m.shutdown({reason:'browser smoke'});`);
 const proc = Bun.spawn([process.execPath, wrapper], { cwd: root, detached: process.platform !== 'win32', stdin: 'pipe', stdout: 'ignore', stderr: 'ignore', env: {
   PATH: process.env.PATH, SystemRoot: process.env.SystemRoot,
+  HOME: home, USERPROFILE: home,
   HOST: '127.0.0.1', PORT: String(port), AGENT_FORGE_ARTIFACT_ROOT: join(root, 'artifacts'),
   AGENT_FORGE_USAGE_SYNC_DIR: join(root, 'usage'), AGENT_FORGE_MACHINE_ID: 'fictional-browser-check',
 } });
@@ -37,7 +39,7 @@ try {
     await Bun.sleep(100);
   }
   assert.ok(ready, 'Browser fixture server did not become ready');
-  const check = Bun.spawn(['node', resolve(import.meta.dir, 'browser-check.mjs'), origin, process.env.FORGE_CAPTURE_PREVIEW === '1' ? 'capture' : 'check'], { stdout: 'inherit', stderr: 'inherit' });
+  const check = Bun.spawn(['node', resolve(import.meta.dir, 'browser-check.mjs'), origin, process.env.FORGE_CAPTURE_PREVIEW === '1' ? 'capture' : 'check', project], { stdout: 'inherit', stderr: 'inherit' });
   assert.equal(await check.exited, 0, 'Browser acceptance checks failed');
 } finally {
   proc.stdin.end();

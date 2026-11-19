@@ -10,6 +10,8 @@ A workspace groups:
 
 Switch workspaces from the sidebar. Drag the `⋮⋮` handle to reorder them, double-click a name to rename it, and delete a workspace with `×` (its agents move to another workspace). The active workspace is remembered per browser tab, so two tabs can look at different workspaces.
 
+In a folder picker, type to filter the current list, or paste an absolute path (including `~/…`) and press **Enter** to navigate. Use **↑ ..** to move to the parent folder, including above your home folder, then **Select** to choose the current folder.
+
 ## Agents
 
 Each agent is one provider CLI session with its own:

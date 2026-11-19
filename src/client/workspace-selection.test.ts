@@ -1,9 +1,22 @@
 import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { STATIC_AGENT_DEFINITIONS } from '../server/agents/agent-kinds';
 
 const clientSource = readFileSync(join(import.meta.dir, 'index.html'), 'utf8');
 const normalizedClientSource = clientSource.replace(/\r\n/g, '\n');
+
+test('browser fallback model IDs and defaults agree with the server registry', () => {
+  const start = normalizedClientSource.indexOf('const FALLBACK_AGENT_PROVIDERS =');
+  const end = normalizedClientSource.indexOf('let AGENT_PROVIDERS =', start);
+  const fallbacks = new Function(`${normalizedClientSource.slice(start, end)}; return FALLBACK_AGENT_PROVIDERS;`)();
+  for (const fallback of fallbacks) {
+    const server = STATIC_AGENT_DEFINITIONS[fallback.kind as keyof typeof STATIC_AGENT_DEFINITIONS];
+    expect(fallback.defaultModel).toBe(server.defaultModel);
+    expect(fallback.models.map(({ id, description, supportedReasoningLevels, defaultReasoningLevel }: any) => ({ id, description, supportedReasoningLevels, defaultReasoningLevel })))
+      .toEqual(server.models.map(({ id, description, supportedReasoningLevels, defaultReasoningLevel }) => ({ id, description, supportedReasoningLevels, defaultReasoningLevel })));
+  }
+});
 
 test('workspace selection remains local to each browser client', () => {
   expect(clientSource).toContain("const ACTIVE_WORKSPACE_STORAGE_KEY = 'agent-forge:active-workspace-id';");
@@ -136,6 +149,18 @@ test('Claude model-specific weekly usage renders as Fable in both limits surface
   expect(clientSource).toContain("snap.provider === 'claude' && Number.isFinite(snap.modelWeekly?.usedPercent)");
   expect(clientSource).toContain("e(LimitsMeter, { label: 'Fable', window: snap.modelWeekly })");
   expect(clientSource).toContain("{ key: 'modelWeekly', label: 'Fable', data: snap.modelWeekly }");
+});
+
+test('folder input distinguishes pasted absolute paths from list filters', () => {
+  const start = normalizedClientSource.indexOf('function isDirectoryPathInput(');
+  const end = normalizedClientSource.indexOf('\n\n    // Folder Browser', start);
+  const isPath = new Function(`${normalizedClientSource.slice(start, end)}; return isDirectoryPathInput;`)();
+  for (const path of ['/tmp/acme notes', '~/projects', '~', 'C:\\Users\\dev\\code', 'C:/', '\\\\server\\share', ' /tmp ']) {
+    expect(isPath(path)).toBe(true);
+  }
+  for (const filter of ['projects', '', 'dev/code', '~someone', 'C:relative']) {
+    expect(isPath(filter)).toBe(false);
+  }
 });
 
 test('the browser application inline script remains syntactically valid', () => {

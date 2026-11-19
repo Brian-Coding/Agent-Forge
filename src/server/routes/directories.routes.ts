@@ -1,5 +1,5 @@
 import { readdirSync, statSync, existsSync } from 'fs';
-import { join } from 'path';
+import { isAbsolute, join, resolve } from 'path';
 import { homedir } from 'os';
 import { jsonResponse } from '../utils';
 
@@ -114,14 +114,25 @@ async function listDirectories(path: string): Promise<{ name: string; path: stri
       a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }),
     );
   } catch (e) {
-    return knownDirectoryFallbacks(path);
+    const fallbacks = knownDirectoryFallbacks(path);
+    if (fallbacks.length) return fallbacks;
+    throw e;
   }
 }
 
 export async function handleDirectories(req: Request): Promise<Response> {
   const url = new URL(req.url);
-  const path = url.searchParams.get('path') || homedir();
-  const dirs = await listDirectories(path);
+  const requested = url.searchParams.get('path') || homedir();
+  const expanded = requested === '~' ? homedir()
+    : /^~[/\\]/.test(requested) ? join(homedir(), requested.slice(2)) : requested;
+  if (!isAbsolute(expanded)) return jsonResponse({ error: 'Enter an absolute folder path.' }, 400);
+  const path = resolve(expanded);
+  let dirs;
+  try {
+    dirs = await listDirectories(path);
+  } catch {
+    return jsonResponse({ error: 'Folder not found or cannot be opened.' }, 400);
+  }
   return jsonResponse({
     path,
     directories: dirs,

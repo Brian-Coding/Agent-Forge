@@ -25,7 +25,7 @@ test('resolveAgentModel falls back to the provider default for a model outside t
   // differs from the configured one.
   expect(resolveAgentModel('claude', 'claude-sonnet-5')).toBe('claude-opus-5-5');
   expect(resolveAgentModel('claude', 'totally-made-up-model')).toBe('claude-opus-5-5');
-  expect(resolveAgentModel('codex', 'totally-made-up-model')).toBe('gpt-5.6-sol');
+  expect(resolveAgentModel('codex', 'totally-made-up-model')).toBe('gpt-6-astra');
 });
 
 test('resolveAgentModel falls back to the provider default when no model is requested', () => {
@@ -33,7 +33,7 @@ test('resolveAgentModel falls back to the provider default when no model is requ
   // selector and the spawned CLI can never disagree for a fresh agent.
   expect(resolveAgentModel('claude', undefined)).toBe('claude-opus-5-5');
   expect(resolveAgentModel('claude', '')).toBe('claude-opus-5-5');
-  expect(resolveAgentModel('codex', undefined)).toBe('gpt-5.6-sol');
+  expect(resolveAgentModel('codex', undefined)).toBe('gpt-6-astra');
 });
 
 test('resolveAgentReasoningLevel honors model capabilities and safe defaults', () => {

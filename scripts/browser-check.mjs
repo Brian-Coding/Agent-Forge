@@ -4,6 +4,7 @@ import {mkdir} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import {chromium} from 'playwright';
 import {checkComposerFocus} from '../src/client/composer-focus.browser.mjs';
+import {checkFirstUseControls} from '../src/client/first-use.browser.mjs';
 const origin=process.argv[2];
 const browser=await chromium.launch();
 try {
@@ -50,10 +51,11 @@ try {
     assert.equal(opened,false); await other.close();
   } finally { await new Promise(resolve=>attacker.close(resolve)); }
   assert.deepEqual(external, []); assert.deepEqual(errors, []);
+  await checkFirstUseControls(browser, origin, process.argv[4]);
   if (process.argv[3] === 'capture') {
     await mkdir(resolve('docs/images'), { recursive: true });
     await page.screenshot({ path: resolve('docs/images/agent-forge.png') });
   }
-  console.log('PASS: authorized UI, two-pane composer focus, cross-port browser rejection, local dependencies, Markdown sanitization, POSIX/file/Windows links, escaped fallback');
+  console.log('PASS: authorized UI, two-pane composer focus, cross-port browser rejection, local dependencies, Markdown sanitization, POSIX/file/Windows links, escaped fallback; 3 first-use control flows');
 
 } finally { await browser.close(); }

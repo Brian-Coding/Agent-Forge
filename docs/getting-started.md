@@ -37,9 +37,9 @@ A workspace is a project plus a grid of agent panes.
 ## 4. Add an agent
 
 1. Click **+ Add Agent** in an empty grid slot (or press `Ctrl+N`).
-2. Pick a provider (Claude or Codex), a model, and a reasoning level.
-3. Optionally add a persona/system prompt and extra **reference folders** the agent may read.
-4. Send a message.
+2. Enter a name and choose its working directory (initially the workspace folder).
+3. Optionally add **reference directories** and a **system prompt**, then click **Create Agent**.
+4. In the new pane's composer, choose the provider (Claude or Codex), model, and reasoning level when supported. Send a message from there.
 
 You will see live progress while the agent works: its current activity, any "thinking" text the provider streams, elapsed time, and the files it changed. Press `Esc` in a pane, or click **Stop turn**, to stop the current turn.
 

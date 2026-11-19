@@ -202,6 +202,10 @@
     .panel-input-wrapper :focus-visible { outline: none; }
     .panel-textarea { flex: 1; background: transparent; border: none; color: var(--text-primary); font-family: 'SF Mono', Monaco, Consolas, monospace; font-size: 12px; padding: 5px 0; outline: none; resize: none; min-height: 20px; max-height: 84px; line-height: 1.35; }
     .panel-textarea::placeholder { color: var(--text-muted); }
+    .panel-command-bar { padding: 6px 10px; background: var(--bg-secondary); border-bottom: 1px solid var(--border); flex-shrink: 0; }
+    .panel-command-input { display: block; width: 100%; min-width: 0; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 5px; color: var(--text-primary); font: 12px/1.35 'SF Mono', Monaco, Consolas, monospace; padding: 6px 9px; text-overflow: ellipsis; }
+    .panel-command-input::placeholder { color: var(--text-muted); }
+    .panel-command-input:focus { outline: none; border-color: var(--text-muted); box-shadow: none; }
     .panel-send-btn { min-width: 52px; min-height: 28px; border: 1px solid var(--accent); border-radius: 4px; background: var(--accent); color: white; padding: 4px 8px; cursor: pointer; font-size: 11px; font-weight: 650; }
     .panel-send-btn:hover:not(:disabled) { background: #1f6feb; }
     .panel-send-btn:disabled { border-color: var(--border); background: var(--bg-secondary); color: var(--text-muted); cursor: not-allowed; }
@@ -707,14 +711,17 @@
           // claude-sonnet-5) must NOT appear here: the server resolver rejects
           // anything outside its catalog and runs the default instead, so listing
           // them makes the dropdown offer models that can never actually run.
+          { id: 'claude-opus-5-5',           label: 'opus 5.5' },
+          { id: 'claude-fable-5-1',          label: 'fable 5.1' },
           { id: 'claude-fable-5',            label: 'fable 5' },
           { id: 'claude-opus-4-8',           label: 'opus 4.8' },
           { id: 'claude-opus-4-7',           label: 'opus 4.7' },
           { id: 'claude-opus-4-6',           label: 'opus 4.6' },
+          { id: 'claude-sonnet-5-5',         label: 'sonnet 5.5' },
           { id: 'claude-sonnet-4-6',         label: 'sonnet 4.6' },
           { id: 'claude-haiku-4-5-20251001', label: 'haiku 4.5' },
         ],
-        defaultModel: 'claude-opus-4-8',
+        defaultModel: 'claude-opus-5-5',
         reasoningLevels: null,
       },
       {
@@ -722,15 +729,15 @@
         label: 'Codex',
         icon: '⚙',
         models: [
-          { id: 'gpt-6-astra',       label: 'gpt-6 astra',   description: 'Most capable model for complex, demanding work.', supportedReasoningLevels: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'], defaultReasoningLevel: 'medium' },
-          { id: 'gpt-5.6-sol',       label: 'gpt-5.6 sol',   description: 'Previous frontier agentic coding model.', supportedReasoningLevels: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'], defaultReasoningLevel: 'medium' },
-          { id: 'gpt-5.6-terra',     label: 'gpt-5.6 terra', description: 'Balanced agentic coding model for everyday work.' },
+          { id: 'gpt-6-astra',       label: 'gpt-6 astra',   description: 'Static fallback for complex coding work; discover models for current availability.', supportedReasoningLevels: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'], defaultReasoningLevel: 'medium' },
+          { id: 'gpt-5.6-sol',       label: 'gpt-5.6 sol',   description: 'Legacy coding model.', supportedReasoningLevels: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'], defaultReasoningLevel: 'medium' },
+          { id: 'gpt-5.6-terra',     label: 'gpt-5.6 terra', description: 'Legacy coding model.' },
           { id: 'gpt-5.5',           label: 'gpt-5.5' },
           { id: 'gpt-5.4',           label: 'gpt-5.4' },
           { id: 'gpt-5.2-codex',     label: 'gpt-5.2 codex' },
           { id: 'gpt-5.1-codex-max', label: 'gpt-5.1 codex max' },
         ],
-        defaultModel: 'gpt-5.6-sol',
+        defaultModel: 'gpt-6-astra',
         reasoningLevels: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
         defaultReasoningLevel: 'medium',
       },
@@ -1486,6 +1493,10 @@
       return parent || '/';
     }
 
+    function isDirectoryPathInput(value) {
+      return /^(?:\/|[A-Za-z]:[/\\]|\\\\|~(?:[/\\]|$))/.test(value.trim());
+    }
+
     // Folder Browser
     function FolderBrowser({ onSelect, defaultPath }) {
       const [currentPath, setCurrentPath] = useState('');
@@ -1494,13 +1505,22 @@
       const [shortcuts, setShortcuts] = useState([]);
       const [loading, setLoading] = useState(true);
       const [searchFilter, setSearchFilter] = useState('');
+      const [error, setError] = useState('');
 
       const initialLoadDone = useRef(false);
+      const requestId = useRef(0);
 
       const load = useCallback((path) => {
+        const id = ++requestId.current;
         setLoading(true);
+        setError('');
         const url = path ? '/api/directories?path=' + encodeURIComponent(path) : '/api/directories';
-        fetch(url).then(r => r.json()).then(data => {
+        fetch(url).then(async r => {
+          const data = await r.json();
+          if (!r.ok) throw new Error(data.error || 'Cannot open folder.');
+          return data;
+        }).then(data => {
+          if (id !== requestId.current) return;
           if (data.home) window.__HOME_PATH = data.home;
           if (data.documentsPath) window.__DOCUMENTS_PATH = data.documentsPath;
           if (data.shortcuts) setShortcuts(data.shortcuts);
@@ -1513,17 +1533,23 @@
             return;
           }
           initialLoadDone.current = true;
-          setCurrentPath(data.path); setDirectories(data.directories || []); setLoading(false);
-        }).catch(() => setLoading(false));
+          setCurrentPath(data.path); setDirectories(data.directories || []); setSearchFilter(''); setLoading(false);
+        }).catch(err => {
+          if (id !== requestId.current) return;
+          setError(err.message || 'Cannot open folder.');
+          setLoading(false);
+        });
       }, [defaultPath]);
 
-      useEffect(() => { load(defaultPath || ''); }, [load, defaultPath]);
+      useEffect(() => {
+        load(defaultPath || '');
+        return () => { requestId.current++; };
+      }, [load, defaultPath]);
 
       const parentPath = parentDirectoryPath(currentPath);
       const goUp = () => load(parentPath);
       const canGoUp = currentPath
-        && normalizeDirectoryPath(currentPath) !== parentPath
-        && normalizeDirectoryPath(currentPath) !== normalizeDirectoryPath(homePath);
+        && normalizeDirectoryPath(currentPath) !== parentPath;
 
       const filteredDirs = searchFilter
         ? directories.filter(dir => dir.name.toLowerCase().includes(searchFilter.toLowerCase()))
@@ -1533,9 +1559,17 @@
         e('input', {
           style: { width: '100%', padding: '6px 10px', background: 'var(--bg-tertiary)', border: 'none', borderBottom: '1px solid var(--border)', color: 'var(--text-primary)', fontSize: 12, outline: 'none' },
           value: searchFilter,
-          onChange: (ev) => setSearchFilter(ev.target.value),
-          placeholder: 'Search folder...',
+          onChange: (ev) => { setSearchFilter(ev.target.value); setError(''); },
+          onKeyDown: (ev) => {
+            if (ev.key === 'Enter' && !ev.nativeEvent.isComposing && isDirectoryPathInput(searchFilter)) {
+              ev.preventDefault();
+              load(searchFilter.trim());
+            }
+          },
+          placeholder: 'Filter or paste a path…',
+          'aria-label': 'Filter folders or enter a path',
         }),
+        error && e('div', { role: 'alert', style: { padding: '4px 8px', color: 'var(--error)', fontSize: 12 } }, error),
         e('div', { className: 'folder-path' }, currentPath || 'Loading...'),
         e('div', { className: 'folder-list' },
           loading ? e('div', { style: { padding: 8, color: 'var(--text-muted)', fontSize: 11 } }, 'Loading...') :
@@ -1548,13 +1582,34 @@
         e('div', { className: 'folder-actions' },
           e('button', { type: 'button', className: 'browse-btn', onClick: () => { load(homePath || ''); setSearchFilter(''); } }, 'Home'),
           ...shortcuts.map(s => e('button', { key: s.path, type: 'button', className: 'browse-btn', onClick: () => { load(s.path); setSearchFilter(''); }, style: { marginLeft: 4 } }, s.name)),
-          e('button', { type: 'button', className: 'btn btn-primary', onClick: () => onSelect(currentPath), style: { marginLeft: 'auto' }, disabled: !currentPath }, 'Select')
+          e('button', { type: 'button', className: 'btn btn-primary', onClick: () => onSelect(currentPath), style: { marginLeft: 'auto' }, disabled: !currentPath || loading }, 'Select')
         )
       );
     }
 
+    // Handle Escape before pane shortcuts, even if focus remains behind a modal.
+    function useModalEscape(isOpen, onClose) {
+      const overlayRef = useRef(null);
+      const closeRef = useRef(onClose);
+      closeRef.current = onClose;
+      useEffect(() => {
+        if (!isOpen) return;
+        const handler = (ev) => {
+          const overlays = document.querySelectorAll('.modal-overlay');
+          if (ev.key !== 'Escape' || ev.isComposing || overlays[overlays.length - 1] !== overlayRef.current) return;
+          ev.preventDefault();
+          ev.stopImmediatePropagation();
+          closeRef.current();
+        };
+        window.addEventListener('keydown', handler, true);
+        return () => window.removeEventListener('keydown', handler, true);
+      }, [isOpen]);
+      return overlayRef;
+    }
+
     // New Agent Modal (also used for editing)
     function NewAgentModal({ isOpen, onClose, onCreate, editAgent, onUpdate, workspaceId, defaultCwd }) {
+      const overlayRef = useModalEscape(isOpen, onClose);
       const [name, setName] = useState('');
       const [cwd, setCwd] = useState('');
       const [systemPrompt, setSystemPrompt] = useState('');
@@ -1592,7 +1647,7 @@
         }
       };
 
-      return e('div', { className: 'modal-overlay', onClick: (ev) => ev.target === ev.currentTarget && onClose() },
+      return e('div', { ref: overlayRef, className: 'modal-overlay', onClick: (ev) => ev.target === ev.currentTarget && onClose() },
         e('div', { className: 'modal' },
           e('h2', { className: 'modal-title' }, isEditing ? 'Edit Agent' : 'Create New Agent'),
           e('div', { className: 'form-group' },
@@ -1634,6 +1689,7 @@
 
     // Shared Context Modal
     function SharedContextModal({ isOpen, onClose, content, onSave }) {
+      const overlayRef = useModalEscape(isOpen, onClose);
       const [text, setText] = useState(content);
       const [instructionManifest, setInstructionManifest] = useState(null);
       const [instructionError, setInstructionError] = useState('');
@@ -1649,7 +1705,7 @@
         return () => { active = false; };
       }, [isOpen]);
       if (!isOpen) return null;
-      return e('div', { className: 'modal-overlay', onClick: (ev) => ev.target === ev.currentTarget && onClose() },
+      return e('div', { ref: overlayRef, className: 'modal-overlay', onClick: (ev) => ev.target === ev.currentTarget && onClose() },
         e('div', { className: 'modal harness-settings-modal' },
           e('h2', { className: 'modal-title' }, 'Harness Settings'),
           e('div', { className: 'settings-card' },
@@ -1972,6 +2028,8 @@
       const [showAllMessages, setShowAllMessages] = useState(false);
       const MESSAGE_PAGE_SIZE = 100;
       const [showTerminals, setShowTerminals] = useState(true);
+      const [showCommandInput, setShowCommandInput] = useState(false);
+      const [terminalCommand, setTerminalCommand] = useState('');
       const [gitBranch, setGitBranch] = useState(null);
       const contentRef = useRef(null);
       const inputRef = useRef(null);
@@ -2330,6 +2388,8 @@
       const presentationStatus = execution.status;
       const statusText = execution.text
         + (agent.lastTurnOutcome?.at && !isWorking ? ' · ' + formatOutcomeAge(agent.lastTurnOutcome.at) : '');
+      const commandDirectory = normalizeDirectoryPath(agent.cwd);
+      const commandFolder = commandDirectory.slice(commandDirectory.lastIndexOf('/') + 1);
 
       return e('div', {
         className: 'terminal-panel' + (isFocused ? ' focused' : '') + (isDragging ? ' dragging' : '') + (isDragOver ? ' drag-over' : '') + (isLocked ? ' locked' : ''),
@@ -2364,6 +2424,11 @@
             statusText && e('span', { className: 'status-elapsed' + (execution.status === 'uncertain' ? ' status-stuck' : ''), title: statusText }, statusText)
           ),
           e('div', { className: 'panel-actions' },
+            onCreateTerminal && e('button', {
+              className: 'panel-btn', title: 'Run a command', 'aria-label': 'Run a command',
+              'aria-expanded': showCommandInput,
+              onClick: () => { setTerminalCommand(''); setShowCommandInput(prev => !prev); },
+            }, '>_'),
             !isMaximized && onToggleLock && e('button', {
               className: 'lock-btn' + (isLocked ? ' locked' : ''),
               onClick: (ev) => { ev.stopPropagation(); onToggleLock(agent.id); },
@@ -2383,6 +2448,29 @@
               title: 'Clear this agent chat and reset its provider session',
             }, 'Clear chat'),
           )
+        ),
+        showCommandInput && e('div', { className: 'panel-command-bar' },
+          e('input', {
+            className: 'panel-command-input',
+            autoFocus: true,
+            value: terminalCommand,
+            onChange: (ev) => setTerminalCommand(ev.target.value),
+            placeholder: 'Run in ' + (commandFolder ? '…/' + commandFolder : commandDirectory),
+            'aria-label': 'Run a command in ' + agent.cwd,
+            title: 'Run in ' + agent.cwd + '\nEnter runs the command · Esc cancels',
+            onKeyDown: (ev) => {
+              if (ev.nativeEvent.isComposing) return;
+              if (ev.key === 'Escape') {
+                ev.preventDefault(); ev.stopPropagation();
+                setShowCommandInput(false); setTerminalCommand(''); inputRef.current?.focus();
+              } else if (ev.key === 'Enter') {
+                ev.preventDefault(); ev.stopPropagation();
+                if (!terminalCommand.trim()) return;
+                onCreateTerminal(agent.id, terminalCommand.trim());
+                setShowTerminals(true); setShowCommandInput(false); setTerminalCommand(''); inputRef.current?.focus();
+              }
+            },
+          })
         ),
         e('div', { className: 'token-info', title: 'Provider-reported totals for the last finished run. Unknown means the provider did not report it.' },
           'Last run: ',
@@ -3025,6 +3113,7 @@
 
     // New Workspace Modal
     function NewWorkspaceModal({ isOpen, onClose, onCreate }) {
+      const overlayRef = useModalEscape(isOpen, onClose);
       const [name, setName] = useState('');
       const [cwd, setCwd] = useState('');
       const [showCwdBrowser, setShowCwdBrowser] = useState(false);
@@ -3038,7 +3127,7 @@
           onClose();
         }
       };
-      return e('div', { className: 'modal-overlay', onClick: (ev) => ev.target === ev.currentTarget && onClose() },
+      return e('div', { ref: overlayRef, className: 'modal-overlay', onClick: (ev) => ev.target === ev.currentTarget && onClose() },
         e('div', { className: 'modal', style: { maxWidth: 700 } },
           e('h2', { className: 'modal-title' }, 'New Workspace'),
           e('div', { className: 'form-group' },
@@ -3917,6 +4006,7 @@
       // Global keyboard shortcuts
       useEffect(() => {
         const handler = (ev) => {
+          if (document.querySelector('.modal-overlay')) return;
           if ((ev.ctrlKey || ev.metaKey) && ev.key === 'n') {
             ev.preventDefault();
             setEditingAgent(null);

@@ -95,6 +95,21 @@ process.stdin.setEncoding('utf8');
 process.stdin.on('data', chunk => { prompt += chunk; });
 process.stdin.on('end', () => {
   const emit = value => process.stdout.write(JSON.stringify(value) + '\\n');
+  if (prompt.includes('CONTEXT_SNAPSHOT')) {
+    const session = 'codex-context-session';
+    const dir = require('node:path').join(process.env.CODEX_HOME, 'sessions');
+    fs.mkdirSync(dir, { recursive: true });
+    const total = args.includes('resume') ? 18000 : 17463;
+    fs.writeFileSync(require('node:path').join(dir, 'rollout-test-' + session + '.jsonl'), [
+      { type: 'turn_context', payload: { model: 'gpt-5.6-sol' } },
+      { type: 'event_msg', payload: { type: 'token_count', info: { last_token_usage: { total_tokens: 12000 }, model_context_window: 475000 } } },
+      { type: 'event_msg', payload: { type: 'token_count', info: { last_token_usage: { total_tokens: total }, model_context_window: 475000 } } },
+    ].map(event => JSON.stringify(event) + '\\n').join(''));
+    emit({ type: 'thread.started', thread_id: session });
+    emit({ type: 'item.completed', item: { type: 'agent_message', text: 'Context fixture finished.' } });
+    emit({ type: 'turn.completed', usage: { input_tokens: 15000, output_tokens: 20 } });
+    return;
+  }
   if (prompt.includes('FINAL_FILE_')) {
     const outputIndex = args.indexOf('--output-last-message');
     fs.writeFileSync(args[outputIndex + 1], 'Codex final-file result.');
@@ -288,6 +303,19 @@ test('Codex adapter exercises real tool streaming, final-file recovery, usage, a
   expect(untracked).toEqual(tracked);
   expect(existsSync(state.outputPath)).toBe(false);
   expect(existsSync(state.outputDirectory)).toBe(false);
+});
+
+test('Codex reads the latest rollout context after both a first turn and a resumed turn', async () => {
+  const fixture = makeContext('codex');
+  for (const contextTokens of [17463, 18000]) {
+    fixture.events.length = 0;
+    const state = codexAdapter.createState(fixture.ctx);
+    await codexAdapter.createHandle('CONTEXT_SNAPSHOT', fixture.ctx, state).run();
+    expect(fixture.getSession()).toBe('codex-context-session');
+    expect(fixture.events).toContainEqual({ type: 'usage', contextTokens, contextLimit: 475000, modelRan: 'gpt-5.6-sol' });
+    expect(fixture.events).toContainEqual({ type: 'finish', reason: 'completed' });
+  }
+  expect(untracked).toEqual(tracked);
 });
 
 for (const outcome of ['SUCCESS', 'NONZERO', 'HANG'] as const) {

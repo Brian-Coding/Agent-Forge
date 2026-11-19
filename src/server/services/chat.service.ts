@@ -635,6 +635,7 @@ async function runChatTurn(agentId: string, content: string, options: ChatTurnOp
       },
       updateSessionId(nextSessionId: string): void {
         if (!isCurrent()) return;
+        sessionIdForAdapter = nextSessionId;
         // Claim the new session for this turn's provider/model. If the user
         // swaps either again, the next turn starts fresh.
         agentService.setCurrentSession(agentId, provider, resolvedModel, nextSessionId);

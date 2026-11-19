@@ -139,7 +139,11 @@ test('normal completion persists one result, one usage row, session ownership, a
   const model = resolveAgentModel('codex')!;
   registerTestAdapter((_prompt, ctx) => ({
     async run() {
+      expect(ctx.getSessionId()).toBeNull();
       ctx.updateSessionId('session-complete');
+      // Codex reads this again during rollout polling and the post-exit
+      // context snapshot, before the next (resumed) turn exists.
+      expect(ctx.getSessionId()).toBe('session-complete');
       ctx.emitAgentEvent({ type: 'status', status: 'thinking' });
       ctx.emitAgentEvent({
         type: 'usage',
@@ -148,6 +152,8 @@ test('normal completion persists one result, one usage row, session ownership, a
         costUsdDelta: 0.25,
         turnsDelta: 1,
         modelRan: model,
+        contextTokens: 17463,
+        contextLimit: 475000,
       });
       ctx.emitAgentEvent({ type: 'usage', inputTokensDelta: Number.NaN, outputTokensDelta: Number.POSITIVE_INFINITY });
       ctx.emitAgentEvent({ type: 'result', text: 'Completed exactly once.', checkpoint: true });
@@ -168,6 +174,7 @@ test('normal completion persists one result, one usage row, session ownership, a
     lastTurnOutcome: { status: 'completed' },
   });
   expect(agentService.getCurrentSessionId(id)).toBe('session-complete');
+  expect(agentService.getTokenUsage(id)).toMatchObject({ contextTokens: 17463, contextLimit: 475000 });
   expect(usageService.getEvents()).toHaveLength(1);
   expect(usageService.getEvents()[0]).toMatchObject({
     inputTokens: 120,
@@ -411,6 +418,7 @@ test('cancellation drops queued work and late adapter callbacks cannot mutate st
   capturedContext!.emitAgentEvent({ type: 'result', text: 'late mutation', checkpoint: true });
   capturedContext!.emitAgentEvent({ type: 'usage', inputTokensDelta: 999, turnsDelta: 1 });
   capturedContext!.updateSessionId('late-session');
+  expect(capturedContext!.getSessionId()).toBeNull();
   expect(agentMessages(id)).toHaveLength(beforeMessages);
   expect(agentService.getTokenUsage(id)).toEqual(beforeUsage);
   expect(agentService.getCurrentSessionId(id)).toBeNull();

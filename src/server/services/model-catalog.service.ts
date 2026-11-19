@@ -1,6 +1,8 @@
 import { createCliEnv, killProcessTree, resolveCliBinary } from '../utils';
 import { collectBoundedProcess } from './bounded-subprocess';
 import { fetchWithTimeout } from './external-io';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import {
   AGENT_DEFINITIONS,
   STATIC_AGENT_DEFINITIONS,
@@ -53,17 +55,6 @@ function dedupeModels(primary: readonly ModelOption[], fallback: readonly ModelO
   return out;
 }
 
-function prioritizeCodexModels(models: readonly ModelOption[]): ModelOption[] {
-  return models
-    .map((model, index) => ({
-      model,
-      index,
-      rank: model.id.startsWith('gpt-6-') ? 0 : model.id.startsWith('gpt-5.6-') ? 1 : 2,
-    }))
-    .sort((a, b) => a.rank - b.rank || a.index - b.index)
-    .map(({ model }) => model);
-}
-
 function mergeDefinition(kind: ChatAgentKind, discovered: readonly ModelOption[]): AgentDefinition {
   const fallback = STATIC_AGENT_DEFINITIONS[kind];
   // fallback.models are always merged in, so fallback.defaultModel is always present.
@@ -76,8 +67,11 @@ function mergeDefinition(kind: ChatAgentKind, discovered: readonly ModelOption[]
 /** Learn real provider model ids reported by the CLI, even for OAuth-backed
  * Claude installations where the public model-list API is unavailable. */
 export function observeProviderModel(kind: ChatAgentKind, rawModel: string): boolean {
-  const model = kind === 'claude' ? stripModelTier(rawModel) : rawModel;
-  if (!model || (kind === 'claude' && !isRealClaudeModelId(model))) return false;
+  // Codex discovery already determines visibility and ordering. Observing a
+  // run must not promote a lower-priority entry or expose an internal model.
+  if (kind === 'codex') return false;
+  const model = stripModelTier(rawModel);
+  if (!isRealClaudeModelId(model)) return false;
   if (observedModels[kind].has(model)) return false;
   observedModels[kind].add(model);
 
@@ -98,6 +92,7 @@ export function observeProviderModel(kind: ChatAgentKind, rawModel: string): boo
 export function buildCodexDefinition(
   discovered: readonly ModelOption[],
   discoverySucceeded: boolean,
+  configuredModel?: string,
 ): AgentDefinition {
   const fallback = STATIC_AGENT_DEFINITIONS.codex;
   const fallbackById = new Map(fallback.models.map(model => [model.id, model]));
@@ -109,15 +104,27 @@ export function buildCodexDefinition(
       description: model.description || staticModel?.description,
     };
   });
-  const models = prioritizeCodexModels(
+  const models =
     discoverySucceeded
       ? dedupeModels(enrichedDiscovered, [])
-      : dedupeModels(enrichedDiscovered, fallback.models),
-  );
-  const defaultModel = models.some(model => model.id === fallback.defaultModel)
-    ? fallback.defaultModel
-    : models[0]?.id || fallback.defaultModel;
+      : dedupeModels(enrichedDiscovered, fallback.models);
+  const preferredModel = configuredModel || (discoverySucceeded ? models[0]?.id : fallback.defaultModel);
+  const defaultModel = models.find(model => model.id === preferredModel)?.id
+    || models[0]?.id || fallback.defaultModel;
   return { ...fallback, models, defaultModel };
+}
+
+/** Only the top-level model preference is consumed; no credentials or other
+ * configuration values are returned or logged. Missing/invalid config is optional. */
+export async function readConfiguredCodexModel(
+  codexHome = process.env.CODEX_HOME || join(homedir(), '.codex'),
+): Promise<string | undefined> {
+  try {
+    const { model } = Bun.TOML.parse(await Bun.file(join(codexHome, 'config.toml')).text()) as { model?: unknown };
+    return typeof model === 'string' && model.trim() ? model.trim() : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function normalizeOpenAiName(value: unknown, maxChars = 500): string {
@@ -237,14 +244,15 @@ export async function getModelCatalog(forceRefresh = false): Promise<Record<Chat
   if (refreshPromise) return refreshPromise;
 
   const refresh = (async () => {
-    const [claudeModels, codexDiscovery] = await Promise.all([
+    const [claudeModels, codexDiscovery, configuredCodexModel] = await Promise.all([
       discoverClaudeModels(),
       discoverCodexModels(),
+      readConfiguredCodexModel(),
     ]);
 
     const definitions: Record<ChatAgentKind, AgentDefinition> = {
       claude: mergeDefinition('claude', claudeModels),
-      codex: buildCodexDefinition(codexDiscovery.models, codexDiscovery.succeeded),
+      codex: buildCodexDefinition(codexDiscovery.models, codexDiscovery.succeeded, configuredCodexModel),
     };
 
     Object.assign(AGENT_DEFINITIONS, definitions);

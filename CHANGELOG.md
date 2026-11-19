@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-11-18 — first-use fixes from a live test pass
+
+Found by driving a fresh clone with real Codex CLI and Claude Code sessions:
+- Keep the Codex CLI's own model order and default to your configured Codex model instead of a legacy model.
+- Show the Codex context meter after the first turn of a new session, not only after a resumed turn.
+- Add a **Run a command** (`>_`) button to each pane so you can start per-agent terminals from the UI.
+- Let the folder picker accept a pasted absolute or `~/` path and go above the home folder.
+- Close Settings, New Workspace, and Add Agent with Esc.
+- Fix the getting-started description of the Add Agent dialog.
+
 ## Unreleased — 2026-11-16
 
 - Preserve the workspace App URL across restarts while continuing to discard removed feature state.

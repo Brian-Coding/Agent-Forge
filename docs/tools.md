@@ -4,6 +4,8 @@
 
 Each agent pane can run commands in its working folder: dev servers, test runs, builds. Output streams into the pane and the process is tracked, so it is stopped when you kill the terminal, remove the agent, or shut Agent Forge down. Commands run through your shell (`$SHELL` on macOS/Linux, `cmd.exe` on Windows).
 
+Click **Run a command** (`>_`) in the pane header to reveal a one-line input showing the working folder. Type a command and press **Enter** to run it, or **Esc** to cancel. Output appears in the pane's **Terminals** section; click **Kill** beside a running command to stop it.
+
 ## File changes and Git
 
 When an agent edits files, the pane lists what changed. Click a file to open its Git diff. The header shows the current branch of the agent's folder. Agent Forge only reads Git state; it never commits or pushes on your behalf (and the built-in guardrails tell agents not to either, unless you ask).

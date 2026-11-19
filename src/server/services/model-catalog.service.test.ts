@@ -1,11 +1,16 @@
 import { expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
-import { getAgentDefinition, STATIC_AGENT_DEFINITIONS, type ModelOption } from '../agents/agent-kinds';
+import { mkdir, mkdtemp } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { AGENT_DEFINITIONS, getAgentDefinition, STATIC_AGENT_DEFINITIONS, type ModelOption } from '../agents/agent-kinds';
+import { safeRemoveTree } from './safe-filesystem.mjs';
 import {
   buildCodexDefinition,
   observeProviderModel,
   parseClaudeModelDiscovery,
   parseCodexModelDiscovery,
+  readConfiguredCodexModel,
   stabilizeCodexModelDiscovery,
 } from './model-catalog.service';
 
@@ -18,7 +23,7 @@ test('valid Claude models observed through OAuth CLI runs become selectable', ()
   expect(getAgentDefinition('claude').models.some(model => model.id === '<synthetic>')).toBe(false);
 });
 
-test('Codex discovery puts GPT-6 ahead of GPT-5.6 and keeps provider capabilities', () => {
+test('Codex discovery preserves CLI order and capabilities, defaulting to its top model', () => {
   const discovered: ModelOption[] = [
     { id: 'gpt-5.5', label: 'GPT-5.5' },
     {
@@ -41,21 +46,53 @@ test('Codex discovery puts GPT-6 ahead of GPT-5.6 and keeps provider capabilitie
   const definition = buildCodexDefinition(discovered, true);
 
   expect(definition.models.map(model => model.id)).toEqual([
-    'gpt-6-astra',
+    'gpt-5.5',
     'gpt-5.6-sol',
     'gpt-5.6-terra',
-    'gpt-5.5',
+    'gpt-6-astra',
   ]);
-  expect(definition.models[0]?.label).toBe('GPT-6 Astra');
-  expect(definition.models[0]?.description).toBe('CLI Astra description');
-  expect(definition.models[0]?.supportedReasoningLevels).toEqual(['medium', 'high']);
-  expect(definition.models[0]?.defaultReasoningLevel).toBe('high');
+  expect(definition.models[3]?.label).toBe('GPT-6 Astra');
+  expect(definition.models[3]?.description).toBe('CLI Astra description');
+  expect(definition.models[3]?.supportedReasoningLevels).toEqual(['medium', 'high']);
+  expect(definition.models[3]?.defaultReasoningLevel).toBe('high');
   expect(definition.models[1]?.label).toBe('GPT-5.6 Sol');
   expect(definition.models[1]?.description).toBe('CLI Sol description');
   expect(definition.models[1]?.supportedReasoningLevels).toContain('max');
   expect(definition.models[1]?.supportedReasoningLevels).toContain('ultra');
   expect(definition.models[1]?.defaultReasoningLevel).toBe('medium');
-  expect(definition.defaultModel).toBe('gpt-5.6-sol');
+  expect(definition.defaultModel).toBe('gpt-5.5');
+});
+
+test('Codex catalog respects CLI priorities across generations and hides unlisted models', () => {
+  const discovered = parseCodexModelDiscovery({ models: [
+    { slug: 'gpt-6-astra', priority: 4, visibility: 'list' },
+    { slug: 'gpt-5.6-sol', priority: 7, visibility: 'list' },
+    { slug: 'gpt-6.1-sol', priority: 3, visibility: 'list' },
+    { slug: 'gpt-6.1-terra', priority: 1, visibility: 'list' },
+    { slug: 'gpt-reserve', priority: 0, visibility: 'hide' },
+    { slug: 'codex-auto-review', priority: 2, visibility: 'hide' },
+    { slug: 'unsupported', priority: 0, visibility: 'list', supported_in_api: false },
+  ] });
+  const definition = buildCodexDefinition(discovered, true);
+  expect(definition.models.map(model => model.id)).toEqual([
+    'gpt-6.1-terra', 'gpt-6.1-sol', 'gpt-6-astra', 'gpt-5.6-sol',
+  ]);
+  expect(definition.defaultModel).toBe('gpt-6.1-terra');
+});
+
+test('runtime Codex observations cannot reorder the catalog or reveal hidden models', () => {
+  const original = AGENT_DEFINITIONS.codex;
+  try {
+    AGENT_DEFINITIONS.codex = buildCodexDefinition([
+      { id: 'gpt-6.1-terra', label: 'Terra' }, { id: 'gpt-6.1-sol', label: 'Sol' },
+    ], true);
+    const expected = structuredClone(AGENT_DEFINITIONS.codex);
+    observeProviderModel('codex', 'gpt-6.1-sol');
+    observeProviderModel('codex', 'codex-auto-review');
+    expect(AGENT_DEFINITIONS.codex).toEqual(expected);
+  } finally {
+    AGENT_DEFINITIONS.codex = original;
+  }
 });
 
 test('successful Codex discovery does not append unsupported static models', () => {
@@ -67,6 +104,33 @@ test('successful Codex discovery does not append unsupported static models', () 
   expect(definition.models.map(model => model.id)).toEqual(['gpt-5.5', 'gpt-5.4']);
   expect(definition.models.some(model => model.id === 'gpt-5.6-sol')).toBe(false);
   expect(definition.models.some(model => model.id === 'gpt-6-astra')).toBe(false);
+});
+
+test('Codex defaults to the configured visible model, otherwise the CLI top model', () => {
+  const models = [{ id: 'gpt-6.1-terra', label: 'Terra' }, { id: 'gpt-6.1-sol', label: 'Sol' }];
+  expect(buildCodexDefinition(models, true, 'gpt-6.1-sol').defaultModel).toBe('gpt-6.1-sol');
+  for (const configured of [undefined, 'unavailable', 'codex-auto-review']) {
+    expect(buildCodexDefinition(models, true, configured).defaultModel).toBe('gpt-6.1-terra');
+  }
+  expect(buildCodexDefinition([], false).defaultModel).toBe('gpt-6-astra');
+  expect(buildCodexDefinition([], false, 'gpt-5.6-sol').defaultModel).toBe('gpt-5.6-sol');
+});
+
+test('Codex model preference reads only the top-level model from an isolated config', async () => {
+  const fixtureRoot = await mkdtemp(join(tmpdir(), 'forge-model-config-'));
+  const home = join(fixtureRoot, 'home');
+  await mkdir(home);
+  try {
+    expect(await readConfiguredCodexModel(home)).toBeUndefined();
+    await Bun.write(join(home, 'config.toml'), 'model = "gpt-6.1-sol" # preference\n[profiles.example]\nmodel = "profile-model"\n');
+    expect(await readConfiguredCodexModel(home)).toBe('gpt-6.1-sol');
+    for (const source of ['model = 42', 'model = " "', 'model = [', '[profiles.example]\nmodel = "profile-model"']) {
+      await Bun.write(join(home, 'config.toml'), source);
+      expect(await readConfiguredCodexModel(home)).toBeUndefined();
+    }
+  } finally {
+    await safeRemoveTree({ targetPath: home, allowedRoot: fixtureRoot, allowNonEmpty: true, mode: 'delete', permanent: true, reason: 'Remove isolated model config fixture' });
+  }
 });
 
 test('failed Codex discovery includes Astra in the static fallback', () => {

@@ -44,6 +44,6 @@ bun run test:browser
 bun run demo:check
 ```
 
-Measured on Linux with Bun 1.4.4 on November 17, 2026: **423 tests across 75 files**, with **78.79% weighted line coverage** and **83.25% function coverage** across 71 LCOV source records. Coverage does not include the inline browser script or child-process execution; the browser and demo gates check those paths separately.
+Measured on Linux with Bun 1.4.4 on November 18, 2026: **431 tests across 75 files**, with **79.27% weighted line coverage** and **83.58% function coverage** across 71 LCOV source records. Coverage does not include the inline browser script or child-process execution; the browser and demo gates check those paths separately.
 
 These checks use fixtures and scripted providers; they do not evaluate model quality or certify live CLI compatibility. Read [failure modes](docs/FAILURE-MODES.md) and [decisions](docs/decisions/README.md) when changing a trust boundary. `bun run media` regenerates the fictional recording; run it only when updating demo media and inspect the frames. See [media instructions](docs/media.md).
