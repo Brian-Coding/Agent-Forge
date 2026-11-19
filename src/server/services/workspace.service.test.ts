@@ -45,6 +45,7 @@ test('workspace creation persists a validated primary working directory', async 
     const created = await workspaceService.create('Project', `  ${projectRoot}  `);
     createdId = created.id;
     expect(created.cwd).toBe(await realpath(projectRoot));
+    expect(created).toMatchObject({ gridColumns: 1, gridRows: 1, gridSizeManuallySet: false });
     await expect(workspaceService.create('Relative', '.')).rejects.toThrow('must be an absolute path');
     await expect(workspaceService.create('Empty', '   ')).rejects.toThrow('must be an absolute path');
     await expect(workspaceService.create('File', filePath)).rejects.toThrow('does not exist or is not a directory');
@@ -78,6 +79,7 @@ test('workspace mutations restore maps, ordering, settings, and reassignments wh
     const selected = ['agent-a'];
     await expect(workspaceService.update(first.id, {
       name: 'uncommitted',
+      gridColumns: 4,
       selectedAgentIds: selected,
       testUrl: 'http://localhost:5173',
     })).rejects.toThrow('disk full');
@@ -107,6 +109,90 @@ test('workspace mutations restore maps, ordering, settings, and reassignments wh
     map.delete(first.id);
     map.delete(second.id);
     settingsService.load(originalSettings);
+  }
+});
+
+test('automatic grids grow to twelve panes without moving existing slots or locks', async () => {
+  const map: Map<string, WorkspaceInfo> = (globalThis as any).__workspacesMap;
+  const ws = { ...workspace(`auto-${randomUUID()}`, 0, 1), gridColumns: 1, gridRows: 1, gridSizeManuallySet: false };
+  map.set(ws.id, ws);
+  try {
+    const sizes = [[1, 1], [2, 1], [2, 2], [2, 2], [3, 2], [3, 2], [3, 3], [3, 3], [3, 3], [4, 3], [4, 3], [4, 3], [4, 3]];
+    for (const [index, size] of sizes.entries()) {
+      workspaceService.addAgentToWorkspace(ws.id, `agent-${index}`);
+      expect([ws.gridColumns, ws.gridRows]).toEqual(size);
+      expect(ws.selectedAgentIds.filter(Boolean)).toEqual(Array.from({ length: Math.min(index + 1, 12) }, (_, i) => `agent-${i}`));
+      ws.lockedAgentIds = ['agent-0'];
+    }
+    workspaceService.removeAgentFromAllWorkspaces('agent-4');
+    workspaceService.addAgentToWorkspace(ws.id, 'replacement');
+    expect(ws.selectedAgentIds.filter(Boolean)).toHaveLength(12);
+    expect(ws.selectedAgentIds).toContain('replacement');
+    expect(ws.lockedAgentIds).toEqual(['agent-0']);
+    expect([ws.gridColumns, ws.gridRows]).toEqual([4, 3]);
+  } finally {
+    map.delete(ws.id);
+  }
+});
+
+test('choosing either grid dimension freezes automatic growth, including choosing its current value', async () => {
+  const map: Map<string, WorkspaceInfo> = (globalThis as any).__workspacesMap;
+  const originalSaveNow = persistenceService.saveNow;
+  persistenceService.saveNow = async () => {};
+  try {
+    for (const dimension of ['gridColumns', 'gridRows'] as const) {
+      const ws = { ...workspace(`manual-${randomUUID()}`, 0, 1), gridColumns: 1, gridRows: 1, gridSizeManuallySet: false };
+      map.set(ws.id, ws);
+      try {
+        await workspaceService.update(ws.id, { name: 'Renamed', selectedAgentIds: ['first'], lockedAgentIds: ['first'] });
+        expect(ws.gridSizeManuallySet).toBe(false);
+        await workspaceService.update(ws.id, { [dimension]: 1 });
+        expect(ws.gridSizeManuallySet).toBe(true);
+        workspaceService.addAgentToWorkspace(ws.id, 'second');
+        expect([ws.gridColumns, ws.gridRows]).toEqual([1, 1]);
+        expect(ws.selectedAgentIds).toEqual(['first']);
+        expect(ws.lockedAgentIds).toEqual(['first']);
+      } finally { map.delete(ws.id); }
+    }
+  } finally { persistenceService.saveNow = originalSaveNow; }
+});
+
+test('loading older explicit grids preserves dimensions, slot order, and manual sizing', async () => {
+  const map: Map<string, WorkspaceInfo> = (globalThis as any).__workspacesMap;
+  const originalSaveNow = persistenceService.saveNow;
+  const ws = { ...workspace(`legacy-grid-${randomUUID()}`, 0, 1), cwd: '/Users/dev/code', gridColumns: 1, gridRows: 2, selectedAgentIds: ['second', 'first'], lockedAgentIds: ['second'] };
+  persistenceService.saveNow = async () => {};
+  try {
+    await workspaceService.loadAndMigrate([ws], {}, [], () => {});
+    workspaceService.addAgentToWorkspace(ws.id, 'third');
+    expect(workspaceService.get(ws.id)).toMatchObject({ gridColumns: 1, gridRows: 2, gridSizeManuallySet: true, selectedAgentIds: ['second', 'first'], lockedAgentIds: ['second'] });
+    workspaceService.removeAgentFromAllWorkspaces('second');
+    expect(ws.selectedAgentIds).toEqual(['', 'first']);
+    expect([ws.gridColumns, ws.gridRows]).toEqual([1, 2]);
+  } finally {
+    map.delete(ws.id);
+    persistenceService.saveNow = originalSaveNow;
+  }
+});
+
+test('a fresh default workspace starts at one automatic slot while legacy global grids stay manual', async () => {
+  const map: Map<string, WorkspaceInfo> = (globalThis as any).__workspacesMap;
+  const originalEntries = [...map.entries()];
+  const originalSettings = structuredClone(settingsService.getRef());
+  const originalSaveNow = persistenceService.saveNow;
+  persistenceService.saveNow = async () => {};
+  try {
+    map.clear();
+    await workspaceService.loadAndMigrate(undefined, {}, [], () => {});
+    expect(workspaceService.getAll()[0]).toMatchObject({ gridColumns: 1, gridRows: 1, gridSizeManuallySet: false });
+    map.clear();
+    await workspaceService.loadAndMigrate(undefined, { gridColumns: 3, gridRows: 2 }, [], () => {});
+    expect(workspaceService.getAll()[0]).toMatchObject({ gridColumns: 3, gridRows: 2, gridSizeManuallySet: true });
+  } finally {
+    map.clear();
+    for (const [id, value] of originalEntries) map.set(id, value);
+    settingsService.load(originalSettings);
+    persistenceService.saveNow = originalSaveNow;
   }
 });
 

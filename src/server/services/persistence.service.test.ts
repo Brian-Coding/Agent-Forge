@@ -192,6 +192,26 @@ test('App URL normalization accepts bounded strings and reports malformed values
   }
 });
 
+test('workspace grid choice survives disk round trips and older or invalid flags stay manual', async () => {
+  const directory = await fixtureDirectory();
+  const options = { dataFile: join(directory, 'data.json'), pidFile: join(directory, 'pids.json') };
+  const service = createPersistenceService(options);
+  const flags = [false, true, undefined, 'false', null, 0];
+  service.setBuildPersistedData(() => ({
+    ...emptyData(),
+    workspaces: flags.map((gridSizeManuallySet, index) => ({
+      id: `workspace-${index}`, name: 'Project', sortOrder: index, gridColumns: 2, gridRows: 1,
+      selectedAgentIds: ['second', 'first'], lockedAgentIds: ['second'], createdAt: 1, gridSizeManuallySet,
+    } as any)),
+  }));
+  await service.saveNow();
+  const loaded = await createPersistenceService(options).load();
+  expect(loaded!.workspaces.map(ws => ws.gridSizeManuallySet)).toEqual([false, true, true, true, true, true]);
+  for (const ws of loaded!.workspaces) {
+    expect(ws).toMatchObject({ gridColumns: 2, gridRows: 1, selectedAgentIds: ['second', 'first'], lockedAgentIds: ['second'] });
+  }
+});
+
 test('a failed data write rejects, leaves prior state intact, and does not poison retries', async () => {
   const directory = await fixtureDirectory();
   const dataFile = join(directory, 'data.json');

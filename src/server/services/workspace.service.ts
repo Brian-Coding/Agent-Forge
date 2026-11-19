@@ -20,6 +20,15 @@ const LEGACY_WORKSPACE_KEYS = [
 // HMR-safe state
 const workspaces: Map<string, WorkspaceInfo> = (globalThis as any).__workspacesMap ??= new Map<string, WorkspaceInfo>();
 
+const AUTOMATIC_GRIDS = [[1, 1], [2, 1], [2, 2], [3, 2], [3, 3], [4, 3]] as const;
+
+function growAutomaticGrid(ws: WorkspaceInfo, requiredSlots: number): void {
+  if (ws.gridSizeManuallySet !== false || requiredSlots <= ws.gridColumns * ws.gridRows) return;
+  const size = AUTOMATIC_GRIDS.find(([columns, rows]) =>
+    columns >= ws.gridColumns && rows >= ws.gridRows && columns * rows >= Math.min(requiredSlots, 12));
+  if (size) [ws.gridColumns, ws.gridRows] = size;
+}
+
 function restoreWorkspace(target: WorkspaceInfo, snapshot: WorkspaceInfo): void {
   for (const key of Object.keys(target) as Array<keyof WorkspaceInfo>) delete (target as any)[key];
   Object.assign(target, snapshot);
@@ -79,8 +88,9 @@ export const workspaceService = {
         name,
         cwd: normalizedCwd,
         sortOrder: nextSortOrder,
-        gridColumns: 3,
-        gridRows: 2,
+        gridColumns: 1,
+        gridRows: 1,
+        gridSizeManuallySet: false,
         selectedAgentIds: [],
         lockedAgentIds: [],
         createdAt: Date.now(),
@@ -108,6 +118,7 @@ export const workspaceService = {
       if (updates.name !== undefined) ws.name = updates.name;
       if (updates.gridColumns !== undefined) ws.gridColumns = updates.gridColumns;
       if (updates.gridRows !== undefined) ws.gridRows = updates.gridRows;
+      if (updates.gridColumns !== undefined || updates.gridRows !== undefined) ws.gridSizeManuallySet = true;
       if (updates.selectedAgentIds !== undefined) ws.selectedAgentIds = [...updates.selectedAgentIds];
       if (updates.lockedAgentIds !== undefined) ws.lockedAgentIds = [...updates.lockedAgentIds];
       if (updates.testUrl !== undefined) ws.testUrl = updates.testUrl;
@@ -197,6 +208,11 @@ export const workspaceService = {
   addAgentToWorkspace(wsId: string, agentId: string): void {
     const ws = workspaces.get(wsId);
     if (!ws) return;
+    if (ws.selectedAgentIds.includes(agentId)) return;
+    const visibleSlots = ws.selectedAgentIds.slice(0, ws.gridColumns * ws.gridRows);
+    if (visibleSlots.length === ws.gridColumns * ws.gridRows && visibleSlots.every(Boolean)) {
+      growAutomaticGrid(ws, visibleSlots.length + 1);
+    }
     const totalSlots = ws.gridColumns * ws.gridRows;
     // Pad to totalSlots with empty strings so we can find empty slots
     while (ws.selectedAgentIds.length < totalSlots) {
@@ -219,7 +235,7 @@ export const workspaceService = {
   /** Remove agent from all workspaces' selectedAgentIds and lockedAgentIds */
   removeAgentFromAllWorkspaces(agentId: string): void {
     for (const ws of workspaces.values()) {
-      ws.selectedAgentIds = ws.selectedAgentIds.filter(id => id !== agentId);
+      ws.selectedAgentIds = ws.selectedAgentIds.map(id => id === agentId ? '' : id);
       ws.lockedAgentIds = ws.lockedAgentIds.filter(id => id !== agentId);
     }
   },
@@ -258,6 +274,10 @@ export const workspaceService = {
           ws.lockedAgentIds = [];
           recoveryChanged = true;
         }
+        if (typeof ws.gridSizeManuallySet !== 'boolean') {
+          ws.gridSizeManuallySet = true;
+          recoveryChanged = true;
+        }
         workspaces.set(ws.id, ws);
       }
       if (recoveryChanged) await persistenceService.saveNow();
@@ -266,17 +286,20 @@ export const workspaceService = {
     // Migration: create "Default" workspace if none exist
     if (workspaces.size === 0) {
       const defaultId = generateId();
+      const hasLegacyGrid = settings?.gridColumns !== undefined || settings?.gridRows !== undefined;
       const defaultWorkspace: WorkspaceInfo = {
         id: defaultId,
         name: 'Default',
         cwd: agents[0]?.cwd,
         sortOrder: 0,
-        gridColumns: settings?.gridColumns || 2,
-        gridRows: settings?.gridRows || 2,
+        gridColumns: hasLegacyGrid ? settings?.gridColumns || 2 : 1,
+        gridRows: hasLegacyGrid ? settings?.gridRows || 2 : 1,
+        gridSizeManuallySet: hasLegacyGrid,
         selectedAgentIds: settings?.selectedAgentIds || agents.map(agent => agent.id),
         lockedAgentIds: [],
         createdAt: Date.now(),
       };
+      growAutomaticGrid(defaultWorkspace, defaultWorkspace.selectedAgentIds.length);
       workspaces.set(defaultId, defaultWorkspace);
 
       for (const agent of agents) {

@@ -37,6 +37,8 @@ function observedModelOptions(kind: ChatAgentKind): ModelOption[] {
     id,
     label: id
       .replace(/^claude-/, '')
+      .replace(/-\d{8}$/, '')
+      .replace(/(\d+)-(\d+)(?=-|$)/g, '$1.$2')
       .split('-')
       .map(part => part.charAt(0).toUpperCase() + part.slice(1))
       .join(' '),
@@ -55,12 +57,12 @@ function dedupeModels(primary: readonly ModelOption[], fallback: readonly ModelO
   return out;
 }
 
-function mergeDefinition(kind: ChatAgentKind, discovered: readonly ModelOption[]): AgentDefinition {
-  const fallback = STATIC_AGENT_DEFINITIONS[kind];
+export function buildClaudeDefinition(discovered: readonly ModelOption[]): AgentDefinition {
+  const fallback = STATIC_AGENT_DEFINITIONS.claude;
   // fallback.models are always merged in, so fallback.defaultModel is always present.
   return {
     ...fallback,
-    models: dedupeModels(observedModelOptions(kind), dedupeModels(discovered, fallback.models)),
+    models: dedupeModels(dedupeModels(discovered, fallback.models), observedModelOptions('claude')),
   };
 }
 
@@ -72,11 +74,12 @@ export function observeProviderModel(kind: ChatAgentKind, rawModel: string): boo
   if (kind === 'codex') return false;
   const model = stripModelTier(rawModel);
   if (!isRealClaudeModelId(model)) return false;
+  const current = AGENT_DEFINITIONS[kind];
+  if (current.models.some(option => option.id === model)) return false;
   if (observedModels[kind].has(model)) return false;
   observedModels[kind].add(model);
 
-  const current = AGENT_DEFINITIONS[kind];
-  const updated = { ...current, models: dedupeModels(observedModelOptions(kind), current.models) };
+  const updated = { ...current, models: dedupeModels(current.models, observedModelOptions(kind)) };
   AGENT_DEFINITIONS[kind] = updated;
   if (cached) {
     cached.definitions = { ...cached.definitions, [kind]: updated };
@@ -251,7 +254,7 @@ export async function getModelCatalog(forceRefresh = false): Promise<Record<Chat
     ]);
 
     const definitions: Record<ChatAgentKind, AgentDefinition> = {
-      claude: mergeDefinition('claude', claudeModels),
+      claude: buildClaudeDefinition(claudeModels),
       codex: buildCodexDefinition(codexDiscovery.models, codexDiscovery.succeeded, configuredCodexModel),
     };
 

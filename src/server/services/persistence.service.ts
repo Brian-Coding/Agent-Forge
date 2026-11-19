@@ -226,6 +226,7 @@ export function normalizePersistedData(raw: unknown): PersistedDataNormalization
       sortOrder: finiteNonNegative(candidate.sortOrder) ?? index,
       gridColumns: finiteInteger(candidate.gridColumns, 1, 12, 3),
       gridRows: finiteInteger(candidate.gridRows, 1, 12, 2),
+      gridSizeManuallySet: candidate.gridSizeManuallySet !== false,
       selectedAgentIds,
       lockedAgentIds,
       createdAt: finiteNonNegative(candidate.createdAt) ?? 0,

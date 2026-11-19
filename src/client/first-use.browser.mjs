@@ -4,6 +4,82 @@ import assert from 'node:assert/strict';
 export async function checkFirstUseControls(browser, origin, project) {
   const failures = [];
   const flows = {
+    async grids(page) {
+      const checkGrid = async (columns, rows, panes, emptyButtons) => {
+        await page.waitForFunction(({ columns, rows, panes, emptyButtons }) => {
+          const grid = document.querySelector('.terminal-grid');
+          return document.querySelector(`[aria-label="Use ${columns} grid column${columns === 1 ? '' : 's'}"]`)?.classList.contains('active')
+            && document.querySelector(`[aria-label="Use ${rows} grid row${rows === 1 ? '' : 's'}"]`)?.classList.contains('active')
+            && grid?.querySelectorAll('textarea').length === panes
+            && grid?.querySelectorAll('.slot-add-btn').length === emptyButtons;
+        }, { columns, rows, panes, emptyButtons }).catch(async error => {
+          const actual = await page.evaluate(() => ({
+            dimensions: [...document.querySelectorAll('.grid-btn.active')].map(button => button.textContent),
+            panes: document.querySelectorAll('.terminal-grid textarea').length,
+            emptyButtons: document.querySelectorAll('.terminal-grid .slot-add-btn').length,
+          }));
+          throw new Error(`Expected ${columns}×${rows}, ${panes} panes, ${emptyButtons} add buttons; got ${JSON.stringify(actual)}: ${error.message}`);
+        });
+      };
+      await page.getByTitle('New Workspace', { exact: true }).click();
+      await page.getByPlaceholder('e.g., Web app, Billing service, Mobile').fill('Automatic grid');
+      await page.getByRole('button', { name: 'Browse for folder...', exact: true }).click();
+      const picker = page.locator('.folder-browser');
+      await page.waitForFunction(() => !document.querySelector('.folder-actions .btn-primary')?.disabled);
+      await picker.getByPlaceholder('Filter or paste a path…').fill(project);
+      await picker.getByPlaceholder('Filter or paste a path…').press('Enter');
+      await page.waitForFunction(path => document.querySelector('.folder-path')?.textContent === path, project);
+      await picker.getByRole('button', { name: 'Select', exact: true }).click();
+      await page.getByRole('button', { name: 'Create Workspace', exact: true }).click();
+      await page.locator('.workspace-item').filter({ hasText: 'Automatic grid' }).click();
+      await checkGrid(1, 1, 0, 1);
+      const addAgent = async (name, useEmptySlot = false) => {
+        if (useEmptySlot) await page.locator('.slot-add-btn').click();
+        else await page.getByRole('button', { name: 'Add agent to Automatic grid', exact: true }).click();
+        await page.locator('.modal .form-input').first().fill(name);
+        await page.getByRole('button', { name: 'Create Agent', exact: true }).click();
+      };
+      await addAgent('First', true);
+      await checkGrid(1, 1, 1, 0);
+      const geometry = await page.locator('.terminal-panel').evaluate(pane => ({
+        pane: pane.getBoundingClientRect().width,
+        grid: pane.parentElement.getBoundingClientRect().width,
+      }));
+      assert.ok(geometry.pane >= geometry.grid * 0.95, 'A single agent should use the full grid width');
+      await addAgent('Second');
+      await checkGrid(2, 1, 2, 0);
+      await addAgent('Third');
+      await checkGrid(2, 2, 3, 1);
+      await page.reload();
+      await checkGrid(2, 2, 3, 1);
+      await addAgent('Fourth', true);
+      await checkGrid(2, 2, 4, 0);
+      await addAgent('Fifth');
+      await checkGrid(3, 2, 5, 1);
+      // Clicking an already active dimension still makes the layout manual.
+      await page.getByRole('button', { name: 'Use 2 grid rows', exact: true }).click();
+      await page.waitForFunction(() => window.firstUse.workspaces.find(ws => ws.name === 'Automatic grid')?.gridSizeManuallySet === true);
+      await page.reload();
+      await checkGrid(3, 2, 5, 1);
+      await addAgent('Sixth', true);
+      await checkGrid(3, 2, 6, 0);
+      await addAgent('Sidebar only');
+      await page.locator('.workspace-agent-chip').filter({ hasText: 'Sidebar only' }).waitFor();
+      await checkGrid(3, 2, 6, 0);
+      await page.getByRole('button', { name: 'Use 3 grid rows', exact: true }).click();
+      await checkGrid(3, 3, 7, 1);
+      const slots = () => page.locator('.terminal-grid > .terminal-panel').evaluateAll(panes =>
+        panes.map(pane => pane.querySelector('.panel-title-name')?.textContent || ''));
+      const beforeRemoval = await slots();
+      page.once('dialog', dialog => dialog.accept());
+      await page.getByRole('button', { name: 'Delete agent First', exact: true }).click();
+      await checkGrid(3, 3, 6, 1);
+      const afterRemoval = beforeRemoval.map(name => name === 'First' ? '' : name);
+      assert.deepEqual(await slots(), afterRemoval, 'Removing an agent must preserve the remaining pane positions');
+      await page.reload();
+      await checkGrid(3, 3, 6, 1);
+      assert.deepEqual(await slots(), afterRemoval, 'Reloading must preserve gaps in a manual grid');
+    },
     async terminals(page) {
       await page.getByRole('button', { name: 'Use 3 grid columns', exact: true }).click();
       await page.waitForFunction(() => document.querySelector('[aria-label="Use 3 grid columns"]')?.classList.contains('active'));
@@ -129,7 +205,7 @@ export async function checkFirstUseControls(browser, origin, project) {
     page.on('pageerror', error => errors.push(error.message));
     await page.addInitScript(() => {
       const Original = window.WebSocket;
-      window.firstUse = { sent: [], agents: [] };
+      window.firstUse = { sent: [], agents: [], workspaces: [] };
       window.WebSocket = class extends Original {
         constructor(...args) {
           super(...args);
@@ -137,6 +213,9 @@ export async function checkFirstUseControls(browser, origin, project) {
           this.addEventListener('message', event => {
             const message = JSON.parse(event.data);
             if (message.type === 'agents_list') window.firstUse.agents = message.agents;
+            if (message.type === 'workspaces_list') window.firstUse.workspaces = message.workspaces;
+            if (message.type === 'workspace_updated') window.firstUse.workspaces = window.firstUse.workspaces.map(ws => ws.id === message.workspace.id ? message.workspace : ws);
+            if (message.type === 'workspace_created') window.firstUse.workspaces.push(message.workspace);
           });
         }
         send(data) {
@@ -154,7 +233,7 @@ export async function checkFirstUseControls(browser, origin, project) {
       assert.deepEqual(errors, []);
       console.log('PASS: first-use ' + name);
     } catch (error) {
-      failures.push(name + ': ' + error.message);
+      failures.push(name + ': ' + error.stack);
     } finally {
       await page.close();
     }

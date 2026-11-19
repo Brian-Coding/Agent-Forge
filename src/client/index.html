@@ -3045,6 +3045,12 @@
                       className: 'workspace-attention-indicator',
                       title: 'Needs attention: ' + failedAgents.map(agent => agent.name).join(', '),
                     }, failedAgents.length + ' failed'),
+                    isActive && e('button', {
+                      className: 'sidebar-btn',
+                      onClick: (ev) => { ev.stopPropagation(); onNewAgent(); },
+                      title: 'Add agent to this workspace',
+                      'aria-label': 'Add agent to ' + ws.name,
+                    }, '+'),
                     workspaces.length > 1 && e('button', {
                       className: 'workspace-delete-btn',
                       onClick: (ev) => { ev.stopPropagation(); if (confirm('Delete workspace "' + ws.name + '"? Agents will be moved to another workspace.')) onDeleteWorkspace(ws.id); },
@@ -3881,8 +3887,8 @@
       // Workspace choice is local to this browser, so another tab or automated
       // browser cannot move the viewport. Workspace grid settings remain shared.
       const activeWorkspace = workspaces.find(w => w.id === activeWorkspaceId) || workspaces[0];
-      const columns = activeWorkspace ? activeWorkspace.gridColumns : 2;
-      const rows = activeWorkspace ? activeWorkspace.gridRows : 2;
+      const columns = activeWorkspace ? activeWorkspace.gridColumns : 1;
+      const rows = activeWorkspace ? activeWorkspace.gridRows : 1;
       const totalPanels = columns * rows;
 
       // Agents for the active workspace
@@ -3896,18 +3902,18 @@
       const sameSlots = (a, b) => a.length === b.length && a.every((id, i) => id === b[i]);
       const normalizeGridSlots = (rawIds, excludedIds = minimizedAgents) => {
         const slots = Array.from({ length: totalPanels }, () => '');
-        const lockedIds = activeWorkspace ? activeWorkspace.lockedAgentIds || [] : [];
         const seen = new Set();
 
+        // Keep every valid saved slot, including gaps, across hydration and growth.
         (rawIds || []).forEach((id, idx) => {
-          if (!id || idx >= totalPanels || !lockedIds.includes(id) || !workspaceAgentIdSet.has(id) || excludedIds.has(id) || seen.has(id)) return;
+          if (!id || idx >= totalPanels || !workspaceAgentIdSet.has(id) || excludedIds.has(id) || seen.has(id)) return;
           slots[idx] = id;
           seen.add(id);
         });
 
         const candidates = [];
         for (const id of rawIds || []) {
-          if (!id || lockedIds.includes(id) || !workspaceAgentIdSet.has(id) || excludedIds.has(id) || seen.has(id)) continue;
+          if (!id || !workspaceAgentIdSet.has(id) || excludedIds.has(id) || seen.has(id)) continue;
           candidates.push(id);
           seen.add(id);
         }
@@ -4291,18 +4297,23 @@
               }
               const nonMinimized = displayAgents;
               const lockedIds = activeWorkspace ? activeWorkspace.lockedAgentIds || [] : [];
+              let hasEmptyAffordance = false;
               return Array.from({ length: totalPanels }).map((_, i) => {
                 const agentId = nonMinimized[i];
                 const agent = agentId ? agents.find(a => a.id === agentId) : null;
-                if (!agent) return e('div', {
-                  key: 'empty-' + i,
-                  className: 'terminal-panel slot-empty' + (dragOverSlot === i ? ' drag-over' : ''),
-                  onDragOver: (ev) => handleDragOver(i, ev),
-                  onDragLeave: handleDragLeave,
-                  onDrop: () => handleDrop(i),
-                },
-                  e('button', { className: 'slot-add-btn', onClick: () => { setEditingAgent(null); setShowModal(true); } }, '+ Add Agent')
-                );
+                if (!agent) {
+                  const showAdd = !hasEmptyAffordance;
+                  hasEmptyAffordance = true;
+                  return e('div', {
+                    key: 'empty-' + i,
+                    className: 'terminal-panel slot-empty' + (dragOverSlot === i ? ' drag-over' : ''),
+                    onDragOver: (ev) => handleDragOver(i, ev),
+                    onDragLeave: handleDragLeave,
+                    onDrop: () => handleDrop(i),
+                  },
+                    showAdd && e('button', { className: 'slot-add-btn', onClick: () => { setEditingAgent(null); setShowModal(true); } }, '+ Add Agent')
+                  );
+                }
                 const isLocked = lockedIds.includes(agentId);
                 return e(TerminalPanel, {
                   key: agentId,

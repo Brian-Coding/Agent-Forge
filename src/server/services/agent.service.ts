@@ -419,6 +419,7 @@ export const agentService = {
       };
 
       const previousSelectedAgentIds = [...targetWorkspace.selectedAgentIds];
+      const previousGrid = { gridColumns: targetWorkspace.gridColumns, gridRows: targetWorkspace.gridRows };
       const previousWorkspaceCwd = targetWorkspace.cwd;
       if (!targetWorkspace.cwd) {
         if (!fallbackWorkspaceCwd) throw new Error(`Workspace directory is unavailable: ${targetWorkspaceId}`);
@@ -450,6 +451,7 @@ export const agentService = {
         agents.delete(id);
         messages.delete(id);
         targetWorkspace.selectedAgentIds = previousSelectedAgentIds;
+        Object.assign(targetWorkspace, previousGrid);
         if (previousWorkspaceCwd === undefined) delete targetWorkspace.cwd;
         else targetWorkspace.cwd = previousWorkspaceCwd;
         throw error;
@@ -964,9 +966,11 @@ export const agentService = {
         ? agentData.currentSessionModel
         : null;
 
+      const interrupted = agentData.status === 'working' || agentData.status === 'thinking';
       const info: any = {
         ...agentData,
-        status: 'stopped' as AgentStatus,
+        status: interrupted ? 'stopped' : agentData.status,
+        ...(interrupted ? { lastTurnOutcome: { status: 'stopped', at: Date.now(), detail: 'Interrupted by server restart' } } : {}),
         referencePaths: agentData.referencePaths || [],
         systemPrompt: agentData.systemPrompt || '',
         workspaceId: agentData.workspaceId || '',

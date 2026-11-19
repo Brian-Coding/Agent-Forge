@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, spyOn, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -28,6 +28,76 @@ function loadTestAgent(id: string, cwd: string, overrides: Record<string, unknow
   });
 }
 
+test('restart preserves ready agents and finished outcomes, interrupting only active turns', async () => {
+  // A missing fictional directory keeps this status-only test free of real watchers.
+  const directory = join(tmpdir(), `forge-restored-status-${randomUUID()}`);
+  const originalSaveNow = persistenceService.saveNow;
+  const originalStart = documentService.startPlansWatcher;
+  const originalStop = documentService.stopPlansWatcher;
+  const originalRelease = documentService.releaseLocksForAgent;
+  const ids: string[] = [];
+  persistenceService.saveNow = async () => {};
+  documentService.startPlansWatcher = () => {};
+  documentService.stopPlansWatcher = () => {};
+  documentService.releaseLocksForAgent = async () => {};
+  try {
+    for (const status of ['idle', 'error', 'stopped', 'working', 'thinking'] as const) {
+      for (const outcome of [undefined, 'completed', 'failed', 'stopped'] as const) {
+        const id = `restored-${randomUUID()}`;
+        ids.push(id);
+        const lastTurnOutcome = outcome ? { status: outcome, at: 123, detail: 'Saved outcome' } : undefined;
+        loadTestAgent(id, directory, { status, lastTurnOutcome });
+        const restored = agentService.getAgent(id)!;
+        const interrupted = status === 'working' || status === 'thinking';
+        expect(restored.status).toBe(interrupted ? 'stopped' : status);
+        if (interrupted) {
+          expect(restored.lastTurnOutcome).toMatchObject({ status: 'stopped', detail: 'Interrupted by server restart' });
+          expect(restored.lastTurnOutcome!.at).toBeGreaterThan(123);
+        } else {
+          expect(restored.lastTurnOutcome).toEqual(lastTurnOutcome);
+        }
+        expect(agentService.buildPersistedAgents().find(agent => agent.id === id)?.status).toBe(restored.status);
+      }
+    }
+  } finally {
+    for (const id of ids) await agentService.removeAgent(id);
+    persistenceService.saveNow = originalSaveNow;
+    documentService.startPlansWatcher = originalStart;
+    documentService.stopPlansWatcher = originalStop;
+    documentService.releaseLocksForAgent = originalRelease;
+  }
+});
+
+test('Kill All still stops every agent, including ready agents, and persists stopped statuses', async () => {
+  const { chatService } = await import('./chat.service');
+  const map: Map<string, any> = (globalThis as any).__agentsMap;
+  const previous = [...map.entries()];
+  map.clear();
+  for (const status of ['idle', 'working', 'thinking', 'error', 'stopped']) {
+    map.set(status, { info: { id: status, status } });
+  }
+  const kill = spyOn(chatService, 'kill').mockImplementation(() => {});
+  const reset = spyOn(chatService, 'resetLock').mockImplementation(() => {});
+  const pids = spyOn(persistenceService, 'getActivePids').mockReturnValue(new Set());
+  const savePids = spyOn(persistenceService, 'savePidsNow').mockResolvedValue();
+  const save = spyOn(persistenceService, 'saveNow').mockImplementation(async () => {
+    expect(agentService.buildPersistedAgents().every(agent => agent.status === 'stopped')).toBe(true);
+  });
+  const release = spyOn(documentService, 'releaseLocksForAgent').mockResolvedValue();
+  try {
+    expect((await agentService.killAllProcesses()).success).toBe(true);
+    expect(kill).toHaveBeenCalledTimes(5);
+    expect(reset).toHaveBeenCalledTimes(5);
+    expect(release).toHaveBeenCalledTimes(5);
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(savePids).toHaveBeenCalledTimes(1);
+  } finally {
+    for (const mock of [kill, reset, pids, savePids, save, release]) mock.mockRestore();
+    map.clear();
+    for (const [id, value] of previous) map.set(id, value);
+  }
+});
+
 test('failed creation removes the agent, workspace slot, and both watchers', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'agent-forge-create-atomic-'));
   const workspaceId = `workspace-${randomUUID()}`;
@@ -36,9 +106,10 @@ test('failed creation removes the agent, workspace slot, and both watchers', asy
     id: workspaceId,
     name: 'Atomicity workspace',
     sortOrder: 999,
-    gridColumns: 2,
-    gridRows: 2,
-    selectedAgentIds: ['existing', '', '', ''],
+    gridColumns: 1,
+    gridRows: 1,
+    gridSizeManuallySet: false,
+    selectedAgentIds: ['existing'],
     lockedAgentIds: [],
     createdAt: Date.now(),
   };
@@ -58,6 +129,7 @@ test('failed creation removes the agent, workspace slot, and both watchers', asy
     await expect(agentService.createAgent('Ghost agent', directory, [], '', workspaceId)).rejects.toThrow('agent write failed');
     expect(new Set(agentService.getAgents().map(agent => agent.id))).toEqual(idsBefore);
     expect(workspace.selectedAgentIds).toEqual(selectionBefore);
+    expect([workspace.gridColumns, workspace.gridRows, workspace.gridSizeManuallySet]).toEqual([1, 1, false]);
     expect(workspace.cwd).toBeUndefined();
     expect(starts).toHaveLength(1);
     expect(stops).toEqual(starts);

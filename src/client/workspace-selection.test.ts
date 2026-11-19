@@ -6,6 +6,20 @@ import { STATIC_AGENT_DEFINITIONS } from '../server/agents/agent-kinds';
 const clientSource = readFileSync(join(import.meta.dir, 'index.html'), 'utf8');
 const normalizedClientSource = clientSource.replace(/\r\n/g, '\n');
 
+test('grid hydration preserves saved slots through removal, reload, and growth', () => {
+  const start = normalizedClientSource.indexOf('const normalizeGridSlots =');
+  const end = normalizedClientSource.indexOf('// Sync sidebar width', start);
+  const normalize = new Function('totalPanels', 'workspaceAgentIds', 'minimizedAgents', 'activeWorkspace', `
+    const workspaceAgentIdSet = new Set(workspaceAgentIds);
+    ${normalizedClientSource.slice(start, end)}
+    return normalizeGridSlots;
+  `)(6, ['first', 'second', 'third'], new Set(), { lockedAgentIds: ['third'], gridSizeManuallySet: true });
+  expect(normalize(['', 'second', 'first', '', 'third', ''])).toEqual(['', 'second', 'first', '', 'third', '']);
+  expect(normalize(['removed', 'second', 'first', '', 'third', ''])).toEqual(['', 'second', 'first', '', 'third', '']);
+  expect(normalize(['second', 'first', 'third'])).toEqual(['second', 'first', 'third', '', '', '']);
+  expect(normalize(['second', 'second', 'first', '', 'third'])).toEqual(['second', '', 'first', '', 'third', '']);
+});
+
 test('browser fallback model IDs and defaults agree with the server registry', () => {
   const start = normalizedClientSource.indexOf('const FALLBACK_AGENT_PROVIDERS =');
   const end = normalizedClientSource.indexOf('let AGENT_PROVIDERS =', start);

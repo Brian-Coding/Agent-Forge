@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-11-19 — showcase UI polish
+
+- Restore ready agents and saved turn outcomes after restart; mark interrupted active turns as stopped while preserving Kill All behavior.
+- Keep catalog model labels, descriptions, and order when Claude reports a known ID. Append unknown observed models with readable version labels.
+- Start new workspaces at 1×1 and grow automatically up to 4×3. Persist manual grid choices, preserve older explicit layouts and pane slots, and show one empty-slot Add Agent button plus a workspace add action.
+- Add restart, model catalog, grid growth/rollback, persistence, and browser regressions. Linux validation with Bun 1.4.4: **442 tests across 75 files**; **79.55% weighted line coverage** (8,362/10,512), **83.74% function coverage** (891/1,064), across 71 LCOV records. Browser checks cover four first-use flows; the scripted demo checks two agents and three terminal fixture tests.
+
 ## 2026-11-18 — first-use fixes from a live test pass
 
 Found by driving a fresh clone with real Codex CLI and Claude Code sessions:

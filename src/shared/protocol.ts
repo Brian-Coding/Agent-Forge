@@ -32,6 +32,8 @@ export interface WorkspaceInfo {
   sortOrder: number;            // User-controlled order in the Workspaces sidebar
   gridColumns: number;
   gridRows: number;
+  /** Only explicit false opts into automatic growth. Older saved grids stay manual. */
+  gridSizeManuallySet?: boolean;
   selectedAgentIds: string[];
   lockedAgentIds: string[];    // Agents locked to their current grid slot
   createdAt: number;

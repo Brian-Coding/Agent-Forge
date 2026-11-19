@@ -14,6 +14,9 @@ try {
   const external = []; page.on('request', req => { if (!req.url().startsWith(origin)) external.push(new URL(req.url()).origin); });
   await page.route('**/api/ports', route => route.fulfill({ json: { ports: [] } }));
   await page.goto(origin); await page.getByText('Search is ready', { exact: true }).waitFor({ timeout: 10000 });
+  await page.locator('.terminal-panel').nth(0).getByText('Ready', { exact: true }).waitFor();
+  await page.locator('.terminal-panel').nth(1).locator('.status-elapsed').filter({ hasText: /^Completed/ }).waitFor();
+  assert.equal(await page.locator('.workspace-agent-chip').filter({ hasText: 'Stopped' }).count(), 0);
   assert.equal(await page.evaluate(() => typeof window.DOMPurify.sanitize), 'function');
   const sanitized = await page.evaluate(() => window.renderMarkdown('<img src=x onerror=alert(1)>\n\n[bad](javascript:alert(1))\n[local](file:///demo/acme/notes%20list.md)\n[posix](/demo/acme/readme.md)\n[win](C:/demo/readme.md)', 'demo-0'));
   assert.ok(!sanitized.includes('onerror') && !sanitized.includes('javascript:'));
@@ -56,6 +59,6 @@ try {
     await mkdir(resolve('docs/images'), { recursive: true });
     await page.screenshot({ path: resolve('docs/images/agent-forge.png') });
   }
-  console.log('PASS: authorized UI, two-pane composer focus, cross-port browser rejection, local dependencies, Markdown sanitization, POSIX/file/Windows links, escaped fallback; 3 first-use control flows');
+  console.log('PASS: authorized UI, restored statuses, two-pane composer focus, cross-port browser rejection, local dependencies, Markdown sanitization, POSIX/file/Windows links, escaped fallback; 4 first-use control flows');
 
 } finally { await browser.close(); }

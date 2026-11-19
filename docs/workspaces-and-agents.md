@@ -10,6 +10,10 @@ A workspace groups:
 
 Switch workspaces from the sidebar. Drag the `⋮⋮` handle to reorder them, double-click a name to rename it, and delete a workspace with `×` (its agents move to another workspace). The active workspace is remembered per browser tab, so two tabs can look at different workspaces.
 
+New workspaces start at **1×1**. Adding agents fills empty slots, then grows the grid through **2×1 → 2×2 → 3×2 → 3×3 → 4×3**. Removing or minimizing agents leaves the grid size and other pane positions intact. Empty grids and grids with spare room show one **+ Add Agent** button; use the sidebar **+** or **Ctrl+N / Cmd+N** when the grid is full.
+
+Choosing either **Columns** or **Rows** in the bottom bar makes that workspace's grid manual, even if you choose the current value. This choice survives restarts; later agents fill available slots or stay in the sidebar when the grid is full. Existing saved workspaces keep their explicit layouts as manual grids.
+
 In a folder picker, type to filter the current list, or paste an absolute path (including `~/…`) and press **Enter** to navigate. Use **↑ ..** to move to the parent folder, including above your home folder, then **Select** to choose the current folder.
 
 ## Agents
@@ -34,3 +38,5 @@ You can switch an existing agent's provider or model mid-conversation. When the 
 ## Status you can trust
 
 Agent status comes from the server, not the browser. If the browser disconnects, panes show "status unknown" instead of guessing. A long silence from the provider is flagged as possibly stalled, but Agent Forge does not stop long-running work on its own unless you configure an inactivity limit (see [Configuration](configuration.md)).
+
+After a server restart, ready agents stay **Ready** and finished turns keep their saved outcome, such as **Completed** or **Failed**. Turns that were working or thinking when the server stopped restore as **Stopped**, with an interrupted outcome. Explicitly stopped agents stay stopped; **Kill All** still stops every agent.

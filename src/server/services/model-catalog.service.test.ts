@@ -7,12 +7,79 @@ import { AGENT_DEFINITIONS, getAgentDefinition, STATIC_AGENT_DEFINITIONS, type M
 import { safeRemoveTree } from './safe-filesystem.mjs';
 import {
   buildCodexDefinition,
+  buildClaudeDefinition,
   observeProviderModel,
   parseClaudeModelDiscovery,
   parseCodexModelDiscovery,
   readConfiguredCodexModel,
   stabilizeCodexModelDiscovery,
 } from './model-catalog.service';
+
+test('observing catalog Claude IDs preserves every label, description, and position', () => {
+  const original = AGENT_DEFINITIONS.claude;
+  const observed: Set<string> = (globalThis as any).__observedProviderModels.claude;
+  const previous = [...observed];
+  try {
+    observed.clear();
+    AGENT_DEFINITIONS.claude = { ...STATIC_AGENT_DEFINITIONS.claude, models: [
+      ...STATIC_AGENT_DEFINITIONS.claude.models,
+      { id: 'claude-preview-8-1', label: 'Preview 8.1', description: 'Discovered catalog description' },
+    ] };
+    const before = structuredClone(AGENT_DEFINITIONS.claude);
+    for (const model of before.models) {
+      expect(observeProviderModel('claude', model.id + '[1m]')).toBe(false);
+    }
+    expect(AGENT_DEFINITIONS.claude).toEqual(before);
+    expect(observed.size).toBe(0);
+  } finally {
+    AGENT_DEFINITIONS.claude = original;
+    observed.clear();
+    for (const id of previous) observed.add(id);
+  }
+});
+
+test('unknown Claude models append in observation order with readable versions and no date suffix', () => {
+  const original = AGENT_DEFINITIONS.claude;
+  const observed: Set<string> = (globalThis as any).__observedProviderModels.claude;
+  const previous = [...observed];
+  try {
+    observed.clear();
+    const known = { id: 'claude-preview-8', label: 'Preview 8', description: 'Catalog entry' };
+    AGENT_DEFINITIONS.claude = { ...original, models: [known] };
+    for (const id of ['claude-sonnet-5-5', 'claude-haiku-4-5-20251001']) {
+      expect(observeProviderModel('claude', id + '[1m]')).toBe(true);
+      expect(observeProviderModel('claude', id)).toBe(false);
+    }
+    expect(AGENT_DEFINITIONS.claude.models).toEqual([
+      known,
+      { id: 'claude-sonnet-5-5', label: 'Sonnet 5.5', description: 'Observed from this provider at runtime.' },
+      { id: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5', description: 'Observed from this provider at runtime.' },
+    ]);
+  } finally {
+    AGENT_DEFINITIONS.claude = original;
+    observed.clear();
+    for (const id of previous) observed.add(id);
+  }
+});
+
+test('catalog refresh promotes discovered observations and keeps static catalog entries ahead of unknowns', () => {
+  const observed: Set<string> = (globalThis as any).__observedProviderModels.claude;
+  const previous = [...observed];
+  try {
+    observed.clear();
+    for (const id of ['claude-sonnet-5-5', 'claude-preview-8-1', 'claude-preview-8-2']) observed.add(id);
+    const discovered = [{ id: 'claude-preview-8-1', label: 'Preview Eight', description: 'From discovery' }];
+    expect(buildClaudeDefinition(discovered).models).toEqual([
+      ...discovered,
+      ...STATIC_AGENT_DEFINITIONS.claude.models,
+      { id: 'claude-preview-8-2', label: 'Preview 8.2', description: 'Observed from this provider at runtime.' },
+    ]);
+    expect(buildClaudeDefinition([]).models.slice(0, STATIC_AGENT_DEFINITIONS.claude.models.length)).toEqual([...STATIC_AGENT_DEFINITIONS.claude.models]);
+  } finally {
+    observed.clear();
+    for (const id of previous) observed.add(id);
+  }
+});
 
 test('valid Claude models observed through OAuth CLI runs become selectable', () => {
   const modelId = `claude-opus-5-${randomUUID()}[1m]`;

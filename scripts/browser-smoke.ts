@@ -11,7 +11,7 @@ const reservation = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new
 const port = reservation.port!; await reservation.stop(true);
 const origin = `http://127.0.0.1:${port}`;
 const now = Date.now();
-const agents = ['Interface', 'Regression tests'].map((name, i) => ({ id: 'demo-' + i, name, cwd: project, workspaceId: 'acme', referencePaths: [], systemPrompt: '', status: 'idle', provider: i ? 'claude' : 'codex', createdAt: now }));
+const agents = ['Interface', 'Regression tests'].map((name, i) => ({ id: 'demo-' + i, name, cwd: project, workspaceId: 'acme', referencePaths: [], systemPrompt: '', status: 'idle', lastTurnOutcome: i ? { status: 'completed', at: now } : null, provider: i ? 'claude' : 'codex', createdAt: now }));
 await writeFile(join(root, 'data.json'), JSON.stringify({ schemaVersion: 1, agents,
   messages: [
     { id: 'u0', agentId: 'demo-0', role: 'user', timestamp: now - 120000, content: 'Polish the Acme Notes search and empty state.' },
